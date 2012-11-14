@@ -302,7 +302,7 @@ toJsonTerm a = defaultValue {
   }
 
 data ExprTypeKind = SequenceType ValueTypeKind | ValueType ValueTypeKind
-data ValueTypeKind = NumberType | BoolType | ObjectType | OtherTermType
+data ValueTypeKind = NumberType | BoolType | ObjectType | ArrayType | StringType | OtherValueType
 
 data Expr (write :: Bool) (t :: ExprTypeKind) =
   Expr (Database -> [String] -> QL.Term) |
@@ -348,29 +348,41 @@ data Query a = Query (Int64 -> Database -> [String] -> QL.Query) ([Value] -> Eit
 instance Functor Query where
   fmap f (Query a g)= Query a (fmap f . g)
 
-class Mapping map where
-  toQLMapping :: map -> QL.Mapping
+class ToMapping map where
+  type MappingFrom map
+  type MappingTo map
+  toMapping :: map -> Mapping (MappingFrom map) (MappingTo map)
 
-instance Mapping Value where
-  toQLMapping v = defaultValue { QLMapping.body = toJsonTerm v }
+data Mapping (from :: ExprTypeKind) (to :: ExprTypeKind) =
+  Mapping (Database -> [String] -> QL.Mapping)
 
-update :: (ToExpr sel, ExprWritable sel ~ True, Mapping map) => sel -> map -> Query ()
+instance ToMapping Value where
+  type MappingFrom Value = ValueType ObjectType
+  type MappingTo Value = ValueType ObjectType
+  toMapping v = Mapping $ \_ _ -> defaultValue { QLMapping.body = toJsonTerm v }
+
+toQLMapping :: ToMapping m => m -> Database -> [String] -> QL.Mapping
+toQLMapping m = case toMapping m of Mapping f -> f
+
+update :: (ToExpr sel, ExprWritable sel ~ True, ToMapping map,
+           MappingFrom map ~ ValueType ObjectType, MappingTo map ~ ValueType ObjectType) =>
+          sel -> map -> Query ()
 update view m = Query
-  (\token curdb _ ->
-    QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
+  (\token curdb vars ->
+    QL.Query QL.WRITE token Nothing (Just $ write curdb vars) Nothing)
   (whenSuccess_ ())
 
-  where write curdb = case toExpr view of
+  where write curdb vars = let (v1, v2) = splitVars vars in case toExpr view of
           Expr f -> defaultValue {
             QLWriteQuery.type' = QL.UPDATE,
-            QL.update = Just $ QL.Update (f curdb newVars) (toQLMapping m)
+            QL.update = Just $ QL.Update (f curdb newVars) (toQLMapping m curdb v1)
             }
           SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
             QLWriteQuery.type' = QL.POINTUPDATE,
             QL.point_update = Just $ QL.PointUpdate (tableRef curdb tbl)
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                               (toJsonTerm d)
-                              (toQLMapping m)
+                              (toQLMapping m curdb v2)
             }
 
 tableToTerm :: Table -> Database -> QL.Term
@@ -382,21 +394,21 @@ tableToTerm (Table mdb name _) curdb = defaultValue {
 
 replace :: (ToExpr sel, ExprWritable sel ~ True, ToJSON a) => sel -> a -> Query ()
 replace view a = Query
-  (\token curdb _ ->
-    QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
+  (\token curdb vars ->
+    QL.Query QL.WRITE token Nothing (Just $ write curdb vars) Nothing)
   (whenSuccess_ ())
 
-  where write curdb = case toExpr view of
+  where write curdb vars = let (v1, v2) = splitVars vars in case toExpr view of
           Expr f -> defaultValue {
             QLWriteQuery.type' = QL.MUTATE,
-            QL.mutate = Just $ QL.Mutate (f curdb newVars) (toQLMapping $ toJSON a)
+            QL.mutate = Just $ QL.Mutate (f curdb newVars) (toQLMapping (toJSON a) curdb v1)
             }
           SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
             QLWriteQuery.type' = QL.POINTMUTATE,
             QL.point_mutate = Just $ QL.PointMutate (tableRef curdb tbl)
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                               (toJsonTerm d)
-                              (toQLMapping $ toJSON a)
+                              (toQLMapping (toJSON a) curdb v2)
             }
 
 delete :: (ToExpr sel, ExprWritable sel ~ True) => sel -> Query ()
@@ -443,17 +455,17 @@ instance ToQuery (Expr w t) where
                                }) Nothing Nothing)
     (Right)
 
-filter :: (ToExpr e, ExprType e ~ SequenceType x,
-           Mapping fil) =>
+filter :: (ToExpr e, ExprType e ~ SequenceType x, ToMapping fil,
+           MappingFrom fil ~ ValueType ObjectType, MappingTo fil ~ ValueType BoolType) =>
            fil -> e -> Expr (ExprWritable e) (ExprType e)
-filter fil e = Expr $ \curdb vars -> defaultValue {
+filter fil e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
      QL.type' = QL.CALL,
      QL.call = Just $ QL.Call {
        QL.builtin = defaultValue {
           QLBuiltin.type' = QL.FILTER,
-          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil
+          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil curdb v1
           },
-       QL.args = Seq.singleton $ toTerm (toExpr e) curdb vars
+       QL.args = Seq.singleton $ toTerm (toExpr e) curdb v2
        }
      }
 
@@ -497,6 +509,27 @@ newVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map
 splitVars :: [String] -> ([String], [String])
 splitVars vs = (map ('a':) vs, map ('b':) vs)
 
+binOp :: (ToExpr a, ExprType a ~ ValueType x,
+          ToExpr b, ExprType b ~ ValueType y) =>
+         QL.Builtin -> a -> b -> Expr False (ValueType c)
+binOp op a b = Expr $ \cudb vars -> let (v1, v2) = splitVars vars in defaultValue {
+  QL.type' = QL.CALL,
+  QL.call = Just $ QL.Call op $ Seq.fromList [toTerm (toExpr a) cudb v1,
+                                              toTerm (toExpr b) cudb v2]
+  }
+
+unaryOp :: ToExpr a => QL.Builtin -> a -> Expr False b
+unaryOp op a = Expr $ \cudb vars -> defaultValue {
+  QL.type' = QL.CALL,
+  QL.call = Just $ QL.Call op $ Seq.fromList [toTerm (toExpr a) cudb vars] 
+  }
+
+comparison :: (ToExpr a, ExprType a ~ ValueType x,
+               ToExpr b, ExprType b ~ ValueType y) =>
+         QL.Comparison -> a -> b -> Expr False (ValueType BoolType)
+comparison comp = binOp $ defaultValue { QLBuiltin.type' = QL.COMPARE,
+                                         QL.comparison = Just comp }
+
 -- outerJoin :: needs map, concatMap, let, letvar, branch and length
 -- innerJoin
 -- eqJoin
@@ -521,7 +554,6 @@ splitVars vs = (map ('a':) vs, map ('b':) vs)
 -- merge
 -- append
 -- contains
--- +, -, *, /, %, &, |, ==, !=, >, >=, <, <=, ~
 -- branch
 -- forEach
 -- error
