@@ -5,6 +5,8 @@ module Database.RethinkDB where
 
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Response as QLResponse
+import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
+import qualified Database.RethinkDB.Internal.Query_Language.Predicate as QLPredicate
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
 import qualified Database.RethinkDB.Internal.Query_Language.ReadQuery as QLReadQuery
 import qualified Database.RethinkDB.Internal.Query_Language.WriteQuery as QLWriteQuery
@@ -65,7 +67,7 @@ run h q = do
 runEither :: ToQuery a => RethinkDBHandle -> a -> IO (Either String (QueryType a))
 runEither h q = do
   let Query f g = toQuery q
-  er <- runQLQuery h (\x -> f x (rdbDatabase h))
+  er <- runQLQuery h (\x -> f x (rdbDatabase h) newVars)
   return $ er >>= \r -> (responseErrorMessage r >>
     (maybe (Left "decode error") Right . sequence . map (decodeAny . utf8) $
      toList $ QL.response r) >>= g)
@@ -84,7 +86,7 @@ instance ToQuery (Query a) where
 instance ToQuery Table where
   type QueryType Table = [Value]
   toQuery tbl = Query
-    (\token curdb -> QL.Query QL.READ token
+    (\token curdb _ -> QL.Query QL.READ token
                      (Just $ defaultValue {
                          QLReadQuery.term = defaultValue {
                              QL.type' = QL.TABLE, 
@@ -100,7 +102,7 @@ uTableKey (Table _ _ mkey) = fromMaybe defaultPrimaryAttr $ fmap uFromString mke
 instance ToQuery Document where
   type QueryType Document = Value
   toQuery (Document tbl d) = Query
-    (\token curdb -> QL.Query QL.READ token
+    (\token curdb _ -> QL.Query QL.READ token
                      (Just $ defaultValue {
                          QLReadQuery.term = defaultValue {
                              QL.type' = QL.GETBYKEY, 
@@ -161,13 +163,13 @@ runQLQuery h query = do
 
 dbCreate :: String -> Query Database
 dbCreate db_name = Query
-  (metaQuery $ const $
+  (metaQuery $ \_ _ -> 
     QL.MetaQuery QL.CREATE_DB (Just $ uFromString db_name) Nothing Nothing)
   (const $ Right $ Database db_name)
 
 dbDrop :: Database -> Query ()
 dbDrop (Database name) = Query
-  (metaQuery $ const $ QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
+  (metaQuery $ \_ _ -> QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
   (const $ Right ())
 
 db :: String -> Database
@@ -180,12 +182,12 @@ responseErrorMessage response =
     then Right ()
     else Left $ maybe (show $ QL.status_code response) uToString $ QL.error_message response
 
-metaQuery :: (Database -> QL.MetaQuery) -> Int64 -> Database -> QL.Query
-metaQuery q t d = QL.Query QL.META t Nothing Nothing $ Just (q d)
+metaQuery :: (Database -> [String] -> QL.MetaQuery) -> Int64 -> Database -> [String] -> QL.Query
+metaQuery q t d v = QL.Query QL.META t Nothing Nothing $ Just (q d v)
 
 dbList :: Query [Database]
 dbList = Query
-  (metaQuery $ const $ QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
+  (metaQuery $ \_ _ -> QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
   (maybe (Left "error") Right . sequence . map (fmap Database . convert))
   
 decodeAny :: FromJSON a => ByteString -> Maybe a
@@ -219,7 +221,7 @@ table n = Table Nothing n Nothing
 tableCreate :: Table -> TableCreateOptions -> Query Table
 tableCreate (Table mdb table_name primary_key)
   (TableCreateOptions datacenter cache_size) = Query
-  (metaQuery $ \curdb -> let create = defaultValue {
+  (metaQuery $ \curdb _ -> let create = defaultValue {
         QLCreateTable.datacenter = fmap uFromString datacenter,
         QLCreateTable.table_ref = QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
                                   (uFromString table_name) Nothing, 
@@ -231,14 +233,14 @@ tableCreate (Table mdb table_name primary_key)
 
 tableDrop :: Table -> Query ()
 tableDrop (Table tdb tb _) = Query
-  (metaQuery $ \curdb -> 
+  (metaQuery $ \curdb _ -> 
     QL.MetaQuery QL.DROP_TABLE Nothing Nothing $ Just $
     QL.TableRef (uFromString $ databaseName $ fromMaybe curdb tdb) (uFromString tb) Nothing)
   (const $ Right ())
 
 tableList :: Database -> Query [Table]
 tableList (Database name) = Query 
-  (metaQuery $ const $ 
+  (metaQuery $ \_ _ -> 
     QL.MetaQuery QL.LIST_TABLES (Just $ uFromString name) Nothing Nothing)
   (maybe (Left "error") Right . sequence .
    map (fmap (\x -> Table (Just (Database name)) x Nothing) . convert))
@@ -254,7 +256,7 @@ tableRef curdb (Table mdb tb _) =
 
 insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query [Document]
 insert_or_upsert tbl as overwrite = Query
-  (\token curdb -> let write = defaultValue {
+  (\token curdb _ -> let write = defaultValue {
           QLWriteQuery.type' = QL.INSERT,
           QL.insert = Just $ QL.Insert (tableRef curdb tbl)
                       (Seq.fromList $ map toJsonTerm as) (Just overwrite)
@@ -299,11 +301,11 @@ toJsonTerm a = defaultValue {
   QL.jsonstring = Just $ Utf8 (encode a)
   }
 
-data ExprTypeKind = SequenceType JsonTypeKind | JsonType JsonTypeKind
-data JsonTypeKind = NumberType | BoolType | ObjectType | OtherJsonType
+data ExprTypeKind = SequenceType ValueTypeKind | ValueType ValueTypeKind
+data ValueTypeKind = NumberType | BoolType | ObjectType | OtherTermType
 
 data Expr (write :: Bool) (t :: ExprTypeKind) =
-  Expr (Database -> QL.Term) |
+  Expr (Database -> [String] -> QL.Term) |
   SpotExpr Document
 
 class ToExpr o where
@@ -316,9 +318,9 @@ instance ToExpr Document where
   type ExprType Document = SequenceType 'ObjectType
   toExpr doc = SpotExpr doc
 
-toTerm :: Expr w t -> Database -> QL.Term
-toTerm (Expr f) curdb = f curdb
-toTerm (SpotExpr (Document tbl@(Table _ _ mkey) d)) curdb = defaultValue { 
+toTerm :: Expr w t -> Database -> [String] -> QL.Term
+toTerm (Expr f) curdb vars = f curdb vars
+toTerm (SpotExpr (Document tbl@(Table _ _ mkey) d)) curdb _ = defaultValue { 
     QL.type' = QL.GETBYKEY,
     QL.get_by_key = Just $ QL.GetByKey (tableRef curdb tbl)
              (fromMaybe defaultPrimaryAttr $ fmap uFromString mkey)
@@ -328,15 +330,20 @@ toTerm (SpotExpr (Document tbl@(Table _ _ mkey) d)) curdb = defaultValue {
 instance ToExpr Table where
   type ExprWritable Table = True
   type ExprType Table = SequenceType ObjectType
-  toExpr tbl = Expr $ \curdb -> defaultValue { 
+  toExpr tbl = Expr $ \curdb _ -> defaultValue { 
     QL.type' = QL.TABLE,
     QL.table = Just $ QL.Table (tableRef curdb tbl)
     }
+                                  
+instance ToExpr (Expr w t) where
+  type ExprWritable (Expr w t) = w
+  type ExprType (Expr w t) = t
+  toExpr e = e
 
 defaultPrimaryAttr :: Utf8
 defaultPrimaryAttr = uFromString "id"
                     
-data Query a = Query (Int64 -> Database -> QL.Query) ([Value] -> Either String a)
+data Query a = Query (Int64 -> Database -> [String] -> QL.Query) ([Value] -> Either String a)
 
 instance Functor Query where
   fmap f (Query a g)= Query a (fmap f . g)
@@ -349,14 +356,14 @@ instance Mapping Value where
 
 update :: (ToExpr sel, ExprWritable sel ~ True, Mapping map) => sel -> map -> Query ()
 update view m = Query
-  (\token curdb ->
+  (\token curdb _ ->
     QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
   (whenSuccess_ ())
 
   where write curdb = case toExpr view of
           Expr f -> defaultValue {
             QLWriteQuery.type' = QL.UPDATE,
-            QL.update = Just $ QL.Update (f curdb) (toQLMapping m)
+            QL.update = Just $ QL.Update (f curdb newVars) (toQLMapping m)
             }
           SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
             QLWriteQuery.type' = QL.POINTUPDATE,
@@ -375,14 +382,14 @@ tableToTerm (Table mdb name _) curdb = defaultValue {
 
 replace :: (ToExpr sel, ExprWritable sel ~ True, ToJSON a) => sel -> a -> Query ()
 replace view a = Query
-  (\token curdb ->
+  (\token curdb _ ->
     QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
   (whenSuccess_ ())
 
   where write curdb = case toExpr view of
           Expr f -> defaultValue {
             QLWriteQuery.type' = QL.MUTATE,
-            QL.mutate = Just $ QL.Mutate (f curdb) (toQLMapping $ toJSON a)
+            QL.mutate = Just $ QL.Mutate (f curdb newVars) (toQLMapping $ toJSON a)
             }
           SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
             QLWriteQuery.type' = QL.POINTMUTATE,
@@ -394,13 +401,13 @@ replace view a = Query
 
 delete :: (ToExpr sel, ExprWritable sel ~ True) => sel -> Query ()
 delete view = Query
-  (\token curdb -> QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
+  (\token curdb _ -> QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
   (whenSuccess_ ())
   
   where write curdb = case toExpr view of
           Expr f -> defaultValue {
             QLWriteQuery.type' = QL.DELETE,
-            QL.delete = Just $ QL.Delete (f curdb)
+            QL.delete = Just $ QL.Delete (f curdb newVars)
             }
           SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
             QLWriteQuery.type' = QL.POINTDELETE,
@@ -414,7 +421,7 @@ get t = Document t . toJSON
 
 between :: (ToJSON a, ToExpr e, ExprType e ~ SequenceType x) =>
            (Maybe String) -> (Maybe a) -> (Maybe a) -> e -> Expr (ExprWritable e) (ExprType e)
-between k a b e = Expr $ \curdb -> defaultValue {
+between k a b e = Expr $ \curdb vars -> defaultValue {
      QL.type' = QL.CALL,
      QL.call = Just $ QL.Call {
        QL.builtin = defaultValue {
@@ -422,7 +429,7 @@ between k a b e = Expr $ \curdb -> defaultValue {
           QL.range = Just $ QL.Range (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                      (fmap toJsonTerm a) (fmap toJsonTerm b)
           },
-       QL.args = Seq.singleton $ toTerm (toExpr e) curdb
+       QL.args = Seq.singleton $ toTerm (toExpr e) curdb vars
        }
      }
 
@@ -430,8 +437,93 @@ instance ToQuery (Expr w t) where
   type QueryType (Expr w t) = [Value]
   toQuery (SpotExpr doc) = fmap return $ toQuery doc
   toQuery (Expr f) =
-    Query (\token curdb -> QL.Query QL.READ token
+    Query (\token curdb vars -> QL.Query QL.READ token
                            (Just $ defaultValue {
-                               QLReadQuery.term = f curdb
+                               QLReadQuery.term = f curdb vars
                                }) Nothing Nothing)
     (Right)
+
+filter :: (ToExpr e, ExprType e ~ SequenceType x,
+           Mapping fil) =>
+           fil -> e -> Expr (ExprWritable e) (ExprType e)
+filter fil e = Expr $ \curdb vars -> defaultValue {
+     QL.type' = QL.CALL,
+     QL.call = Just $ QL.Call {
+       QL.builtin = defaultValue {
+          QLBuiltin.type' = QL.FILTER,
+          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil
+          },
+       QL.args = Seq.singleton $ toTerm (toExpr e) curdb vars
+       }
+     }
+
+mappingToPredicate :: QL.Mapping -> QL.Predicate
+mappingToPredicate (QL.Mapping arg body _1) = defaultValue {
+  QLPredicate.arg = arg,
+  QLPredicate.body = body
+  }
+
+js :: String -> Expr False any
+js s = Expr $ \_ _ -> defaultValue {
+  QL.type' = QL.JAVASCRIPT,
+  QL.javascript = Just $ uFromString ("return (" ++ s ++ ")")
+  }
+
+bind :: ToExpr e => e -> (Expr (ExprWritable e) (ExprType e) -> Expr ww tt) -> Expr ww tt
+bind val f = Expr $ \curdb (v:vs) -> let (v1, v2) = splitVars vs in defaultValue {
+  QL.type' = QL.LET,
+  QL.let' = Just $ QL.Let (Seq.singleton $
+                           QL.VarTermTuple (uFromString v) (toTerm (toExpr val) curdb v1))
+           (toTerm (toExpr (f $ var v)) curdb v2)
+  }
+
+let' :: ToExpr e => String -> e -> Expr w t -> Expr w t
+let' nam val e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
+  QL.type' = QL.LET,
+  QL.let' = Just $ QL.Let (Seq.singleton $
+                           QL.VarTermTuple (uFromString nam) (toTerm (toExpr val) curdb v1))
+           (toTerm (toExpr e) curdb v2)
+  }
+
+var :: String -> Expr w t
+var v = Expr $ \_ _ -> defaultValue { 
+  QL.type' = QL.VAR,
+  QLTerm.var = Just $ uFromString v
+  }
+
+newVars :: [String]
+newVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
+
+splitVars :: [String] -> ([String], [String])
+splitVars vs = (map ('a':) vs, map ('b':) vs)
+
+-- outerJoin :: needs map, concatMap, let, letvar, branch and length
+-- innerJoin
+-- eqJoin
+-- zip :: needs branch map lambda contains merge
+-- map
+-- concatMap
+-- orderBy
+-- skip
+-- limit
+-- trim
+-- nth
+-- pluck
+-- without
+-- union
+-- reduce
+-- count
+-- distinct
+-- groupedMapReduce
+-- groupBy (count, sum, avg)
+-- pick
+-- unpick
+-- merge
+-- append
+-- contains
+-- +, -, *, /, %, &, |, ==, !=, >, >=, <, <=, ~
+-- branch
+-- forEach
+-- error
+-- stream_to_array
+-- array_to_stream
