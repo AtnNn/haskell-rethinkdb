@@ -1,5 +1,8 @@
-{-# LANGUAGE DataKinds, ConstraintKinds, TypeFamilies #-}
+{-# LANGUAGE DataKinds, TypeFamilies, ConstraintKinds, FlexibleInstances #-}
 
+-- | RethinkDB funtions that clash with the Prelude.
+-- 
+-- To be imported qualified
 module Database.RethinkDB.Operators where
 
 import Text.ProtocolBuffers.Basic hiding (Default)
@@ -7,36 +10,49 @@ import Text.ProtocolBuffers.Basic hiding (Default)
 import Database.RethinkDB
 
 import qualified Database.RethinkDB.Internal.Types as QL
-import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QL (type') 
+import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
+import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QL (type', attr)
 
 import qualified Prelude as P
-import Prelude (Bool(..), ($))
+import Prelude (Bool(..), ($), Maybe(..), (++), Int)
 
-type HasValueType a v = (ToExpr a, ExprType a ~ ValueType v)
-type HaveValueType a b v = (HasValueType a v, HasValueType b v)
-type NumberExpr = Expr False (ValueType NumberType)
-type BoolExpr = Expr False (ValueType BoolType)
-type ValueExpr t = Expr False (ValueType t)
+import qualified Data.Sequence as Seq
 
 class CanAdd (a :: ValueTypeKind)
 instance CanAdd NumberType
 instance CanAdd StringType
 instance CanAdd ArrayType
 
-(+) :: (HaveValueType a b v, CanAdd v) => a -> b -> Expr False (ValueType v)
+(+), plus :: (HaveValueType a b v, CanAdd v) => a -> b -> Expr (ValueType v)
 (+) = binOp $ defaultValue { QL.type' = QL.ADD}
+plus = (+)
 
-(-) :: HaveValueType a b NumberType => a -> b -> NumberExpr
+(-), minus :: HaveValueType a b NumberType => a -> b -> NumberExpr
 (-) = binOp $ defaultValue { QL.type' = QL.SUBTRACT }
+minus = (-)
 
-(*) :: HaveValueType a b NumberType => a -> b -> NumberExpr
+(*), times :: HaveValueType a b NumberType => a -> b -> NumberExpr
 (*) = binOp $ defaultValue { QL.type' = QL.MULTIPLY }
+times = (*)
 
-(/) :: HaveValueType a b NumberType => a -> b -> NumberExpr
+(/), divide :: HaveValueType a b NumberType => a -> b -> NumberExpr
 (/) = binOp $ defaultValue { QL.type' = QL.DIVIDE }
+divide = (/)
 
 mod :: HaveValueType a b NumberType => a -> b -> NumberExpr
 mod = binOp $ defaultValue { QL.type' = QL.MODULO }
+
+instance P.Num (Expr (ValueType NumberType)) where
+  (+) = plus
+  (-) = minus
+  (*) = times
+  abs = jsfun "abs"
+  signum x = bind x (\n -> branch (n < (0 :: Int)) (-1 :: Int) (branch (n > (0 :: Int)) (1 :: Int) (0 :: Int)))
+  fromInteger = toExpr
+
+instance P.Fractional (Expr (ValueType NumberType)) where
+  fromRational n = toExpr (P.fromRational n :: Double)
+  (/) = divide
 
 or :: HaveValueType a b BoolType => a -> b -> BoolExpr
 or = binOp $ defaultValue { QL.type' = QL.ANY }
@@ -61,15 +77,43 @@ instance CanCompare StringType
 not :: HasValueType a BoolType => a -> BoolExpr
 not = unaryOp $ defaultValue { QL.type' = QL.NOT }
 
-(!) :: (HasValueType a ObjectType, HasValueType b StringType) =>
-       a -> b -> ValueExpr t
-(!) = binOp $ defaultValue { QL.type' = QL.GETATTR }
+(!) :: (HasValueType a ObjectType) =>
+       a -> P.String -> ValueExpr t
+(!) a b = unaryOp (defaultValue { QL.type' = QL.GETATTR, QL.attr = Just (uFromString b) }) a
 
+-- TODO: wrong?
 attr :: HasValueType a StringType => a -> ValueExpr t
 attr = unaryOp $ defaultValue { QL.type' = QL.IMPLICIT_GETATTR }
 
-(!?) :: (HasValueType a ObjectType, HasValueType b StringType) => a -> b -> BoolExpr 
-(!?) = binOp $ defaultValue { QL.type' = QL.HASATTR }
 
-hasattr :: HasValueType a StringType => a -> BoolExpr
-hasattr = unaryOp $ defaultValue { QL.type' = QL.IMPLICIT_HASATTR }
+(!?) :: (HasValueType a ObjectType) => a -> P.String -> BoolExpr 
+(!?) a b = unaryOp (defaultValue { QL.type' = QL.HASATTR, QL.attr = Just $ uFromString b }) a
+
+map :: (ToExpr e, ExprType e ~ StreamType x from) =>
+       (Expr (ValueType from) -> Expr (ValueType to)) -> e -> Expr (StreamType False to)
+map fun = unaryOp' $ \curdb vars -> defaultValue {
+  QL.type' = QL.MAP,
+  QL.map = Just $ QL.Map $ toQLMapping fun curdb vars
+  }
+
+-- filter is implemented the long way because it was implemented first
+filter :: (ToExpr e, ExprType e ~ StreamType x out) =>
+           (Expr (ValueType out) -> Expr (ValueType BoolType)) -> e -> Expr (ExprType e)
+filter fil e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
+     QLTerm.type' = QL.CALL,
+     QL.call = Just $ QL.Call {
+       QL.builtin = defaultValue {
+          QL.type' = QL.FILTER,
+          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil curdb v1
+          },
+       QL.args = Seq.singleton $ toTerm (toExpr e) curdb v2
+       }
+     }
+
+-- zip :: needs branch map lambda contains merge
+-- map
+-- concatMap
+-- orderBy
+-- union
+-- groupBy (count, sum, avg)
+-- error
