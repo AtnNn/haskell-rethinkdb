@@ -1,0 +1,25 @@
+name:                rethinkdb
+version:             0.1.0.0
+synopsis:            RethinkDB client library for haskell
+homepage:            http://code.atnnn.com/projects/haskell-rethinkdb
+license:             BSD3
+license-file:        LICENSE
+author:              Etienne Laurin
+maintainer:          Etienne Laurin <etienne@atnnn.com>
+category:            Database
+build-type:          Simple
+cabal-version:       >=1.8
+
+library
+  exposed-modules:     Database.RethinkDB
+  other-modules:       
+  build-depends:       base,
+                       protocol-buffers,
+                       unordered-containers,
+                       text,
+                       aeson,
+                       bytestring,
+                       containers,
+                       attoparsec,
+                       data-default,
+                       network
