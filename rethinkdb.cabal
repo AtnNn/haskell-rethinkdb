@@ -22,4 +22,5 @@ library
                        containers,
                        attoparsec,
                        data-default,
-                       network
+                       network,
+                       ghc-prim
