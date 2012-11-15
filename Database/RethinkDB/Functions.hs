@@ -1,5 +1,5 @@
 {-# LANGUAGE DataKinds, TypeFamilies, ConstraintKinds, FlexibleInstances, 
-             FlexibleContexts #-}
+             FlexibleContexts, TypeOperators #-}
 
 -- | Functions from the RQL (RethinkDB Query Language)
 
@@ -14,7 +14,7 @@ import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
 
 import qualified Prelude as P
-import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined)
+import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined, return, (.))
 
 import Data.Maybe
 import Data.Functor
@@ -28,120 +28,115 @@ signum x = bind x (\n -> branch (n `lt` (0 :: NumberExpr)) (-1 :: Int)
                          (branch (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
 signum' = signum
 
-(+), plus :: (HaveValueType a b NumberType) => a -> b -> Expr (ValueType v)
-(+) = binOp $ defaultValue { QLBuiltin.type' = QL.ADD}
+(+), plus, (-), minus, (*), times, (/), divide, mod, mod'
+  :: (HaveValueType a b NumberType) => a -> b -> NumberExpr
+
+(+) a b = simpleOp QL.ADD [value a, value b]
+(-) a b = simpleOp QL.SUBTRACT [value a, value b]
+(*) a b = simpleOp QL.MULTIPLY [value a, value b]
+(/) a b = simpleOp QL.DIVIDE [value a, value b]
 plus = (+)
-
-(-), minus :: HaveValueType a b NumberType => a -> b -> NumberExpr
-(-) = binOp $ defaultValue { QLBuiltin.type' = QL.SUBTRACT }
 minus = (-)
-
-(*), times :: HaveValueType a b NumberType => a -> b -> NumberExpr
-(*) = binOp $ defaultValue { QLBuiltin.type' = QL.MULTIPLY }
 times = (*)
-
-(/), divide :: HaveValueType a b NumberType => a -> b -> NumberExpr
-(/) = binOp $ defaultValue { QLBuiltin.type' = QL.DIVIDE }
 divide = (/)
 
-mod, mod' :: HaveValueType a b NumberType => a -> b -> NumberExpr
-mod = binOp $ defaultValue { QLBuiltin.type' = QL.MODULO }
+mod a b = simpleOp QL.MODULO [value a, value b]
 mod' = mod
 
-or, or' :: HaveValueType a b BoolType => a -> b -> BoolExpr
-or = binOp $ defaultValue { QLBuiltin.type' = QL.ANY }
+or, or', and, and' :: HaveValueType a b BoolType => a -> b -> BoolExpr
+or a b = simpleOp QL.ANY [value a, value b]
+and a b = simpleOp QL.ALL [value a, value b]
 or' = or
-
-and, and' :: HaveValueType a b BoolType => a -> b -> BoolExpr
-and = binOp $ defaultValue { QLBuiltin.type' = QL.ALL }
 and' = and
 
 (==), (!=), eq, neq :: (HasValueType a x, HasValueType b y) => a -> b -> BoolExpr
-eq = comparison QL.EQ
-neq = comparison QL.NE
+eq a b = comparison QL.EQ [value a, value b]
+neq a b = comparison QL.NE [value a, value b]
 (==) = eq
 (!=) = neq
 
 (>), (>=), (<), (<=), gt, lt, ge, le
   :: (HaveValueType a b v, CanCompare v) => a -> b -> BoolExpr
-gt = comparison QL.GT
-lt = comparison QL.LT
-ge = comparison QL.GE
-le = comparison QL.LE
+gt a b = comparison QL.GT [value a, value b]
+lt a b = comparison QL.LT [value a, value b]
+ge a b = comparison QL.GE [value a, value b]
+le a b = comparison QL.LE [value a, value b]
 (>) = gt
 (>=) = ge
 (<) = lt
 (<=) = le
 
 not, not' :: HasValueType a BoolType => a -> BoolExpr
-not = unaryOp $ defaultValue { QLBuiltin.type' = QL.NOT }
+not a = simpleOp QL.NOT [value a]
 not' = not
 
 -- * Lists and Streams
 
 length, count :: (ToExpr e, Sequence (ExprType e)) => e -> NumberExpr
-count = unaryOp $ defaultValue { QLBuiltin.type' = QL.LENGTH }
+count e = simpleOp QL.LENGTH [expr e]
 length = count
 
 (++), concat :: (HaveValueType a b v, CanConcat v) => a -> b -> Expr (ValueType v)
-(++) = binOp $ defaultValue { QLBuiltin.type' = QL.ADD}
+(++) a b = simpleOp QL.ADD [value a, value b]
 concat = (++)
 
-map, map' :: (ToExpr e, ExprType e ~ StreamType x from) =>
-       (Expr (ValueType from) -> Expr (ValueType to)) -> e -> Expr (StreamType False to)
-map fun = unaryOp' $ \curdb vars -> defaultValue {
-  QLBuiltin.type' = QL.MAP,
-  QL.map = Just $ QL.Map $ toQLMapping fun curdb vars
-  }
+map, map' :: (ToMapping m, ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
+       m -> e -> Expr (StreamType False (MappingTo m))
+map fun a = Expr $ do
+  mapp <- mapping fun
+  rapply [expr a] $ (op QL.MAP) {
+    QL.map = Just $ QL.Map mapp }
+
 map' = map
 
-filter', filter :: (ToExpr e, ExprType e ~ StreamType x out) =>
-           (Expr (ValueType out) -> Expr (ValueType BoolType)) -> e -> Expr (ExprType e)
-filter' fil e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
-     QLTerm.type' = QL.CALL,
-     QL.call = Just $ QL.Call {
-       QL.builtin = defaultValue {
-          QLBuiltin.type' = QL.FILTER,
-          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil curdb v1
-          },
-       QL.args = Seq.singleton $ toTerm (toExpr e) curdb v2
-       }
-     }
+filter', filter :: (ToMapping m, ToStream e,
+                    MappingFrom m `HasToStreamValueOf` e) =>
+                   m -> e -> Expr (ExprType e)
+filter' fil e = Expr $ do
+  mapp <- mapping fil
+  rapply [stream e] $ (op QL.FILTER) {
+    QL.filter = Just $ QL.Filter $ mappingToPredicate mapp }
+
 filter = filter'
 
-between :: (ToJSON a, ToExpr e, ExprType e ~ StreamType x ObjectType) =>
+between :: (ToJSON a, ToStream e, ObjectType `HasToStreamValueOf` e) =>
            (Maybe String) -> (Maybe a) -> (Maybe a) -> e -> Expr (ExprType e)
-between k a b e = Expr $ \curdb vars -> defaultValue {
-     QLTerm.type' = QL.CALL,
-     QLTerm.call = Just $ QL.Call {
-       QL.builtin = defaultValue {
-          QLBuiltin.type' = QL.RANGE,
+between k a b e = Expr $ do
+  rapply [stream e] (op QL.RANGE) {
           QL.range = Just $ QL.Range (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
-                     (fmap toJsonTerm a) (fmap toJsonTerm b)
-          },
-       QL.args = Seq.singleton $ toTerm (toExpr e) curdb vars
-       }
-     }
+                     (fmap toJsonTerm a) (fmap toJsonTerm b) }
 
-slice :: (HasValueType a x, HaveValueType b c y) => a -> b -> c -> ValueExpr x
-slice = triOp $ defaultValue { QLBuiltin.type' = QL.SLICE }
+slice :: (ToExpr c, ExprType c ~ StreamType w t, HaveValueType a b NumberType)
+         => a -> b -> c -> ValueExpr x
+slice a b c = simpleOp QL.SLICE [expr c, value a, value b]
 
 append :: (HasValueType a ArrayType, HasValueType b x) => a -> b -> ArrayExpr
-append = binOp $ defaultValue { QLBuiltin.type' = QL.ARRAYAPPEND }
+append a b = simpleOp QL.ARRAYAPPEND [value a, value b]
 
-concatMap, concatMap' :: (ToExpr e, ExprType e ~ StreamType x from) =>
-             (Expr (ValueType from) -> Expr (ValueType ArrayType)) ->
-             e -> Expr (StreamType False to)
-concatMap fun = unaryOp' $ \curdb vars -> defaultValue {
-  QLBuiltin.type' = QL.CONCATMAP,
-  QL.concat_map = Just $ QL.ConcatMap $ toQLMapping fun curdb vars
-  }
+concatMap, concatMap' ::
+  (ToMapping m, (MappingTo m) ~ ArrayType,
+   ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
+   m -> e -> Expr (StreamType False t)
+concatMap fun e = Expr $ do
+  mapp <- mapping fun
+  rapply [stream e] (op QL.CONCATMAP) {
+    QL.concat_map = Just $ QL.ConcatMap mapp }
+
 concatMap' = concatMap
 
-innerJoin = undefined
+innerJoin :: (ToStream a, l `HasToStreamValueOf` a,
+              ToStream b, r `HasToStreamValueOf` b) =>
+             a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
+             Expr (StreamType False ObjectType)
+innerJoin self other p =
+  flip concatMap self
+  (\row -> flip concatMap other
+           (\row2 -> branch (p row row2)
+                     [obj ["left" := row, "right" := row2]]
+                     nil))
 
-{-
-outerJoin :: (ToStream a, ToStream b) =>
+outerJoin :: (ToStream a, l `HasToStreamValueOf` a,
+              ToStream b, r `HasToStreamValueOf` b) =>
              a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
              Expr (StreamType False ObjectType)
 outerJoin self other p =
@@ -152,20 +147,9 @@ outerJoin self other p =
                            nil))
            (\matches ->
              branch (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
--}
 
-outerJoin :: (ToExpr a, ExprType a ~ StreamType x l,
-              ToExpr b, ExprType b ~ StreamType y r) =>
-             a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
-             Expr (StreamType False ObjectType)
-outerJoin self other p =
-  flip concatMap' self
-  (\row -> bind (flip concatMap' other
-                 (\row2 -> branch (p row row2)
-                           [obj ["left" := row, "right" := row2]]
-                           nil))
-           (\matches ->
-             branch (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
+asArray :: Expr t -> ArrayExpr
+asArray (Expr e) = Expr e
 
 eqJoin = undefined
 
@@ -178,10 +162,6 @@ limit  = undefined
 trim = undefined
 
 nth = undefined
-
--- | Treat any exression as an array, without converting it
-asArray :: (ToExpr e, ExprType e ~ StreamType w x) => e -> ArrayExpr
-asArray e = Expr $ \curdb vars -> toTerm (toExpr e) curdb vars
 
 -- | The empty list expression
 nil :: ValueExpr ArrayType
@@ -211,76 +191,75 @@ groupBy' = groupBy
 -- * Accessors
 
 (!) :: (HasValueType a ObjectType) => a -> String -> ValueExpr t
-(!) a b = unaryOp (defaultValue {
-                      QLBuiltin.type' = QL.GETATTR, QLBuiltin.attr = Just (uFromString b) }) a
+(!) a b = Expr $ rapply [value a] (op QL.GETATTR) {
+  QLBuiltin.attr = Just (uFromString b) }
 
--- TODO: wrong
-hasattr :: HasValueType a StringType => a -> BoolExpr
-hasattr = unaryOp $ defaultValue { QLBuiltin.type' = QL.IMPLICIT_HASATTR }
+pick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
+pick ks e = Expr $ rapply [value e] (op QL.PICKATTRS) {
+  QL.attrs = Seq.fromList $ P.map uFromString ks }
 
--- TODO: wrong
-pick :: HasValueType a StringType => [a] -> ObjectExpr
-pick = opMany $ defaultValue { QLBuiltin.type' = QL.IMPLICIT_PICKATTRS }
-
-pickFrom :: (HasValueType a ObjectType, HasValueType b StringType) => a -> [b] -> ObjectExpr
-pickFrom = opOneMany $ defaultValue { QLBuiltin.type' = QL.PICKATTRS }
-
--- TODO: wrong
-attr :: HasValueType a StringType => a -> ValueExpr t
-attr = unaryOp $ defaultValue { QLBuiltin.type' = QL.IMPLICIT_GETATTR }
+unpick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
+unpick ks e = Expr $ rapply [value e] (op QL.WITHOUT) {
+  QL.attrs = Seq.fromList $ P.map uFromString ks }
 
 (!?) :: (HasValueType a ObjectType) => a -> String -> BoolExpr 
-(!?) a b = unaryOp (defaultValue { QLBuiltin.type' = QL.HASATTR, QLBuiltin.attr = Just $ uFromString b }) a
+(!?) a b = Expr $ rapply [value a] (op QL.HASATTR) {
+  QLBuiltin.attr = Just $ uFromString b }
 
-pluck = undefined
+pluck ks = map (pick ks)
 
-without = undefined
-
-unpick = undefined
+without ks = map (unpick ks)
 
 merge = undefined
 
 -- * Controld Structures, Functions and Javascript
 
 js :: String -> Expr (ValueType any)
-js s = Expr $ \_ _ -> defaultValue {
+js s = Expr $ return defaultValue {
   QLTerm.type' = QL.JAVASCRIPT,
-  QLTerm.javascript = Just $ uFromString ("return (" P.++ s P.++ ")")
-  }
+  QLTerm.javascript = Just $ uFromString ("return (" P.++ s P.++ ")") }
 
 bind :: (ToValue e) => e -> (Expr (ExprType e) -> Expr t) -> Expr t
-bind val f = Expr $ \curdb (v:vs) -> let (v1, v2) = splitVars vs in defaultValue {
-  QLTerm.type' = QL.LET,
-  QLTerm.let' = Just $ QL.Let (Seq.singleton $
-                           QL.VarTermTuple (uFromString v) (toTerm (toValue val) curdb v1))
-           (toTerm (toExpr (f $ var v)) curdb v2)
-  }
+bind val f = Expr $ do
+  arg <- value val
+  v <- newVar
+  body <- expr (f (var v))
+  return defaultValue {
+    QLTerm.type' = QL.LET,
+    QLTerm.let' = Just $ QL.Let (Seq.singleton $ QL.VarTermTuple (uFromString v) arg)
+                  body }
 
 let' :: (ToValue e) => String -> e -> Expr t -> Expr t
-let' nam val e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
-  QLTerm.type' = QL.LET,
-  QLTerm.let' = Just $ QL.Let (Seq.singleton $
-                           QL.VarTermTuple (uFromString nam) (toTerm (toValue val) curdb v1))
-           (toTerm (toExpr e) curdb v2)
-  }
+let' nam val e = Expr $ do
+  arg <- value val
+  body <- expr e
+  return defaultValue {
+    QLTerm.type' = QL.LET,
+    QLTerm.let' = Just $ QL.Let (Seq.singleton $
+                                 QL.VarTermTuple (uFromString nam) arg)
+                  body }
 
 var :: String -> Expr t
-var v = Expr $ \_ _ -> defaultValue { 
+var v = Expr $ return defaultValue { 
   QLTerm.type' = QL.VAR,
   QLTerm.var = Just $ uFromString v
   }
 
-branch :: (ToExpr e, ExprType e ~ (ValueType BoolType),
+branch :: (ToValue e, ToValueType (ExprType e) ~ BoolType,
            ToExpr a, ExprType a ~ x,
            ToExpr b, ExprType b ~ x) =>
           e -> a -> b -> Expr x
-branch t a b = Expr $ \curdb vars -> let (v1:v2:v3:_) = splitsVars vars in defaultValue {
-  QLTerm.type' = QL.IF, QL.if_ = Just $ QL.If (toTerm (toExpr t) curdb v1)
-                                          (toTerm (toExpr a) curdb v2)
-                                          (toTerm (toExpr b) curdb v3) }
+branch t a b = Expr $ do
+  tq <- value t
+  aq <- expr a
+  bq <- expr b
+  return defaultValue {
+    QLTerm.type' = QL.IF, QL.if_ = Just $ QL.If tq aq bq }
 
 jsfun :: ToValue e => String -> e -> Expr (ValueType y)
-jsfun f e = Expr $ \curdb (v:vars) -> toTerm (let' v e $ js $ f P.++ "(" P.++ v P.++ ")") curdb vars 
+jsfun f e = Expr $ do 
+  v <- newVar
+  expr (let' v e $ js $ f P.++ "(" P.++ v P.++ ")")
 
 error = undefined
 error' = error

@@ -2,9 +2,14 @@
 -- | RethinkDB client library for Haskell
 
 module Database.RethinkDB (
+  module Database.RethinkDB.Types,
   module Database.RethinkDB.Driver,
   module Database.RethinkDB.Functions
   ) where
+
+import Database.RethinkDB.Types (
+  ValueTypeKind(..), ExprTypeKind(..)
+  )
 
 import Database.RethinkDB.Driver (
   RethinkDBHandle,
@@ -22,7 +27,7 @@ import Database.RethinkDB.Driver (
   CanCompare,
   Sequence(..),
   Obj, obj,
-  streamToValue, valueToStream,
+  streamToValue, arrayToStream,
   Mapping(..), ToMapping(..)
   )
 
@@ -37,8 +42,7 @@ import Database.RethinkDB.Functions (
   distinct, groupedMapReduce, forEach, zip',
   orderBy, groupBy',
   
-  (!), hasattr, pick, pickFrom, attr, (!?),
-  pluck, without, unpick, merge,
+  (!), pick, (!?), pluck, without, unpick, merge,
   
   js, bind, let', var, branch, jsfun, error'
   )

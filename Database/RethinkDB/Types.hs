@@ -5,7 +5,7 @@ module Database.RethinkDB.Types where
 -- 
 -- The type hierarchy has 3 branches:
 -- - Regular Stream
--- - Updateable Streams
+-- - Updateable Streams (also called Views)
 -- - Values
 data ExprTypeKind =
     StreamType Bool ValueTypeKind -- ^ When the flag is true, it can be updated or deleted

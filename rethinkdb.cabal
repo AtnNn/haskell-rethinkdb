@@ -23,4 +23,5 @@ library
                        attoparsec,
                        data-default,
                        network,
-                       ghc-prim
+                       ghc-prim,
+                       mtl

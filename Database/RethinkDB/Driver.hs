@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings, KindSignatures, DataKinds, MultiParamTypeClasses, 
              TypeFamilies, ExistentialQuantification, FlexibleInstances, 
-             ConstraintKinds, FlexibleContexts #-}
+             ConstraintKinds, FlexibleContexts, UndecidableInstances, 
+             PolyKinds, FunctionalDependencies #-}
+
+-- TODO: missing functions. BatchQuery. insert and co should take arbitrary terms
 
 -- | The core of the haskell client library for RethinkDB
 
@@ -9,7 +12,7 @@ module Database.RethinkDB.Driver where
 import {-# SOURCE #-} Database.RethinkDB.Functions
 import Database.RethinkDB.Types
 
-import GHC.Prim as GHC
+import GHC.Prim
 
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Response as QLResponse
@@ -29,13 +32,14 @@ import Text.ProtocolBuffers.WireMessage
 import System.IO (Handle, hClose)
 import Network
 
+import Control.Monad.State as S
 import qualified Data.HashMap.Strict as HM
 import Data.Default
 import qualified Data.Attoparsec.Lazy as Attoparsec
 import Data.Foldable (toList)
 import qualified Data.Text as T
 import Data.Aeson
-import Data.Aeson.Parser (value)
+import qualified Data.Aeson.Parser (value)
 import qualified Data.Sequence as Seq
 import Data.Monoid
 import Data.Maybe
@@ -87,13 +91,13 @@ sendAll :: RethinkDBHandle -> ByteString -> IO ()
 sendAll (RethinkDBHandle h _ _) s = hPut h s
 
 -- | Get a request token and increment the token counter
-getToken :: RethinkDBHandle -> IO Int64
-getToken (RethinkDBHandle _ r _) = atomicModifyIORef r $ \t -> (t + 1, t)
+getNewToken :: RethinkDBHandle -> IO Int64
+getNewToken (RethinkDBHandle _ r _) = atomicModifyIORef r $ \t -> (t + 1, t)
 
 -- | Execute a raw protobuffer query and return the raw response
 runQLQuery :: RethinkDBHandle -> (Int64 -> QL.Query) -> IO (Either String QL.Response)
 runQLQuery h query = do
-  token <- getToken h
+  token <- getNewToken h
   let queryS = messagePut (query token)
   sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
   readResponse token
@@ -127,20 +131,19 @@ db s = Database s
 -- | Create a database on the server
 dbCreate :: String -> Query Database
 dbCreate db_name = Query
-  (metaQuery $ \_ _ -> 
-    QL.MetaQuery QL.CREATE_DB (Just $ uFromString db_name) Nothing Nothing)
+  (metaQuery $ return $ QL.MetaQuery QL.CREATE_DB (Just $ uFromString db_name) Nothing Nothing)
   (const $ Right $ Database db_name)
 
 -- | Drop a database
 dbDrop :: Database -> Query ()
 dbDrop (Database name) = Query
-  (metaQuery $ \_ _ -> QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
+  (metaQuery $ return $ QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
   (const $ Right ())
 
 -- | List the databases on the server
 dbList :: Query [Database]
 dbList = Query
-  (metaQuery $ \_ _ -> QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
+  (metaQuery $ return $ QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
   (maybe (Left "error") Right . sequence . map (fmap Database . convert))
 
 -- | Options used to create a table
@@ -181,28 +184,31 @@ table n = Table Nothing n Nothing
 tableCreate :: Table -> TableCreateOptions -> Query Table
 tableCreate (Table mdb table_name primary_key)
   (TableCreateOptions datacenter cache_size) = Query
-  (metaQuery $ \curdb _ -> let create = defaultValue {
+  (metaQuery $ do 
+      curdb <- activeDB
+      let create = defaultValue {
         QLCreateTable.datacenter = fmap uFromString datacenter,
         QLCreateTable.table_ref = QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
                                   (uFromString table_name) Nothing, 
         QLCreateTable.primary_key = fmap uFromString primary_key,
         QLCreateTable.cache_size = cache_size
-        } in
-    QL.MetaQuery QL.CREATE_TABLE Nothing (Just create) Nothing)
-    (const $ Right $ Table Nothing table_name primary_key)
+        }
+      return $ QL.MetaQuery QL.CREATE_TABLE Nothing (Just create) Nothing)
+               (const $ Right $ Table Nothing table_name primary_key)
 
 -- | Drop a table
 tableDrop :: Table -> Query ()
-tableDrop (Table tdb tb _) = Query
-  (metaQuery $ \curdb _ -> 
-    QL.MetaQuery QL.DROP_TABLE Nothing Nothing $ Just $
-    QL.TableRef (uFromString $ databaseName $ fromMaybe curdb tdb) (uFromString tb) Nothing)
+tableDrop tbl = Query
+  (metaQuery $ do
+      curdb <- activeDB
+      ref <- tableRef tbl
+      return $ QL.MetaQuery QL.DROP_TABLE Nothing Nothing $ Just $ ref)
   (const $ Right ())
 
 -- | List the tables in a database
 tableList :: Database -> Query [Table]
 tableList (Database name) = Query 
-  (metaQuery $ \_ _ -> 
+  (metaQuery $ return $ 
     QL.MetaQuery QL.LIST_TABLES (Just $ uFromString name) Nothing Nothing)
   (maybe (Left "error") Right . sequence .
    map (fmap (\x -> Table (Just (Database name)) x Nothing) . convert))
@@ -223,11 +229,14 @@ get t = Document t . toJSON
 
 insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query [Document]
 insert_or_upsert tbl as overwrite = Query
-  (\token curdb _ -> let write = defaultValue {
+  (do token <- getToken
+      curdb <- activeDB
+      ref <- tableRef tbl
+      let write = defaultValue {
           QLWriteQuery.type' = QL.INSERT,
-          QL.insert = Just $ QL.Insert (tableRef curdb tbl)
-                      (Seq.fromList $ map toJsonTerm as) (Just overwrite)
-          } in QL.Query QL.WRITE token Nothing (Just write) Nothing)
+          QL.insert = Just $ QL.Insert ref
+                      (Seq.fromList $ map toJsonTerm as) (Just overwrite) }
+      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
   (whenSuccess "generated_keys" $ \keys -> Right $ map (\doc -> Document tbl doc) keys)
 
 -- | Insert a document into a table
@@ -263,66 +272,73 @@ update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
            MappingFrom map ~ out, MappingTo map ~ ObjectType) =>
           sel -> map -> Query ()
 update view m = Query
-  (\token curdb vars ->
-    QL.Query QL.WRITE token Nothing (Just $ write curdb vars) Nothing)
-  (whenSuccess_ ())
-
-  where write curdb vars = let (v1, v2) = splitVars vars in case toExpr view of
-          Expr f -> defaultValue {
-            QLWriteQuery.type' = QL.UPDATE,
-            QL.update = Just $ QL.Update (f curdb newVars) (toQLMapping m curdb v1)
-            }
-          SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
+  (do token <- getToken 
+      curdb <- activeDB
+      mT <- mapping m
+      write <- case toExpr view of
+        Expr f -> do viewT <- expr view
+                     return defaultValue {
+                       QLWriteQuery.type' = QL.UPDATE,
+                       QL.update = Just $ QL.Update viewT mT
+                       }
+        SpotExpr (Document tbl@(Table _ _ k) d) -> do
+          ref <- tableRef tbl
+          return $ defaultValue {
             QLWriteQuery.type' = QL.POINTUPDATE,
-            QL.point_update = Just $ QL.PointUpdate (tableRef curdb tbl)
+            QL.point_update = Just $ QL.PointUpdate ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
-                              (toJsonTerm d)
-                              (toQLMapping m curdb v2)
-            }
+                              (toJsonTerm d) mT }
+      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+  (whenSuccess_ ())
 
 -- | Replace the objects return by a query by another object
 replace :: (ToExpr sel, ExprWritable sel ~ True, ToJSON a) => sel -> a -> Query ()
 replace view a = Query
-  (\token curdb vars ->
-    QL.Query QL.WRITE token Nothing (Just $ write curdb vars) Nothing)
-  (whenSuccess_ ())
-
-  where write curdb vars = let (v1, v2) = splitVars vars in case toExpr view of
-          Expr f -> defaultValue {
+  (do token <- getToken 
+      curdb <- activeDB 
+      fun <- mapping (toJSON a)
+      write <- case toExpr view of
+        Expr f -> do
+          e <- f
+          return defaultValue {
             QLWriteQuery.type' = QL.MUTATE,
-            QL.mutate = Just $ QL.Mutate (f curdb newVars) (toQLMapping (toJSON a) curdb v1)
-            }
-          SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
+            QL.mutate = Just $ QL.Mutate e fun }
+        SpotExpr (Document tbl@(Table _ _ k) d) -> do
+          ref <- tableRef tbl
+          return defaultValue {
             QLWriteQuery.type' = QL.POINTMUTATE,
-            QL.point_mutate = Just $ QL.PointMutate (tableRef curdb tbl)
+            QL.point_mutate = Just $ QL.PointMutate ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
-                              (toJsonTerm d)
-                              (toQLMapping (toJSON a) curdb v2)
-            }
+                              (toJsonTerm d) fun }
+      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+  (whenSuccess_ ())
 
 -- | Delete the result of a query from the database
 delete :: (ToExpr sel, ExprWritable sel ~ True) => sel -> Query ()
 delete view = Query
-  (\token curdb _ -> QL.Query QL.WRITE token Nothing (Just $ write curdb) Nothing)
-  (whenSuccess_ ())
-  
-  where write curdb = case toExpr view of
-          Expr f -> defaultValue {
-            QLWriteQuery.type' = QL.DELETE,
-            QL.delete = Just $ QL.Delete (f curdb newVars)
-            }
-          SpotExpr (Document tbl@(Table _ _ k) d) -> defaultValue {
-            QLWriteQuery.type' = QL.POINTDELETE,
-            QL.point_delete = Just $ QL.PointDelete (tableRef curdb tbl)
+  (do token <- getToken 
+      curdb <- activeDB
+      write <- case toExpr view of
+          Expr f -> do
+            ex <- f
+            return defaultValue {
+              QLWriteQuery.type' = QL.DELETE,
+              QL.delete = Just $ QL.Delete ex }
+          SpotExpr (Document tbl@(Table _ _ k) d) -> do
+            ref <- tableRef tbl
+            return defaultValue {
+              QLWriteQuery.type' = QL.POINTDELETE,
+              QL.point_delete = Just $ QL.PointDelete ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
-                              (toJsonTerm d)
-            }
+                              (toJsonTerm d) }
+      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+  (whenSuccess_ ())
 
 -- * Queries
 
 -- | A query returning a
 data Query a = Query { 
-  _queryBuild :: Int64 -> Database -> [String] -> QL.Query,
+  _queryBuild :: QueryM QL.Query,
   _queryExtract :: [Value] -> Either String a
   }
 
@@ -341,11 +357,14 @@ instance ToQuery (Query a) where
 instance ToQuery Table where
   type QueryType Table = [Value]
   toQuery tbl = Query
-    (\token curdb _ -> QL.Query QL.READ token
+    (do token <- getToken 
+        curdb <- activeDB
+        ref <- tableRef tbl
+        return $ QL.Query QL.READ token
                      (Just $ defaultValue {
                          QLReadQuery.term = defaultValue {
                              QLTerm.type' = QL.TABLE, 
-                             QLTerm.table = Just $ QL.Table $ tableRef curdb tbl
+                             QLTerm.table = Just $ QL.Table ref
                              }
                          }
                      ) Nothing Nothing)
@@ -354,14 +373,15 @@ instance ToQuery Table where
 instance ToQuery Document where
   type QueryType Document = Value
   toQuery (Document tbl d) = Query
-    (\token curdb _ -> QL.Query QL.READ token
+    (do token <- getToken 
+        curdb <- activeDB
+        ref <- tableRef tbl
+        return $ QL.Query QL.READ token
                      (Just $ defaultValue {
                          QLReadQuery.term = defaultValue {
                              QL.type' = QL.GETBYKEY, 
-                             QL.get_by_key = Just $ QL.GetByKey (tableRef curdb tbl)
-                                             (uTableKey tbl) (toJsonTerm d)
-                             }
-                         }
+                             QL.get_by_key = Just $ QL.GetByKey ref
+                                             (uTableKey tbl) (toJsonTerm d) } }
                      ) Nothing Nothing)
     (maybe (Left "insufficient results") Right . listToMaybe)
 
@@ -369,11 +389,13 @@ instance ToQuery (Expr t) where
   type QueryType (Expr t) = [Value]
   toQuery (SpotExpr doc) = fmap return $ toQuery doc
   toQuery (Expr f) =
-    Query (\token curdb vars -> QL.Query QL.READ token
-                           (Just $ defaultValue {
-                               QLReadQuery.term = f curdb vars
-                               }) Nothing Nothing)
-    (Right)
+    Query (do token <- getToken
+              ex <- f
+              return $ QL.Query QL.READ token
+                (Just $ defaultValue {
+                    QLReadQuery.term = ex
+                    }) Nothing Nothing)
+    Right
 
 -- | Submit a query to the server, throwing exceptions when there is an error
 run :: ToQuery a => RethinkDBHandle -> a -> IO (QueryType a)
@@ -387,7 +409,7 @@ run h q = do
 runEither :: ToQuery a => RethinkDBHandle -> a -> IO (Either String (QueryType a))
 runEither h q = do
   let Query f g = toQuery q
-  er <- runQLQuery h (\x -> f x (rdbDatabase h) newVars)
+  er <- runQLQuery h (\x -> fst $ runQueryM f $ QuerySettings x (rdbDatabase h) newVars False)
   return $ er >>= \r -> (responseErrorMessage r >>
     (maybe (Left "decode error") Right . sequence . map (decodeAny . utf8) $
      toList $ QL.response r) >>= g)
@@ -400,19 +422,24 @@ runMaybe h = fmap (either (const Nothing) Just) . runEither h
 -- * Expressions
 
 -- | Can the Expr be written to? (updated or deleted)
-type family ExprWritable expr :: Bool
-type instance ExprWritable (Expr (StreamType True o)) = True
-type instance ExprWritable (Expr (StreamType False o)) = False
-type instance ExprWritable (Expr (ValueType v)) = False
+type family ExprTypeWritable (expr :: ExprTypeKind) :: Bool
+type instance ExprTypeWritable (StreamType w o) = w
+type instance ExprTypeWritable (ValueType v) = False
 
--- | The type od the value of an Expr
+type ExprWritable e = ExprTypeWritable (ExprType e)
+
+-- | The type of the value of an Expr
 type family ExprValueType expr :: ValueTypeKind
 type instance ExprValueType (Expr (ValueType v)) = v
 
+-- | The type of the stream of an Expr
+type family ExprTypeStreamType (t :: ExprTypeKind) :: ValueTypeKind
+type instance ExprTypeStreamType (StreamType w t) = t
+
 -- | An RQL expression
 data Expr (t :: ExprTypeKind) =
-    Expr (Database -> [String] -> QL.Term) -- ^ A protobuf term
-  | SpotExpr Document                      -- ^ A single document
+    Expr (QueryM QL.Term) -- ^ A protobuf term
+  | SpotExpr Document     -- ^ A single document
 
 -- | Convert something into an Expr
 class ToExpr (o :: *) where
@@ -420,13 +447,28 @@ class ToExpr (o :: *) where
   toExpr :: o -> Expr (ExprType o)
 
 -- | The result type of toValue
-type family TypeToValue (t :: ExprTypeKind) :: ValueTypeKind
-type instance TypeToValue (StreamType w t) = ArrayType
-type instance TypeToValue (ValueType t) = t
+type family ToValueType (t :: ExprTypeKind) :: ValueTypeKind
+type instance ToValueType (StreamType w t) = ArrayType
+type instance ToValueType (ValueType t) = t
 
 -- | Convert something into a value Expr
 class ToValue e where
-  toValue :: e -> Expr (ValueType (TypeToValue (ExprType e)))
+  toValue :: e -> Expr (ValueType (ToValueType (ExprType e)))
+
+type family FromMaybe (a :: k) (m :: Maybe k) :: k
+type instance FromMaybe a Nothing = a
+type instance FromMaybe a (Just b) = b
+
+type HasToStreamValueOf a b = FromMaybe a (ToStreamValue b) ~ a
+
+type ToStreamValue e = ToStreamTypeValue (ExprType e)
+
+type family ToStreamTypeValue (t :: ExprTypeKind) :: Maybe ValueTypeKind
+type instance ToStreamTypeValue (StreamType w t) = Just t
+type instance ToStreamTypeValue (ValueType t) = Nothing
+
+class ToExpr e => ToStream e where
+  toStream :: e -> Expr (StreamType (ExprWritable e) (FromMaybe a (ToStreamValue e)))
 
 instance ToExpr Document where
   type ExprType Document = StreamType True 'ObjectType
@@ -435,16 +477,24 @@ instance ToExpr Document where
 instance ToValue Document where
   toValue = streamToValue
 
+instance ToStream Document where
+  toStream = toExpr
+
 instance ToExpr Table where
   type ExprType Table = StreamType True ObjectType
-  toExpr tbl = Expr $ \curdb _ -> defaultValue { 
-    QL.type' = QL.TABLE,
-    QL.table = Just $ QL.Table (tableRef curdb tbl)
-    }
+  toExpr tbl = Expr $ do
+    curdb <- activeDB 
+    ref <- tableRef tbl
+    return defaultValue { 
+      QL.type' = QL.TABLE,
+      QL.table = Just $ QL.Table ref }
 
 instance ToValue Table where
   toValue = streamToValue
                                   
+instance ToStream Table where
+  toStream = toExpr
+
 instance ToExpr (Expr t) where
   type ExprType (Expr t) = t
   toExpr e = e
@@ -455,17 +505,23 @@ instance ToValue (Expr (ValueType t)) where
 instance ToValue (Expr (StreamType w t)) where
   toValue = streamToValue
 
+instance ToStream (Expr (ValueType ArrayType)) where
+  toStream = arrayToStream
+
+instance ToStream (Expr (StreamType w t)) where
+  toStream e = e
+
 instance ToExpr Int where
   type ExprType Int = ValueType NumberType
-  toExpr n = Expr $ \_ _ -> defaultValue {
+  toExpr n = Expr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just $ fromIntegral n }
 
 instance ToValue Int where
   toValue = toExpr
-
+  
 instance ToExpr Integer where
   type ExprType Integer = ValueType NumberType
-  toExpr n = Expr $ \_ _ -> defaultValue {
+  toExpr n = Expr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just $ fromInteger n }
 
 instance ToValue Integer where
@@ -473,7 +529,7 @@ instance ToValue Integer where
 
 instance ToExpr Double where
   type ExprType Double = ValueType NumberType
-  toExpr n = Expr $ \_ _ -> defaultValue {
+  toExpr n = Expr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just n }
 
 instance ToValue Double where
@@ -481,32 +537,42 @@ instance ToValue Double where
 
 instance ToExpr a => ToExpr [a] where
   type ExprType [a] = ValueType ArrayType
-  toExpr l = Expr $ \curdb vars -> let vs = splitsVars vars in defaultValue {
-    QL.type' = QL.ARRAY, QL.array = Seq.fromList $ 
-    zipWith (\x v -> toTerm (toExpr x) curdb v) l vs }
+  toExpr l = Expr $ do
+    curdb <- activeDB 
+    exs <- sequence $ map (expr . toExpr) l
+    return defaultValue {
+      QL.type' = QL.ARRAY, QL.array = Seq.fromList exs }
 
 instance ToExpr a => ToValue [a] where
   toValue = toExpr
 
+instance ToExpr a => ToStream [a] where
+  toStream = arrayToStream . toExpr
+
 instance ToExpr () where
   type ExprType () = ValueType NoneType
-  toExpr () = Expr $ \_ _ -> defaultValue { QL.type' = QL.JSON_NULL }
+  toExpr () = Expr $ return $  defaultValue { QL.type' = QL.JSON_NULL }
 
 instance ToValue () where
   toValue = toExpr
 
 instance ToExpr Obj where
   type ExprType Obj = ValueType ObjectType
-  toExpr (Obj o) = Expr $ \curdb vars -> let vs = splitsVars vars in defaultValue {
-    QL.type' = QL.OBJECT, QL.object = Seq.fromList $ zipWith (go curdb) o vs }
-    where go curdb (k := a) v = QL.VarTermTuple {
-            QLVarTermTuple.var = uFromString k, QLVarTermTuple.term = toTerm (toExpr a) curdb v}
+  toExpr (Obj o) = Expr $ do
+    curdb <- activeDB 
+    exs <- sequence $ map go o
+    return defaultValue {
+      QL.type' = QL.OBJECT, QL.object = Seq.fromList exs }
+    where go (k := a) = do
+            ex <- expr a
+            return QL.VarTermTuple {
+              QLVarTermTuple.var = uFromString k, QLVarTermTuple.term = ex }
 
 instance ToValue Obj where
   toValue = toExpr
 
 -- | Aliases for type constraints on expressions
-type HasValueType a v = (ToExpr a, ExprType a ~ ValueType v)
+type HasValueType a v = (ToValue a, ToValueType (ExprType a) ~ v)
 type HaveValueType a b v = (HasValueType a v, HasValueType b v)
 
 -- | Simple aliases for a value Expr
@@ -536,13 +602,13 @@ instance Fractional (Expr (ValueType NumberType)) where
 
 -- | A sequence is either a stream or an array
 class Sequence (e :: ExprTypeKind) where
-  type SequenceType e :: ValueTypeKind
+  type SequenceType e (t :: ValueTypeKind) :: Constraint
 
 instance Sequence (StreamType w t) where
-  type SequenceType (StreamType w t) = t
+  type SequenceType (StreamType w t) tt = t ~ tt
 
 instance a ~ ArrayType => Sequence (ValueType a) where
-  type SequenceType (ValueType a) = GHC.Any
+  type SequenceType (ValueType a) t = ()
 
 -- | A list of String/Expr pairs
 data Obj = Obj [Attribute]
@@ -557,17 +623,17 @@ obj = Obj
 -- The whole stream is read into the server's memory
 
 streamToValue :: (ToExpr e, ExprType e ~ StreamType w t) => e -> Expr (ValueType ArrayType)
-streamToValue = (unaryOp $ defaultValue { QLBuiltin.type' = QL.STREAMTOARRAY }) . toExpr
+streamToValue = simpleOp QL.STREAMTOARRAY . return . expr
 
 -- | Convert a value into a stream
-valueToStream :: (ToExpr e, ExprType e ~ ValueType ArrayType) => e -> Expr (StreamType False t)
-valueToStream = (unaryOp $ defaultValue { QLBuiltin.type' = QL.STREAMTOARRAY }) . toExpr
+arrayToStream :: (ToExpr e, ExprType e ~ ValueType ArrayType) => e -> Expr (StreamType False t)
+arrayToStream = simpleOp QL.ARRAYTOSTREAM . return . expr
 
 -- * Mappings
 
 -- | A mapping is a like single-parameter function
 data Mapping (from :: ValueTypeKind) (to :: ValueTypeKind) =
-  Mapping (Database -> [String] -> QL.Mapping)
+  Mapping (QueryM QL.Mapping)
 
 -- | Convert objects into mappings
 class ToMapping map where
@@ -578,21 +644,66 @@ class ToMapping map where
 instance ToMapping Obj where
   type MappingFrom Obj = ObjectType
   type MappingTo Obj = ObjectType
-  toMapping v = Mapping $ \curdb vars -> defaultValue {
-    QLMapping.body = toTerm (toExpr v) curdb vars }
+  toMapping v = Mapping $ do 
+    curdb <- activeDB
+    ex <- expr v
+    return $ defaultValue { QLMapping.body = ex }
 
 instance ToMapping Value where
   type MappingFrom Value = ObjectType
   type MappingTo Value = ObjectType
-  toMapping v = Mapping $ \_ _ -> defaultValue { QLMapping.body = toJsonTerm v }
+  toMapping v = Mapping $ return $ defaultValue { QLMapping.body = toJsonTerm v }
 
-instance (ToExpr b) => ToMapping (Expr (ValueType t) -> b) where 
-            type MappingFrom (Expr (ValueType t) -> b) = t
-            type MappingTo (Expr (ValueType t) -> b) = ExprValueType b
-            toMapping f = Mapping $ \curdb (v:vars) -> defaultValue {
-              QLMapping.arg = uFromString v,
-              QLMapping.body = toTerm (toExpr (f (var v))) curdb vars
-              }
+instance (ToValue b, a ~ Expr (ValueType t)) => ToMapping (a -> b) where 
+  type MappingFrom (a -> b) = ExprValueType a
+  type MappingTo (a -> b) = ToValueType (ExprType b)
+  toMapping f = Mapping $ do
+    curdb <- activeDB 
+    v <- newVar
+    ex <- value (f (var v))
+    return $ defaultValue {
+      QLMapping.arg = uFromString v,
+      QLMapping.body = ex }
+
+instance ToMapping (Expr (ValueType t)) where
+  type MappingFrom (Expr (ValueType t)) = ObjectType
+  type MappingTo (Expr (ValueType t)) = t
+  toMapping e = Mapping $ do 
+    ex <- expr e
+    return defaultValue { QLMapping.body = ex }
+
+-- * QueryM Monad
+
+data QuerySettings = QuerySettings {
+  _queryToken :: Int64,
+  _queryDB :: Database,
+  _queryVars :: [String],
+  _queryUseOutdated :: Bool
+  }
+
+type QueryM = State QuerySettings
+
+runQueryM = runState
+
+initialVars :: [String]
+initialVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
+
+splitVars = undefined
+splitsVars = undefined
+newVars = undefined
+
+getToken :: QueryM Int64
+getToken = fmap _queryToken S.get
+
+activeDB :: QueryM Database
+activeDB = fmap _queryDB S.get
+
+newVar :: QueryM String
+newVar  = state $ \s -> let (x:xs) = _queryVars s in (x, s { _queryVars = xs} )
+
+setUseOutdated :: ToExpr e => Bool -> e -> Expr t
+setUseOutdated b e = Expr $ do
+  state $ \s -> runQueryM (expr $ toExpr e) s { _queryUseOutdated = b }
 
 -- * Utilities
 
@@ -604,26 +715,36 @@ mappingToPredicate (QL.Mapping arg body _1) = defaultValue {
   }
 
 -- | Convert a table to a raw protobuf term
-tableToTerm :: Table -> Database -> QL.Term
-tableToTerm (Table mdb name _) curdb = defaultValue {
-  QL.type' = QL.TABLE,
-  QL.table = Just $ QL.Table $ QL.TableRef
-             (uFromString $ databaseName $ fromMaybe curdb mdb) (uFromString name) Nothing
-  }
+tableToTerm :: Table -> QueryM QL.Term
+tableToTerm tbl = do
+  ref <- tableRef tbl
+  return $ defaultValue {
+    QL.type' = QL.TABLE,
+    QL.table = Just $ QL.Table ref }
 
 -- | Convert into a raw protobuf mapping
-toQLMapping :: ToMapping m => m -> Database -> [String] -> QL.Mapping
-toQLMapping m = case toMapping m of Mapping f -> f
+mapping :: ToMapping m => m -> QueryM QL.Mapping
+mapping m = case toMapping m of Mapping f -> f
 
 -- | Convert an Expr to a term
-toTerm :: Expr t -> Database -> [String] -> QL.Term
-toTerm (Expr f) curdb vars = f curdb vars
-toTerm (SpotExpr (Document tbl@(Table _ _ mkey) d)) curdb _ = defaultValue { 
-    QL.type' = QL.GETBYKEY,
-    QL.get_by_key = Just $ QL.GetByKey (tableRef curdb tbl)
+expr :: ToExpr e => e -> QueryM QL.Term
+expr e = case toExpr e of
+  Expr f -> f
+  SpotExpr (Document tbl@(Table _ _ mkey) d) -> do
+    ref <- tableRef tbl
+    return defaultValue { 
+      QL.type' = QL.GETBYKEY,
+      QL.get_by_key = Just $ QL.GetByKey ref
              (fromMaybe defaultPrimaryAttr $ fmap uFromString mkey)
-             (toJsonTerm d)
-    }
+             (toJsonTerm d) }
+
+-- | Convert a stream to a term
+stream :: ToStream a => a -> QueryM QL.Term
+stream = expr . toStream
+
+-- | Convert a value to a term
+value :: ToValue a => a -> QueryM QL.Term
+value = expr . toValue
 
 -- | build a raw protobuf Term
 toJsonTerm :: ToJSON a => a -> QL.Term
@@ -655,15 +776,10 @@ whenSuccess_ b response = do
     then maybe (Left "unknown error") Left $ info .? "first_error"
     else Right b
 
--- | Build a protobuf TableRef object
-tableRef :: Database -> Table -> QL.TableRef
-tableRef curdb (Table mdb tb _) =
-  QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb) (uFromString tb) Nothing
-
 -- | Like aeson's decode, but but works on numbers and strings, not only objects and arrays
 decodeAny :: FromJSON a => ByteString -> Maybe a
 decodeAny s =
-  case Attoparsec.parse value s of
+  case Attoparsec.parse Data.Aeson.Parser.value s of
     Attoparsec.Done _ v -> convert v
     _          -> Nothing
 
@@ -682,8 +798,11 @@ responseErrorMessage response =
     else Left $ maybe (show $ QL.status_code response) uToString $ QL.error_message response
 
 -- | Help build meta queries
-metaQuery :: (Database -> [String] -> QL.MetaQuery) -> Int64 -> Database -> [String] -> QL.Query
-metaQuery q t d v = QL.Query QL.META t Nothing Nothing $ Just (q d v)
+metaQuery :: QueryM QL.MetaQuery -> QueryM QL.Query
+metaQuery q = do
+  t <- getToken
+  mq <- q
+  return $ QL.Query QL.META t Nothing Nothing $ Just mq
 
 -- | Convert an int to a 4-byte bytestring
 packUInt :: Int -> ByteString
@@ -700,66 +819,25 @@ unpackUInt s = case unpack s of
                fromIntegral d `shiftL` 24
   _ -> error "unpackUInt: lengh is not 4"
 
-newVars :: [String]
-newVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
+op o = defaultValue { QLBuiltin.type' = o }
 
-splitVars :: [String] -> ([String], [String])
-splitVars vs = (map ('a':) vs, map ('b':) vs)
+apply :: QL.Builtin -> [QueryM QL.Term] -> QueryM QL.Term
+apply op args = do
+  a <- sequence args
+  return $ defaultValue { QL.type' = QL.CALL, QL.call = Just $ QL.Call op (Seq.fromList a) }
 
-splitsVars :: [String] -> [[String]]
-splitsVars vs = zipWith (\p v -> map (p++) v) newVars (repeat vs)
+rapply = flip apply
 
-binOp :: (ToExpr a, ToExpr b) =>
-         QL.Builtin -> a -> b -> Expr c
-binOp op a b = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call op $ Seq.fromList [toTerm (toExpr a) curdb v1,
-                                              toTerm (toExpr b) curdb v2]
-  }
+simpleOp :: QL.BuiltinType -> [QueryM QL.Term] -> Expr t
+simpleOp o a = Expr $ apply (op o) a
 
-triOp :: (ToExpr a, ToExpr b, ToExpr c) =>
-         QL.Builtin -> a -> b -> c -> Expr d
-triOp op a b c = Expr $ \curdb vars -> let (v1:v2:v3:_) = splitsVars vars in defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call op $ Seq.fromList [toTerm (toExpr a) curdb v1,
-                                              toTerm (toExpr b) curdb v2,
-                                              toTerm (toExpr c) curdb v3]
-  }
+comparison :: QL.Comparison -> [QueryM QL.Term] -> Expr t
+comparison o a = Expr $ rapply a (op QL.COMPARE) { QL.comparison = Just o }
 
-unaryOp :: ToExpr a => QL.Builtin -> a -> Expr b
-unaryOp op a = Expr $ \curdb vars -> defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call op $ Seq.fromList [toTerm (toExpr a) curdb vars] 
-  }
-
-unaryOp' :: ToExpr a => (Database -> [String] -> QL.Builtin) -> a -> Expr b
-unaryOp' op a = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call (op curdb v1) $ Seq.fromList [toTerm (toExpr a) curdb v2] 
-  }
-
-zeroOp :: (Database -> [String] -> QL.Builtin) -> Expr b
-zeroOp op = Expr $ \curdb vars -> defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call (op curdb vars) $ Seq.fromList []
-  }
-
-comparison :: (ToExpr a, ExprType a ~ ValueType x,
-               ToExpr b, ExprType b ~ ValueType y) =>
-         QL.Comparison -> a -> b -> Expr (ValueType BoolType)
-comparison comp = binOp $ defaultValue { QLBuiltin.type' = QL.COMPARE,
-                                         QL.comparison = Just comp }
-
-opMany :: ToExpr a => 
-         QL.Builtin -> [a] -> Expr c
-opMany op as = Expr $ \curdb vars -> let vs = splitsVars vars in defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call op $ Seq.fromList $ zipWith (\x v -> toTerm (toExpr x) curdb v) as vs
-  }
-
-opOneMany :: (ToExpr a, ToExpr b) => QL.Builtin -> a -> [b] -> Expr c
-opOneMany op a bs = Expr $ \curdb vars -> let (v:vs) = splitsVars vars in defaultValue {
-  QL.type' = QL.CALL,
-  QL.call = Just $ QL.Call op $ Seq.fromList $ (toTerm (toExpr a) curdb v) : 
-            zipWith (\x v' -> toTerm (toExpr x) curdb v') bs vs
-  }
+-- | Build a protobuf TableRef object
+tableRef :: Table -> QueryM QL.TableRef
+tableRef (Table mdb tb _) = do
+  curdb <- activeDB
+  useOutdated <- fmap _queryUseOutdated S.get
+  return $ QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
+    (uFromString tb) (Just useOutdated)
