@@ -252,12 +252,12 @@ upsert tb a = fmap head $ insert_or_upsert tb [a] True
 upsertMany :: ToJSON a => Table -> [a] -> Query [Document]
 upsertMany tb a = insert_or_upsert tb a True
 
--- | Update a table (TODO: test the example)
+-- | Update a table
 -- 
 -- t <- run h $ tableCreate (table "example") def
 -- run h $ insertMany t [object ["a" .= 1, "b" .= 11], object ["a" .= 2, "b" .= 12]]
 -- run h $ update t (object ["b" .= 20])
--- run h $ table t
+-- run h $ t
 
 update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
            MappingFrom map ~ out, MappingTo map ~ ObjectType) =>
