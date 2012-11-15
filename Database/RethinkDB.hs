@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings, KindSignatures, DataKinds, MultiParamTypeClasses, 
              TypeFamilies, ExistentialQuantification, FlexibleInstances, 
-             ConstraintKinds #-}
+             ConstraintKinds, FlexibleContexts #-}
 
 module Database.RethinkDB where
 
+import GHC.Prim as GHC
+
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Response as QLResponse
+import qualified Database.RethinkDB.Internal.Query_Language.VarTermTuple as QLVarTermTuple
 import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
 import qualified Database.RethinkDB.Internal.Query_Language.Predicate as QLPredicate
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
@@ -319,13 +322,26 @@ data Expr (t :: ExprTypeKind) =
   Expr (Database -> [String] -> QL.Term) |
   SpotExpr Document
 
-class ToExpr o where
+class ToExpr (o :: *) where
   type ExprType o :: ExprTypeKind
   toExpr :: o -> Expr (ExprType o)
+
+type family TypeToValue (t :: ExprTypeKind) :: ValueTypeKind
+type instance TypeToValue (StreamType w t) = ArrayType
+type instance TypeToValue (ValueType t) = t
+
+streamToValue :: (ToExpr e, ExprType e ~ StreamType w t) => e -> Expr (ValueType ArrayType)
+streamToValue = (unaryOp $ defaultValue { QLBuiltin.type' = QL.STREAMTOARRAY }) . toExpr
+
+valueToStream :: (ToExpr e, ExprType e ~ ValueType ArrayType) => e -> Expr (StreamType False t)
+valueToStream = (unaryOp $ defaultValue { QLBuiltin.type' = QL.STREAMTOARRAY }) . toExpr
 
 instance ToExpr Document where
   type ExprType Document = StreamType True 'ObjectType
   toExpr doc = SpotExpr doc
+
+instance ToValue Document where
+  toValue = streamToValue
 
 toTerm :: Expr t -> Database -> [String] -> QL.Term
 toTerm (Expr f) curdb vars = f curdb vars
@@ -342,10 +358,22 @@ instance ToExpr Table where
     QL.type' = QL.TABLE,
     QL.table = Just $ QL.Table (tableRef curdb tbl)
     }
+
+instance ToValue Table where
+  toValue = streamToValue
                                   
 instance ToExpr (Expr t) where
   type ExprType (Expr t) = t
   toExpr e = e
+
+class ToValue e where
+  toValue :: e -> Expr (ValueType (TypeToValue (ExprType e)))
+
+instance ToValue (Expr (ValueType t)) where
+  toValue e = e
+
+instance ToValue (Expr (StreamType w t)) where
+  toValue = streamToValue
 
 defaultPrimaryAttr :: Utf8
 defaultPrimaryAttr = uFromString "id"
@@ -363,10 +391,17 @@ class ToMapping map where
 data Mapping (from :: ValueTypeKind) (to :: ValueTypeKind) =
   Mapping (Database -> [String] -> QL.Mapping)
 
+instance ToMapping Obj where
+  type MappingFrom Obj = ObjectType
+  type MappingTo Obj = ObjectType
+  toMapping v = Mapping $ \curdb vars -> defaultValue {
+    QLMapping.body = toTerm (toExpr v) curdb vars }
+
 instance ToMapping Value where
   type MappingFrom Value = ObjectType
   type MappingTo Value = ObjectType
   toMapping v = Mapping $ \_ _ -> defaultValue { QLMapping.body = toJsonTerm v }
+
 
 toQLMapping :: ToMapping m => m -> Database -> [String] -> QL.Mapping
 toQLMapping m = case toMapping m of Mapping f -> f
@@ -474,19 +509,19 @@ js s = Expr $ \_ _ -> defaultValue {
   QL.javascript = Just $ uFromString ("return (" ++ s ++ ")")
   }
 
-bind :: ToExpr e => e -> (Expr (ExprType e) -> Expr tt) -> Expr tt
+bind :: (ToValue e) => e -> (Expr (ExprType e) -> Expr t) -> Expr t
 bind val f = Expr $ \curdb (v:vs) -> let (v1, v2) = splitVars vs in defaultValue {
   QL.type' = QL.LET,
   QL.let' = Just $ QL.Let (Seq.singleton $
-                           QL.VarTermTuple (uFromString v) (toTerm (toExpr val) curdb v1))
+                           QL.VarTermTuple (uFromString v) (toTerm (toValue val) curdb v1))
            (toTerm (toExpr (f $ var v)) curdb v2)
   }
 
-let' :: ToExpr e => String -> e -> Expr t -> Expr t
+let' :: (ToValue e) => String -> e -> Expr t -> Expr t
 let' nam val e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
   QL.type' = QL.LET,
   QL.let' = Just $ QL.Let (Seq.singleton $
-                           QL.VarTermTuple (uFromString nam) (toTerm (toExpr val) curdb v1))
+                           QL.VarTermTuple (uFromString nam) (toTerm (toValue val) curdb v1))
            (toTerm (toExpr e) curdb v2)
   }
 
@@ -595,6 +630,7 @@ type NumberExpr = Expr (ValueType NumberType)
 type BoolExpr = Expr (ValueType BoolType)
 type ObjectExpr = Expr (ValueType ObjectType)
 type ArrayExpr = Expr (ValueType ArrayType)
+type StringExpr = Expr (ValueType StringType)
 type ValueExpr t = Expr (ValueType t)
 
 slice :: (HasValueType a x, HaveValueType b c y) => a -> b -> c -> ValueExpr x
@@ -614,10 +650,10 @@ pick = opMany $ defaultValue { QLBuiltin.type' = QL.IMPLICIT_PICKATTRS }
 pickFrom :: (HasValueType a ObjectType, HasValueType b StringType) => a -> [b] -> ObjectExpr
 pickFrom = opOneMany $ defaultValue { QLBuiltin.type' = QL.PICKATTRS }
 
-concatMap :: (ToExpr e, ExprType e ~ StreamType x from) =>
+concatMap' :: (ToExpr e, ExprType e ~ StreamType x from) =>
              (Expr (ValueType from) -> Expr (ValueType ArrayType)) ->
              e -> Expr (StreamType False to)
-concatMap fun = unaryOp' $ \curdb vars -> defaultValue {
+concatMap' fun = unaryOp' $ \curdb vars -> defaultValue {
   QLBuiltin.type' = QL.CONCATMAP,
   QL.concat_map = Just $ QL.ConcatMap $ toQLMapping fun curdb vars
   }
@@ -631,10 +667,120 @@ branch t a b = Expr $ \curdb vars -> let (v1:v2:v3:_) = splitsVars vars in defau
                                           (toTerm (toExpr a) curdb v2)
                                           (toTerm (toExpr b) curdb v3) }
 
-jsfun :: (ToExpr e, ExprType e ~ ValueType x) => String -> e -> Expr (ValueType y)
+jsfun :: ToValue e => String -> e -> Expr (ValueType y)
 jsfun f e = Expr $ \curdb (v:vars) -> toTerm (let' v e $ js $ f ++ "(" ++ v ++ ")") curdb vars 
 
--- outerJoin :: needs map, concatMap, let, letvar, branch and length
+class CanCompare (a :: ValueTypeKind)
+instance CanCompare NumberType
+instance CanCompare StringType
+
+gt, lt, ge, le :: (HaveValueType a b v, CanCompare v) => a -> b -> BoolExpr
+gt = comparison QL.GT
+lt = comparison QL.LT
+ge = comparison QL.GE
+le = comparison QL.LE
+
+instance Num (Expr (ValueType NumberType)) where
+  (+) = plus
+  (-) = minus
+  (*) = times
+  abs = jsfun "abs"
+  signum x = bind x (\n -> branch (n `lt` (0 :: NumberExpr)) (-1 :: Int) (branch (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
+  fromInteger = toExpr
+
+plus :: (HaveValueType a b NumberType) => a -> b -> Expr (ValueType v)
+plus = binOp $ defaultValue { QLBuiltin.type' = QL.ADD}
+
+minus :: HaveValueType a b NumberType => a -> b -> NumberExpr
+minus = binOp $ defaultValue { QLBuiltin.type' = QL.SUBTRACT }
+
+times :: HaveValueType a b NumberType => a -> b -> NumberExpr
+times = binOp $ defaultValue { QLBuiltin.type' = QL.MULTIPLY }
+
+divide :: HaveValueType a b NumberType => a -> b -> NumberExpr
+divide = binOp $ defaultValue { QLBuiltin.type' = QL.DIVIDE }
+
+instance Fractional (Expr (ValueType NumberType)) where
+  fromRational n = toExpr (fromRational n :: Double)
+  (/) = divide
+
+class Sequence (e :: ExprTypeKind) where
+  type SequenceType e :: ValueTypeKind
+
+instance Sequence (StreamType w t) where
+  type SequenceType (StreamType w t) = t
+instance a ~ ArrayType => Sequence (ValueType a) where
+  type SequenceType (ValueType a) = GHC.Any
+
+count :: (ToExpr e, Sequence (ExprType e)) => e -> NumberExpr
+count = unaryOp $ defaultValue { QLBuiltin.type' = QL.LENGTH }
+
+map' :: (ToExpr e, ExprType e ~ StreamType x from) =>
+       (Expr (ValueType from) -> Expr (ValueType to)) -> e -> Expr (StreamType False to)
+map' fun = unaryOp' $ \curdb vars -> defaultValue {
+  QLBuiltin.type' = QL.MAP,
+  QL.map = Just $ QL.Map $ toQLMapping fun curdb vars
+  }
+
+(!) :: (HasValueType a ObjectType) => a -> String -> ValueExpr t
+(!) a b = unaryOp (defaultValue {
+                      QLBuiltin.type' = QL.GETATTR, QLBuiltin.attr = Just (uFromString b) }) a
+
+
+filter' :: (ToExpr e, Sequence (ExprType e), SequenceType (ExprType e) ~ t) =>
+           (Expr (ValueType t) -> Expr (ValueType BoolType)) -> e -> Expr (StreamType w t)
+filter' fil e = Expr $ \curdb vars -> let (v1, v2) = splitVars vars in defaultValue {
+     QLTerm.type' = QL.CALL,
+     QL.call = Just $ QL.Call {
+       QL.builtin = defaultValue {
+          QLBuiltin.type' = QL.FILTER,
+          QL.filter = Just $ QL.Filter $ mappingToPredicate $ toQLMapping fil curdb v1
+          },
+       QL.args = Seq.singleton $ toTerm (toExpr e) curdb v2
+       }
+     }
+
+outerJoin :: (ToExpr a, ExprType a ~ StreamType x l,
+              ToExpr b, ExprType b ~ StreamType y r) =>
+             a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
+             Expr (StreamType False ObjectType)
+outerJoin self other p =
+  flip concatMap' self
+  (\row -> bind (flip concatMap' other
+                 (\row2 -> branch (p row row2)
+                           [obj ["left" := row, "right" := row2]]
+                           nil))
+           (\matches ->
+             branch (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
+
+asArray :: (ToExpr e, ExprType e ~ StreamType w x) => e -> ArrayExpr
+asArray e = Expr $ \curdb vars -> toTerm (toExpr e) curdb vars
+
+nil :: ValueExpr ArrayType
+nil = toExpr ([] :: [()])
+
+instance ToExpr () where
+  type ExprType () = ValueType NoneType
+  toExpr () = Expr $ \_ _ -> defaultValue { QL.type' = QL.JSON_NULL }
+
+data Attribute = forall e . (ToExpr e) => String := e
+
+obj :: [Attribute] -> Obj
+obj = Obj
+
+data Obj = Obj [Attribute]
+
+instance ToExpr Obj where
+  type ExprType Obj = ValueType ObjectType
+  toExpr (Obj o) = Expr $ \curdb vars -> let vs = splitsVars vars in defaultValue {
+    QL.type' = QL.OBJECT, QL.object = Seq.fromList $ zipWith (go curdb) o vs }
+    where go curdb (k := a) v = QL.VarTermTuple {
+            QLVarTermTuple.var = uFromString k, QLVarTermTuple.term = toTerm (toExpr a) curdb v}
+
+eq, neq :: (HasValueType a x, HasValueType b y) => a -> b -> BoolExpr
+eq = comparison QL.EQ
+neq = comparison QL.NE
+
 -- innerJoin
 -- eqJoin
 -- skip
@@ -644,7 +790,6 @@ jsfun f e = Expr $ \curdb (v:vars) -> toTerm (let' v e $ js $ f ++ "(" ++ v ++ "
 -- pluck
 -- without
 -- reduce
--- count
 -- distinct
 -- groupedMapReduce
 -- pick
@@ -655,3 +800,5 @@ jsfun f e = Expr $ \curdb (v:vars) -> toTerm (let' v e $ js $ f ++ "(" ++ v ++ "
 -- stream_to_array
 -- array_to_stream
 -- TODO: mapmerge ?
+
+-- TODO: typed objects and arrays
