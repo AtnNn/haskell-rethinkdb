@@ -1,9 +1,15 @@
 {-# LANGUAGE OverloadedStrings, KindSignatures, DataKinds, MultiParamTypeClasses, 
              TypeFamilies, ExistentialQuantification, FlexibleInstances, 
              ConstraintKinds, FlexibleContexts, UndecidableInstances, 
-             PolyKinds, FunctionalDependencies #-}
+             PolyKinds, FunctionalDependencies, GADTs #-}
 
--- TODO: missing functions. BatchQuery. insert and co should take arbitrary terms
+-- TODO: missing functions. BatchQuery. insert and co should take arbitrary terms. ToExpr String
+
+-- TODO: successful yet:
+-- run h $ insert jslib (object [Data.Text.pack "name" .= "underscore", Data.Text.pack "source" .= underscore_js])
+-- *** Exception: key missing in response
+
+-- TODO: the result of a get, is it both a value and a view?
 
 -- | The core of the haskell client library for RethinkDB
 
@@ -200,7 +206,6 @@ tableCreate (Table mdb table_name primary_key)
 tableDrop :: Table -> Query ()
 tableDrop tbl = Query
   (metaQuery $ do
-      curdb <- activeDB
       ref <- tableRef tbl
       return $ QL.MetaQuery QL.DROP_TABLE Nothing Nothing $ Just $ ref)
   (const $ Right ())
@@ -223,14 +228,23 @@ data Document = Document {
   documentKey :: Value
   } deriving Show
 
--- | Create a reference to a document, given its table and id
-get :: ToJSON a => Table -> a -> Document
-get t = Document t . toJSON
+-- | Get a document by its primary key
+get :: (ToExpr e, ExprType e ~ StreamType True ObjectType, ToValue k) =>
+       e -> k -> Expr (StreamType True ObjectType)
+get e k = Expr $ do
+  (vw, _) <- exprV e
+  let tbl@(Table _ _ mattr) = viewTable vw
+  ref <- tableRef tbl
+  key <- value k
+  withView (ViewOf tbl) $ return defaultValue {
+    QL.type' = QL.GETBYKEY,
+    QL.get_by_key = Just $ QL.GetByKey ref (fromMaybe defaultPrimaryAttr $
+                                            fmap uFromString mattr) key
+    }
 
 insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query [Document]
 insert_or_upsert tbl as overwrite = Query
   (do token <- getToken
-      curdb <- activeDB
       ref <- tableRef tbl
       let write = defaultValue {
           QLWriteQuery.type' = QL.INSERT,
@@ -273,14 +287,12 @@ update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
           sel -> map -> Query ()
 update view m = Query
   (do token <- getToken 
-      curdb <- activeDB
       mT <- mapping m
       write <- case toExpr view of
-        Expr f -> do viewT <- expr view
+        Expr _ -> do viewT <- expr view
                      return defaultValue {
                        QLWriteQuery.type' = QL.UPDATE,
-                       QL.update = Just $ QL.Update viewT mT
-                       }
+                       QL.update = Just $ QL.Update viewT mT }
         SpotExpr (Document tbl@(Table _ _ k) d) -> do
           ref <- tableRef tbl
           return $ defaultValue {
@@ -292,14 +304,13 @@ update view m = Query
   (whenSuccess_ ())
 
 -- | Replace the objects return by a query by another object
-replace :: (ToExpr sel, ExprWritable sel ~ True, ToJSON a) => sel -> a -> Query ()
+replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> Query ()
 replace view a = Query
   (do token <- getToken 
-      curdb <- activeDB 
       fun <- mapping (toJSON a)
       write <- case toExpr view of
         Expr f -> do
-          e <- f
+          (_, e) <- f
           return defaultValue {
             QLWriteQuery.type' = QL.MUTATE,
             QL.mutate = Just $ QL.Mutate e fun }
@@ -314,13 +325,12 @@ replace view a = Query
   (whenSuccess_ ())
 
 -- | Delete the result of a query from the database
-delete :: (ToExpr sel, ExprWritable sel ~ True) => sel -> Query ()
+delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> Query ()
 delete view = Query
   (do token <- getToken 
-      curdb <- activeDB
       write <- case toExpr view of
           Expr f -> do
-            ex <- f
+            (_, ex) <- f
             return defaultValue {
               QLWriteQuery.type' = QL.DELETE,
               QL.delete = Just $ QL.Delete ex }
@@ -358,7 +368,6 @@ instance ToQuery Table where
   type QueryType Table = [Value]
   toQuery tbl = Query
     (do token <- getToken 
-        curdb <- activeDB
         ref <- tableRef tbl
         return $ QL.Query QL.READ token
                      (Just $ defaultValue {
@@ -374,7 +383,6 @@ instance ToQuery Document where
   type QueryType Document = Value
   toQuery (Document tbl d) = Query
     (do token <- getToken 
-        curdb <- activeDB
         ref <- tableRef tbl
         return $ QL.Query QL.READ token
                      (Just $ defaultValue {
@@ -390,7 +398,7 @@ instance ToQuery (Expr t) where
   toQuery (SpotExpr doc) = fmap return $ toQuery doc
   toQuery (Expr f) =
     Query (do token <- getToken
-              ex <- f
+              (_, ex) <- f
               return $ QL.Query QL.READ token
                 (Just $ defaultValue {
                     QLReadQuery.term = ex
@@ -409,7 +417,7 @@ run h q = do
 runEither :: ToQuery a => RethinkDBHandle -> a -> IO (Either String (QueryType a))
 runEither h q = do
   let Query f g = toQuery q
-  er <- runQLQuery h (\x -> fst $ runQueryM f $ QuerySettings x (rdbDatabase h) newVars False)
+  er <- runQLQuery h (\x -> fst $ runQueryM f $ QuerySettings x (rdbDatabase h) initialVars False)
   return $ er >>= \r -> (responseErrorMessage r >>
     (maybe (Left "decode error") Right . sequence . map (decodeAny . utf8) $
      toList $ QL.response r) >>= g)
@@ -422,11 +430,15 @@ runMaybe h = fmap (either (const Nothing) Just) . runEither h
 -- * Expressions
 
 -- | Can the Expr be written to? (updated or deleted)
-type family ExprTypeWritable (expr :: ExprTypeKind) :: Bool
-type instance ExprTypeWritable (StreamType w o) = w
-type instance ExprTypeWritable (ValueType v) = False
+type family ExprTypeIsView (expr :: ExprTypeKind) :: Bool
+type instance ExprTypeIsView (StreamType w o) = w
+type instance ExprTypeIsView (ValueType v) = False
 
-type ExprWritable e = ExprTypeWritable (ExprType e)
+type ExprIsView e = ExprTypeIsView (ExprType e)
+
+type family ExprTypeNoView (t :: ExprTypeKind) :: ExprTypeKind
+type instance ExprTypeNoView (StreamType b t) = StreamType False t
+type instance ExprTypeNoView (ValueType t) = ValueType t
 
 -- | The type of the value of an Expr
 type family ExprValueType expr :: ValueTypeKind
@@ -437,9 +449,28 @@ type family ExprTypeStreamType (t :: ExprTypeKind) :: ValueTypeKind
 type instance ExprTypeStreamType (StreamType w t) = t
 
 -- | An RQL expression
-data Expr (t :: ExprTypeKind) =
-    Expr (QueryM QL.Term) -- ^ A protobuf term
-  | SpotExpr Document     -- ^ A single document
+data Expr (t :: ExprTypeKind) where
+  Expr :: QueryM (MaybeView (ExprIsView (Expr t)), QL.Term) -> Expr t -- ^ A protobuf term
+  SpotExpr :: Document -> Expr (StreamType True ObjectType)           -- ^ A single document
+
+mkExpr :: ExprIsView (Expr t) ~ False => QueryM QL.Term -> Expr t
+mkExpr q = Expr $ fmap ((,) NoView) q
+
+mkView :: ExprIsView (Expr t) ~ True => Table -> QueryM QL.Term -> Expr t
+mkView t q = Expr $ fmap ((,) (ViewOf t)) q
+
+viewKeyAttr :: MaybeView b -> Utf8
+viewKeyAttr v = fromMaybe defaultPrimaryAttr $ fmap uFromString $
+    case v of 
+      ViewOf (Table _ _ k) -> k
+      NoView -> Nothing
+
+viewTable :: MaybeView True -> Table
+viewTable v = case v of ViewOf t -> t
+
+data MaybeView (w :: Bool) where
+ NoView :: MaybeView False
+ ViewOf :: Table -> MaybeView True
 
 -- | Convert something into an Expr
 class ToExpr (o :: *) where
@@ -468,7 +499,7 @@ type instance ToStreamTypeValue (StreamType w t) = Just t
 type instance ToStreamTypeValue (ValueType t) = Nothing
 
 class ToExpr e => ToStream e where
-  toStream :: e -> Expr (StreamType (ExprWritable e) (FromMaybe a (ToStreamValue e)))
+  toStream :: e -> Expr (StreamType (ExprIsView e) (FromMaybe a (ToStreamValue e)))
 
 instance ToExpr Document where
   type ExprType Document = StreamType True 'ObjectType
@@ -482,8 +513,7 @@ instance ToStream Document where
 
 instance ToExpr Table where
   type ExprType Table = StreamType True ObjectType
-  toExpr tbl = Expr $ do
-    curdb <- activeDB 
+  toExpr tbl = mkView tbl $ do
     ref <- tableRef tbl
     return defaultValue { 
       QL.type' = QL.TABLE,
@@ -513,7 +543,7 @@ instance ToStream (Expr (StreamType w t)) where
 
 instance ToExpr Int where
   type ExprType Int = ValueType NumberType
-  toExpr n = Expr $ return $ defaultValue {
+  toExpr n = mkExpr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just $ fromIntegral n }
 
 instance ToValue Int where
@@ -521,7 +551,7 @@ instance ToValue Int where
   
 instance ToExpr Integer where
   type ExprType Integer = ValueType NumberType
-  toExpr n = Expr $ return $ defaultValue {
+  toExpr n = mkExpr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just $ fromInteger n }
 
 instance ToValue Integer where
@@ -529,7 +559,7 @@ instance ToValue Integer where
 
 instance ToExpr Double where
   type ExprType Double = ValueType NumberType
-  toExpr n = Expr $ return $ defaultValue {
+  toExpr n = mkExpr $ return $ defaultValue {
     QL.type' = QL.NUMBER, QL.number = Just n }
 
 instance ToValue Double where
@@ -537,8 +567,7 @@ instance ToValue Double where
 
 instance ToExpr a => ToExpr [a] where
   type ExprType [a] = ValueType ArrayType
-  toExpr l = Expr $ do
-    curdb <- activeDB 
+  toExpr l = mkExpr $ do
     exs <- sequence $ map (expr . toExpr) l
     return defaultValue {
       QL.type' = QL.ARRAY, QL.array = Seq.fromList exs }
@@ -551,15 +580,14 @@ instance ToExpr a => ToStream [a] where
 
 instance ToExpr () where
   type ExprType () = ValueType NoneType
-  toExpr () = Expr $ return $  defaultValue { QL.type' = QL.JSON_NULL }
+  toExpr () = mkExpr $ return $  defaultValue { QL.type' = QL.JSON_NULL }
 
 instance ToValue () where
   toValue = toExpr
 
 instance ToExpr Obj where
   type ExprType Obj = ValueType ObjectType
-  toExpr (Obj o) = Expr $ do
-    curdb <- activeDB 
+  toExpr (Obj o) = mkExpr $ do
     exs <- sequence $ map go o
     return defaultValue {
       QL.type' = QL.OBJECT, QL.object = Seq.fromList exs }
@@ -645,7 +673,6 @@ instance ToMapping Obj where
   type MappingFrom Obj = ObjectType
   type MappingTo Obj = ObjectType
   toMapping v = Mapping $ do 
-    curdb <- activeDB
     ex <- expr v
     return $ defaultValue { QLMapping.body = ex }
 
@@ -658,7 +685,6 @@ instance (ToValue b, a ~ Expr (ValueType t)) => ToMapping (a -> b) where
   type MappingFrom (a -> b) = ExprValueType a
   type MappingTo (a -> b) = ToValueType (ExprType b)
   toMapping f = Mapping $ do
-    curdb <- activeDB 
     v <- newVar
     ex <- value (f (var v))
     return $ defaultValue {
@@ -683,14 +709,11 @@ data QuerySettings = QuerySettings {
 
 type QueryM = State QuerySettings
 
+runQueryM :: QueryM a -> QuerySettings -> (a, QuerySettings)
 runQueryM = runState
 
 initialVars :: [String]
 initialVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
-
-splitVars = undefined
-splitsVars = undefined
-newVars = undefined
 
 getToken :: QueryM Int64
 getToken = fmap _queryToken S.get
@@ -701,9 +724,9 @@ activeDB = fmap _queryDB S.get
 newVar :: QueryM String
 newVar  = state $ \s -> let (x:xs) = _queryVars s in (x, s { _queryVars = xs} )
 
-setUseOutdated :: ToExpr e => Bool -> e -> Expr t
+setUseOutdated :: ToExpr e => Bool -> e -> Expr (ExprType e)
 setUseOutdated b e = Expr $ do
-  state $ \s -> runQueryM (expr $ toExpr e) s { _queryUseOutdated = b }
+  state $ \s -> runQueryM (exprV e) s { _queryUseOutdated = b }
 
 -- * Utilities
 
@@ -727,12 +750,15 @@ mapping :: ToMapping m => m -> QueryM QL.Mapping
 mapping m = case toMapping m of Mapping f -> f
 
 -- | Convert an Expr to a term
-expr :: ToExpr e => e -> QueryM QL.Term
-expr e = case toExpr e of
+expr ::  ToExpr e => e -> QueryM QL.Term
+expr = fmap snd . exprV
+
+exprV :: ToExpr e => e -> QueryM (MaybeView (ExprIsView e), QL.Term)
+exprV e = case toExpr e of
   Expr f -> f
   SpotExpr (Document tbl@(Table _ _ mkey) d) -> do
     ref <- tableRef tbl
-    return defaultValue { 
+    return $ ((,) (ViewOf tbl)) defaultValue { 
       QL.type' = QL.GETBYKEY,
       QL.get_by_key = Just $ QL.GetByKey ref
              (fromMaybe defaultPrimaryAttr $ fmap uFromString mkey)
@@ -819,20 +845,25 @@ unpackUInt s = case unpack s of
                fromIntegral d `shiftL` 24
   _ -> error "unpackUInt: lengh is not 4"
 
+op :: QL.BuiltinType -> QLBuiltin.Builtin
 op o = defaultValue { QLBuiltin.type' = o }
 
 apply :: QL.Builtin -> [QueryM QL.Term] -> QueryM QL.Term
-apply op args = do
+apply o args = do
   a <- sequence args
-  return $ defaultValue { QL.type' = QL.CALL, QL.call = Just $ QL.Call op (Seq.fromList a) }
+  return $ defaultValue { QL.type' = QL.CALL, QL.call = Just $ QL.Call o (Seq.fromList a) }
 
+rapply :: [QueryM QL.Term] -> QL.Builtin -> QueryM QL.Term
 rapply = flip apply
 
-simpleOp :: QL.BuiltinType -> [QueryM QL.Term] -> Expr t
-simpleOp o a = Expr $ apply (op o) a
+simpleOp :: ExprIsView (Expr t) ~ False => QL.BuiltinType -> [QueryM QL.Term] -> Expr t
+simpleOp o a = mkExpr $ apply (op o) a
 
-comparison :: QL.Comparison -> [QueryM QL.Term] -> Expr t
-comparison o a = Expr $ rapply a (op QL.COMPARE) { QL.comparison = Just o }
+withView :: MaybeView b -> QueryM QL.Term -> QueryM (MaybeView b, QL.Term)
+withView v = fmap ((,) v)
+
+comparison :: ExprTypeIsView t ~ False => QL.Comparison -> [QueryM QL.Term] -> Expr t
+comparison o a = mkExpr $ rapply a (op QL.COMPARE) { QL.comparison = Just o }
 
 -- | Build a protobuf TableRef object
 tableRef :: Table -> QueryM QL.TableRef

@@ -9,3 +9,5 @@ type HasValueType a v = (ToValue a, ToValueType (ExprType a) ~ v)
 type HaveValueType a b v = (HasValueType a v, HasValueType b v)
 data Expr (a :: ExprTypeKind)
 type NumberExpr = Expr (ValueType NumberType)
+type family ExprTypeIsView (expr :: ExprTypeKind) :: Bool
+type ExprIsView e = ExprTypeIsView (ExprType e)

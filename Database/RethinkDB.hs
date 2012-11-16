@@ -21,7 +21,7 @@ import Database.RethinkDB.Driver (
   update, replace, delete,
   Query, ToQuery(..),
   run, runMaybe, runEither,
-  ExprWritable, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
+  ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
   HasValueType, HaveValueType,
   NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
   CanCompare,
@@ -44,5 +44,5 @@ import Database.RethinkDB.Functions (
   
   (!), pick, (!?), pluck, without, unpick, merge,
   
-  js, bind, let', var, branch, jsfun, error'
+  js, bind, let', var, if', jsfun, error'
   )

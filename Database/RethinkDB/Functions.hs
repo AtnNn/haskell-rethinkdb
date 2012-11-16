@@ -23,9 +23,9 @@ import qualified Data.Sequence as Seq
 
 -- * Numbers, Booleans and Comparisons
 
-signum, signum' :: (ToValue e, ExprType e ~ ValueType NumberType) => e -> NumberExpr
-signum x = bind x (\n -> branch (n `lt` (0 :: NumberExpr)) (-1 :: Int)
-                         (branch (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
+signum, signum' :: (ToValue e, ToValueType (ExprType e) ~ NumberType) => e -> NumberExpr
+signum x = bind x (\n -> if' (n `lt` (0 :: NumberExpr)) (-1 :: Int)
+                         (if' (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
 signum' = signum
 
 (+), plus, (-), minus, (*), times, (/), divide, mod, mod'
@@ -82,7 +82,7 @@ concat = (++)
 
 map, map' :: (ToMapping m, ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
        m -> e -> Expr (StreamType False (MappingTo m))
-map fun a = Expr $ do
+map fun a = mkExpr $ do
   mapp <- mapping fun
   rapply [expr a] $ (op QL.MAP) {
     QL.map = Just $ QL.Map mapp }
@@ -94,16 +94,18 @@ filter', filter :: (ToMapping m, ToStream e,
                    m -> e -> Expr (ExprType e)
 filter' fil e = Expr $ do
   mapp <- mapping fil
-  rapply [stream e] $ (op QL.FILTER) {
+  (vw, term) <- exprV e
+  withView vw $ rapply [return term] $ (op QL.FILTER) {
     QL.filter = Just $ QL.Filter $ mappingToPredicate mapp }
 
 filter = filter'
 
 between :: (ToJSON a, ToStream e, ObjectType `HasToStreamValueOf` e) =>
-           (Maybe String) -> (Maybe a) -> (Maybe a) -> e -> Expr (ExprType e)
-between k a b e = Expr $ do
-  rapply [stream e] (op QL.RANGE) {
-          QL.range = Just $ QL.Range (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
+           (Maybe a) -> (Maybe a) -> e -> Expr (ExprType e)
+between a b e = Expr $ do
+  (vw, term) <- exprV e
+  withView vw $ rapply [return term] (op QL.RANGE) {
+          QL.range = Just $ QL.Range (viewKeyAttr vw)
                      (fmap toJsonTerm a) (fmap toJsonTerm b) }
 
 slice :: (ToExpr c, ExprType c ~ StreamType w t, HaveValueType a b NumberType)
@@ -117,7 +119,7 @@ concatMap, concatMap' ::
   (ToMapping m, (MappingTo m) ~ ArrayType,
    ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
    m -> e -> Expr (StreamType False t)
-concatMap fun e = Expr $ do
+concatMap fun e = mkExpr $ do
   mapp <- mapping fun
   rapply [stream e] (op QL.CONCATMAP) {
     QL.concat_map = Just $ QL.ConcatMap mapp }
@@ -131,7 +133,7 @@ innerJoin :: (ToStream a, l `HasToStreamValueOf` a,
 innerJoin self other p =
   flip concatMap self
   (\row -> flip concatMap other
-           (\row2 -> branch (p row row2)
+           (\row2 -> if' (p row row2)
                      [obj ["left" := row, "right" := row2]]
                      nil))
 
@@ -142,17 +144,24 @@ outerJoin :: (ToStream a, l `HasToStreamValueOf` a,
 outerJoin self other p =
   flip concatMap' self
   (\row -> bind (flip concatMap' other
-                 (\row2 -> branch (p row row2)
+                 (\row2 -> if' (p row row2)
                            [obj ["left" := row, "right" := row2]]
                            nil))
            (\matches ->
-             branch (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
+             if' (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
 
-asArray :: Expr t -> ArrayExpr
-asArray (Expr e) = Expr e
+asArray :: ToExpr e => e -> ArrayExpr
+asArray e = mkExpr $ expr e
 
 eqJoin = undefined
-
+{-
+eqJoin :: (ToStream a, ObjectType `HasToStreamValueOf` a,
+           ToStream b, ObjectType `HasToStreamValueOf` b) =>
+           a -> String -> b -> String -> Expr (StreamType False ObjectType)
+eqJoin this k1 other k2 = flip concatMap k1 $ \row ->
+  bind (get (row ! k1)) $ \right ->
+    if' (right != ()) [obj ["left" := row, "right" := right]] []  
+-}
 drop = undefined
 drop' = drop
 skip = drop
@@ -191,19 +200,19 @@ groupBy' = groupBy
 -- * Accessors
 
 (!) :: (HasValueType a ObjectType) => a -> String -> ValueExpr t
-(!) a b = Expr $ rapply [value a] (op QL.GETATTR) {
+(!) a b = mkExpr $ rapply [value a] (op QL.GETATTR) {
   QLBuiltin.attr = Just (uFromString b) }
 
 pick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
-pick ks e = Expr $ rapply [value e] (op QL.PICKATTRS) {
+pick ks e = mkExpr $ rapply [value e] (op QL.PICKATTRS) {
   QL.attrs = Seq.fromList $ P.map uFromString ks }
 
 unpick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
-unpick ks e = Expr $ rapply [value e] (op QL.WITHOUT) {
+unpick ks e = mkExpr $ rapply [value e] (op QL.WITHOUT) {
   QL.attrs = Seq.fromList $ P.map uFromString ks }
 
 (!?) :: (HasValueType a ObjectType) => a -> String -> BoolExpr 
-(!?) a b = Expr $ rapply [value a] (op QL.HASATTR) {
+(!?) a b = mkExpr $ rapply [value a] (op QL.HASATTR) {
   QLBuiltin.attr = Just $ uFromString b }
 
 pluck ks = map (pick ks)
@@ -215,16 +224,16 @@ merge = undefined
 -- * Controld Structures, Functions and Javascript
 
 js :: String -> Expr (ValueType any)
-js s = Expr $ return defaultValue {
+js s = mkExpr $ return defaultValue {
   QLTerm.type' = QL.JAVASCRIPT,
   QLTerm.javascript = Just $ uFromString ("return (" P.++ s P.++ ")") }
 
-bind :: (ToValue e) => e -> (Expr (ExprType e) -> Expr t) -> Expr t
+bind :: (ToValue e) => e -> (ValueExpr (ToValueType (ExprType e)) -> Expr t) -> Expr t
 bind val f = Expr $ do
   arg <- value val
   v <- newVar
-  body <- expr (f (var v))
-  return defaultValue {
+  (vw, body) <- exprV (f (var v))
+  withView vw $ return defaultValue {
     QLTerm.type' = QL.LET,
     QLTerm.let' = Just $ QL.Let (Seq.singleton $ QL.VarTermTuple (uFromString v) arg)
                   body }
@@ -232,24 +241,25 @@ bind val f = Expr $ do
 let' :: (ToValue e) => String -> e -> Expr t -> Expr t
 let' nam val e = Expr $ do
   arg <- value val
-  body <- expr e
-  return defaultValue {
+  (vw, body) <- exprV e
+  withView vw $ return defaultValue {
     QLTerm.type' = QL.LET,
     QLTerm.let' = Just $ QL.Let (Seq.singleton $
                                  QL.VarTermTuple (uFromString nam) arg)
                   body }
 
-var :: String -> Expr t
-var v = Expr $ return defaultValue { 
+var :: ExprIsView (Expr t) ~ False => String -> Expr t
+var v = mkExpr $ return defaultValue { 
   QLTerm.type' = QL.VAR,
   QLTerm.var = Just $ uFromString v
   }
 
-branch :: (ToValue e, ToValueType (ExprType e) ~ BoolType,
-           ToExpr a, ExprType a ~ x,
-           ToExpr b, ExprType b ~ x) =>
+if' :: (ToValue e, ToValueType (ExprType e) ~ BoolType,
+        ToExpr a, ExprTypeNoView (ExprType a) ~ x,
+        ToExpr b, ExprTypeNoView (ExprType b) ~ x,
+        ExprTypeIsView x ~ False) =>
           e -> a -> b -> Expr x
-branch t a b = Expr $ do
+if' t a b = mkExpr $ do
   tq <- value t
   aq <- expr a
   bq <- expr b
@@ -257,7 +267,7 @@ branch t a b = Expr $ do
     QLTerm.type' = QL.IF, QL.if_ = Just $ QL.If tq aq bq }
 
 jsfun :: ToValue e => String -> e -> Expr (ValueType y)
-jsfun f e = Expr $ do 
+jsfun f e = mkExpr $ do 
   v <- newVar
   expr (let' v e $ js $ f P.++ "(" P.++ v P.++ ")")
 
