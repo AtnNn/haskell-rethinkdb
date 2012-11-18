@@ -3,14 +3,6 @@
              ConstraintKinds, FlexibleContexts, UndecidableInstances, 
              PolyKinds, FunctionalDependencies, GADTs #-}
 
--- TODO: missing functions. BatchQuery. insert and co should take arbitrary terms. ToExpr String
-
--- TODO: successful yet:
--- run h $ insert jslib (object [Data.Text.pack "name" .= "underscore", Data.Text.pack "source" .= underscore_js])
--- *** Exception: key missing in response
-
--- TODO: the result of a get, is it both a value and a view?
-
 -- | The core of the haskell client library for RethinkDB
 
 module Database.RethinkDB.Driver where
@@ -18,6 +10,8 @@ module Database.RethinkDB.Driver where
 import {-# SOURCE #-} Database.RethinkDB.Functions
 import Database.RethinkDB.Types
 
+import Data.Typeable
+import Data.Data
 import GHC.Prim
 
 import qualified Database.RethinkDB.Internal.Types as QL
@@ -38,6 +32,7 @@ import Text.ProtocolBuffers.WireMessage
 import System.IO (Handle, hClose)
 import Network
 
+import Data.List
 import Control.Monad.State as S
 import qualified Data.HashMap.Strict as HM
 import Data.Default
@@ -230,13 +225,13 @@ data Document = Document {
 
 -- | Get a document by its primary key
 get :: (ToExpr e, ExprType e ~ StreamType True ObjectType, ToValue k) =>
-       e -> k -> Expr (StreamType True ObjectType)
+       e -> k -> ObjectExpr
 get e k = Expr $ do
   (vw, _) <- exprV e
   let tbl@(Table _ _ mattr) = viewTable vw
   ref <- tableRef tbl
   key <- value k
-  withView (ViewOf tbl) $ return defaultValue {
+  withView NoView $ return defaultValue {
     QL.type' = QL.GETBYKEY,
     QL.get_by_key = Just $ QL.GetByKey ref (fromMaybe defaultPrimaryAttr $
                                             fmap uFromString mattr) key
@@ -426,6 +421,10 @@ runEither h q = do
 runMaybe :: ToQuery a => RethinkDBHandle -> a -> IO (Maybe (QueryType a))
 runMaybe h = fmap (either (const Nothing) Just) . runEither h
 
+-- | Get the raw response from a query
+runRaw :: ToQuery q => RethinkDBHandle -> q -> IO (Either String QL.Response)
+runRaw h q =
+  runQLQuery h (\tok -> fst $ runQueryM (_queryBuild (toQuery q)) $ QuerySettings tok (rdbDatabase h) initialVars False)
 
 -- * Expressions
 
@@ -443,6 +442,7 @@ type instance ExprTypeNoView (ValueType t) = ValueType t
 -- | The type of the value of an Expr
 type family ExprValueType expr :: ValueTypeKind
 type instance ExprValueType (Expr (ValueType v)) = v
+type instance ExprValueType (Expr (StreamType w v)) = v
 
 -- | The type of the stream of an Expr
 type family ExprTypeStreamType (t :: ExprTypeKind) :: ValueTypeKind
@@ -603,13 +603,15 @@ instance ToValue Obj where
 type HasValueType a v = (ToValue a, ToValueType (ExprType a) ~ v)
 type HaveValueType a b v = (HasValueType a v, HasValueType b v)
 
--- | Simple aliases for a value Expr
+-- | Simple aliases for different Expr types
 type NumberExpr = Expr (ValueType NumberType)
 type BoolExpr = Expr (ValueType BoolType)
 type ObjectExpr = Expr (ValueType ObjectType)
 type ArrayExpr = Expr (ValueType ArrayType)
 type StringExpr = Expr (ValueType StringType)
 type ValueExpr t = Expr (ValueType t)
+type ObjectStream b = Expr (StreamType b ObjectType)
+type ViewExpr = ObjectStream True
 
 -- | What values can be compared with <, <=, > and >=
 class CanCompare (a :: ValueTypeKind)
@@ -707,13 +709,16 @@ data QuerySettings = QuerySettings {
   _queryUseOutdated :: Bool
   }
 
+instance Default QuerySettings where
+  def = QuerySettings 0 (db "") initialVars False
+
 type QueryM = State QuerySettings
 
 runQueryM :: QueryM a -> QuerySettings -> (a, QuerySettings)
 runQueryM = runState
 
 initialVars :: [String]
-initialVars = concat $ zipWith (\n as -> map (show n ++) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
+initialVars = concat $ zipWith (\n as -> map (++ show n) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
 
 getToken :: QueryM Int64
 getToken = fmap _queryToken S.get
@@ -862,6 +867,12 @@ simpleOp o a = mkExpr $ apply (op o) a
 withView :: MaybeView b -> QueryM QL.Term -> QueryM (MaybeView b, QL.Term)
 withView v = fmap ((,) v)
 
+primaryAttr :: (ToExpr e, ExprTypeIsView (ExprType e) ~ True) =>
+               e -> String -> Expr (ExprType e)
+primaryAttr e a = Expr $ do
+  (ViewOf (Table mdb name _), ex) <- exprV e
+  return (ViewOf (Table mdb name (Just a)), ex)
+
 comparison :: ExprTypeIsView t ~ False => QL.Comparison -> [QueryM QL.Term] -> Expr t
 comparison o a = mkExpr $ rapply a (op QL.COMPARE) { QL.comparison = Just o }
 
@@ -872,3 +883,37 @@ tableRef (Table mdb tb _) = do
   useOutdated <- fmap _queryUseOutdated S.get
   return $ QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
     (uFromString tb) (Just useOutdated)
+
+extractTerm :: ToExpr e => e -> QL.Term
+extractTerm e = fst $ runQueryM (expr e) def
+
+dumpExpr :: ToExpr e => e -> String
+dumpExpr = dumpTermPart "" . extractTerm
+
+dumpTermPart :: Data a => String -> a -> String
+dumpTermPart p a = case dataTypeName (dataTypeOf a) of
+  name | "Database.RethinkDB.Internal" `isPrefixOf` name ->
+    showConstr (toConstr a) ++ maybeFields a
+       | ".Utf8" `isSuffixOf` name ->
+         show (uToString (fromJust $ cast a))
+       | ".Double" `isSuffixOf` name ->
+           show (fromJust $ cast a :: Double)
+       | ".Seq" `isSuffixOf` name -> dumpSeq a 
+       | otherwise -> dataTypeName (dataTypeOf a) -- showConstr (toConstr a)
+  where fieldValues t = gmapQ maybeDump t
+        fields t = catMaybes $ zipWith (\x y -> fmap ((x ++ ": ") ++) y)
+                   (constrFields (toConstr t)) (fieldValues t)
+        maybeFields t = let f = fields t in if null f then ""
+                        else " {\n" ++ p ++ concat (intersperse (",\n"++p) f) ++ " }"
+        maybeDump :: Data a => a -> Maybe String
+        maybeDump t = case showConstr (toConstr t) of
+          "Nothing" -> Nothing
+          "Just" -> Just $ head (gmapQ (dumpTermPart (p ++ "  ")) t)
+          "empty" -> Nothing -- empty Seq
+          "ExtField" -> Nothing
+          _ -> Just $ dumpTermPart (p ++ "  ") t
+        dumpSeq t = let elems :: Data a => a -> [String]
+                        elems tt = case showConstr (toConstr tt) of 
+                          "empty" -> []
+                          _ -> gmapQi 0 (dumpTermPart (p ++ "  ")) tt : gmapQi 1 elems tt
+          in "[" ++ concat (intersperse ", " $ elems t) ++ "]"

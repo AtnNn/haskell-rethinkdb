@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds, TypeFamilies, ConstraintKinds, FlexibleInstances, 
-             FlexibleContexts, TypeOperators #-}
+             FlexibleContexts, TypeOperators, ViewPatterns #-}
 
--- | Functions from the RQL (RethinkDB Query Language)
+-- | Functions from the ReQL (RethinkDB Query Language)
+-- 
+-- documentation: http://www.rethinkdb.com/api/
 
 module Database.RethinkDB.Functions where
 
@@ -12,6 +14,8 @@ import Text.ProtocolBuffers.Basic hiding (Default)
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
+import qualified Database.RethinkDB.Internal.Query_Language.Builtin.OrderBy as QLOrderBy
+import qualified Database.RethinkDB.Internal.Query_Language.Reduction as QLReduction
 
 import qualified Prelude as P
 import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined, return, (.))
@@ -108,10 +112,6 @@ between a b e = Expr $ do
           QL.range = Just $ QL.Range (viewKeyAttr vw)
                      (fmap toJsonTerm a) (fmap toJsonTerm b) }
 
-slice :: (ToExpr c, ExprType c ~ StreamType w t, HaveValueType a b NumberType)
-         => a -> b -> c -> ValueExpr x
-slice a b c = simpleOp QL.SLICE [expr c, value a, value b]
-
 append :: (HasValueType a ArrayType, HasValueType b x) => a -> b -> ArrayExpr
 append a b = simpleOp QL.ARRAYAPPEND [value a, value b]
 
@@ -153,54 +153,176 @@ outerJoin self other p =
 asArray :: ToExpr e => e -> ArrayExpr
 asArray e = mkExpr $ expr e
 
-eqJoin = undefined
-{-
 eqJoin :: (ToStream a, ObjectType `HasToStreamValueOf` a,
-           ToStream b, ObjectType `HasToStreamValueOf` b) =>
-           a -> String -> b -> String -> Expr (StreamType False ObjectType)
-eqJoin this k1 other k2 = flip concatMap k1 $ \row ->
-  bind (get (row ! k1)) $ \right ->
-    if' (right != ()) [obj ["left" := row, "right" := right]] []  
--}
-drop = undefined
+           ToExpr b, ExprType b ~ ExprType ViewExpr) =>
+           a -> String -> b -> Expr (StreamType False ObjectType)
+eqJoin this k1 other =
+  flip concatMap this $ \row ->
+    bind (get other (row ! k1)) $ \right ->
+      if' (right != ()) [obj ["left" := row, "right" := right]] nil
+
+drop, drop', skip :: (ToStream e, t `HasToStreamValueOf` e,
+         ToExpr n, ExprType n ~ ValueType NumberType) =>
+        e -> n -> Expr (StreamType (ExprIsView e) t)
+drop e n = Expr $ do
+  (vw, ex) <- exprV e
+  withView vw $ rapply [return ex, expr (), expr n] (op QL.SLICE)
 drop' = drop
 skip = drop
 
-limit  = undefined
+take, take', limit :: (ToStream e, t `HasToStreamValueOf` e,
+         ToExpr n, ExprType n ~ ValueType NumberType) =>
+        e -> n -> Expr (StreamType (ExprIsView e) t)
+take e n = Expr $ do
+  (vw, ex) <- exprV e
+  withView vw $ rapply [return ex, expr n, expr ()] (op QL.SLICE)
+take' = take
+limit  = take
 
-trim = undefined
+slice :: (ToStream e, t `HasToStreamValueOf` e,
+         ToExpr n, ExprType n ~ ValueType NumberType,
+         ToExpr m, ExprType m ~ ValueType NumberType) =>
+        e -> n -> m -> Expr (StreamType (ExprIsView e) t)
+slice e n m = Expr $ do
+  (vw, ex) <- exprV e
+  withView vw $ rapply [return ex, expr n, expr m] (op QL.SLICE)
 
-nth = undefined
+(!!), nth :: (ToStream e, t `HasToStreamValueOf` e,
+        ToExpr n, ExprType n ~ ValueType NumberType) =>
+        e -> n -> ValueExpr t
+nth e n = Expr $ withView NoView $ rapply [stream e, expr n] (op QL.NTH)
+(!!) = nth
 
 -- | The empty list expression
 nil :: ValueExpr ArrayType
 nil = toExpr ([] :: [()])
 
-union = undefined
+union, union' :: (ToStream a, t `HasToStreamValueOf` a,
+           ToStream b, t `HasToStreamValueOf` b) =>
+          a -> b -> Expr (StreamType False t)
+union a b = simpleOp QL.UNION [stream a, stream b]
 union' = union
 
-reduce = undefined
-fold = reduce
+-- | A fold
+-- 
+-- >>> run h $ reduce [1,2,3] (0 :: Int) (+)
+-- [Number 6]
 
-distinct = undefined
+fold :: (ToValue z, ToValueType (ExprType z) ~ a,
+         ToStream e, b `HasToStreamValueOf` e,
+         ToExpr c, ExprIsView c ~ False) =>
+        (ValueExpr a -> ValueExpr b -> c) -> z -> e -> Expr (ExprType c)
+fold f a e = Expr $ do
+  v1 <- newVar
+  v2 <- newVar
+  aq <- value a
+  result <- expr (f (var v1) (var v2))
+  withView NoView $ rapply [stream e] (op QL.REDUCE) {
+    QL.reduce = Just $ QL.Reduction {
+       QL.base = aq,
+       QL.var1 = uFromString v1,
+       QL.var2 = uFromString v2, 
+       QLReduction.body = result } }
 
-groupedMapReduce = undefined
+reduce :: (ToValue z, ToValueType (ExprType z) ~ a,
+         ToStream e, b `HasToStreamValueOf` e,
+         ToExpr c, ExprIsView c ~ False) =>
+        e -> z -> (ValueExpr a -> ValueExpr b -> c) -> Expr (ExprType c)
+reduce this base f = fold f base this
 
-forEach = undefined
+distinct :: (ToStream e, v `HasToStreamValueOf` e) =>
+            e -> Expr (StreamType False v)
+distinct e = simpleOp QL.DISTINCT [stream e]
 
-zip = undefined
+-- TODO: does not work
+groupedMapReduce :: (ToValue group, ToValue value,
+                     ToValue acc, ToValueType (ExprType acc) ~ b,
+                     ToValue acc', ToValueType (ExprType acc') ~ b,
+                     ToStream e, a `HasToStreamValueOf` e) =>
+                    (ValueExpr a -> group) ->
+                    (ValueExpr a -> value) ->
+                    acc ->
+                    (ValueExpr b -> ValueExpr v -> acc') ->
+                    e -> 
+                    Expr (StreamType False b)
+groupedMapReduce group val base reduction e = Expr $ do
+  g <- mapping group
+  v <- mapping val
+  v1 <- newVar
+  v2 <- newVar
+  b <- value base
+  result <- value (reduction (var v1) (var v2))
+  withView NoView $ rapply [stream e] (op QL.GROUPEDMAPREDUCE) {
+    QL.grouped_map_reduce = Just $ QL.GroupedMapReduce {
+       QL.group_mapping = g,
+       QL.value_mapping = v,
+       QL.reduction = QL.Reduction {
+         QL.base = b, 
+         QL.var1 = uFromString v1,
+         QL.var2 = uFromString v2,
+         QLReduction.body = result }} }
+
+-- TODO: write this after the rewrite of run
+forEach = error "forEach is not implemented yet"
+
+zip, zip' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
+             e -> Expr (StreamType False ObjectType)
+zip = map (\row -> if' (row !? "right")
+                   (merge (row ! "left") (row ! "right"))
+                   (row ! "left"))
 zip' = zip
 
-orderBy = undefined
-sortBy = orderBy
+data Order = Asc  { orderAttr :: String }
+           | Desc { orderAttr :: String }
 
-groupBy = undefined
+orderAscending :: Order -> Bool
+orderAscending Asc  {} = True
+orderAscending Desc {} = False
+
+class ToOrder a where toOrder :: a -> Order
+instance ToOrder String where toOrder = Asc
+instance ToOrder Order where toOrder o = o
+
+orderBy :: (ToOrder o, ToStream e, a `HasToStreamValueOf` e) =>
+           [o] -> e -> Expr (StreamType (ExprIsView e) a)
+orderBy o e = Expr $ do
+  (vw, ex) <- exprV e
+  withView vw $ rapply [return ex] (op QL.ORDERBY) {
+    QL.order_by = Seq.fromList $ flip P.map o $ \(toOrder -> x) -> QL.OrderBy {
+       QLOrderBy.attr = uFromString (orderAttr x), QL.ascending = Just $ orderAscending x }}
+
+groupBy,groupBy' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
+                    [String] -> MapReduce ObjectType b c d -> e -> Expr (StreamType False d)
+groupBy ks (MapReduce m b r f) e = map f (groupedMapReduce (pick ks) m b r e)
 groupBy' = groupBy
+
+data MapReduce a b c d = MapReduce (ValueExpr a -> ValueExpr b) (ValueExpr c)
+                         (ValueExpr c -> ValueExpr b -> ValueExpr c)
+                         (ValueExpr c -> ValueExpr d)
+
+sum, sum' :: String -> MapReduce ObjectType NumberType NumberType NumberType
+sum a = MapReduce (! a) 0 (+) P.id
+sum' = sum
+
+count' :: MapReduce ObjectType NoneType NumberType NumberType
+count' = MapReduce (P.const (toExpr ())) 0 (\x _ -> x + (1 :: Int)) P.id
+
+avg :: String -> MapReduce ObjectType ArrayType ArrayType NumberType
+avg k = MapReduce (\x -> toExpr [x ! k :: NumberExpr, 1]) (toExpr [0,0 :: Int])
+        (\a o -> toExpr [(a !! (0 :: Int)) + (o !! (0 :: Int)), (a !! (1 :: Int)) + (o !! (1 :: Int)) :: NumberExpr])
+        (\a -> ((a !! (0 :: Int)) / (a !! (1 :: Int))))
 
 -- * Accessors
 
-(!) :: (HasValueType a ObjectType) => a -> String -> ValueExpr t
-(!) a b = mkExpr $ rapply [value a] (op QL.GETATTR) {
+-- | Get the value of the field of an object
+-- 
+-- When GHC thinks the result is ambiguous, it has to be annotated.
+-- 
+-- >>> run h $ (get (table "tea") "black" ! "water_temperature" :: NumberExpr)
+-- [Number 95]
+
+(!) :: (ToExpr a, ExprValueType a ~ ObjectType) => a -> String -> ValueExpr t
+(!) a b = mkExpr $ rapply [expr a] (op QL.GETATTR) {
   QLBuiltin.attr = Just (uFromString b) }
 
 pick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
@@ -215,13 +337,25 @@ unpick ks e = mkExpr $ rapply [value e] (op QL.WITHOUT) {
 (!?) a b = mkExpr $ rapply [value a] (op QL.HASATTR) {
   QLBuiltin.attr = Just $ uFromString b }
 
+pluck :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
+         [String] -> e -> Expr (StreamType False ObjectType)
 pluck ks = map (pick ks)
 
+without :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
+           [String] -> e -> Expr (StreamType False ObjectType)
 without ks = map (unpick ks)
 
-merge = undefined
+merge :: (ToExpr a, ExprType a ~ ValueType ObjectType,
+          ToExpr b, ExprType b ~ ValueType ObjectType) =>
+         a -> b -> ObjectExpr
+merge this other = simpleOp QL.MAPMERGE [expr this, expr other]
 
 -- * Controld Structures, Functions and Javascript
+
+-- | A javascript expression
+-- 
+-- It is often necessary to specify the result type:
+-- run h $ (js "1 + 2" :: ExprNumber)
 
 js :: String -> Expr (ValueType any)
 js s = mkExpr $ return defaultValue {
@@ -271,7 +405,9 @@ jsfun f e = mkExpr $ do
   v <- newVar
   expr (let' v e $ js $ f P.++ "(" P.++ v P.++ ")")
 
-error = undefined
+error, error' :: (ExprTypeIsView t ~ False) => String -> Expr t
+error m = Expr $ withView NoView $ return defaultValue {
+  QLTerm.type' = QL.ERROR, QL.error = Just $ uFromString m }
 error' = error
 
 class CanConcat (a :: ValueTypeKind)

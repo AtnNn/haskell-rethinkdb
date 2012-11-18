@@ -2,7 +2,7 @@ name:                rethinkdb
 version:             0.1.0.0
 synopsis:            RethinkDB client library for haskell
 homepage:            http://code.atnnn.com/projects/haskell-rethinkdb
-license:             BSD3
+license:             Apache
 license-file:        LICENSE
 author:              Etienne Laurin
 maintainer:          Etienne Laurin <etienne@atnnn.com>

@@ -20,13 +20,13 @@ import Database.RethinkDB.Driver (
   get, insert, insertMany, upsert, upsertMany,
   update, replace, delete,
   Query, ToQuery(..),
-  run, runMaybe, runEither,
+  run, runMaybe, runEither, runRaw,
   ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
   HasValueType, HaveValueType,
   NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
   CanCompare,
   Sequence(..),
-  Obj, obj,
+  Obj, obj, Attribute(..),
   streamToValue, arrayToStream,
   Mapping(..), ToMapping(..)
   )
@@ -38,11 +38,13 @@ import Database.RethinkDB.Functions (
   count, concat, map', filter', between,
   concatMap', slice, append, innerJoin,
   outerJoin, eqJoin, skip, drop', limit,
-  trim, nth, asArray, nil, union', reduce,
+  slice, nth, asArray, nil, union', reduce,
   distinct, groupedMapReduce, forEach, zip',
   orderBy, groupBy',
   
   (!), pick, (!?), pluck, without, unpick, merge,
   
-  js, bind, let', var, if', jsfun, error'
+  js, bind, let', var, if', jsfun, error', 
+  
+  sum', count', avg
   )

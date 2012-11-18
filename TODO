@@ -1,0 +1,21 @@
+fix groupedMapReduce, it yields an error "could not match stream with object"
+
+BatchQuery
+
+insert and co should take arbitrary terms
+
+ToExpr String
+
+A successful insert gives an error:
+*** Exception: key missing in response
+
+generalise run:
+-- custom formatted results
+-- list of Value
+-- list of FromJSON
+-- list of (Document, FromJSON)
+-- stream of the above
+
+display backtraces
+
+use attribute lists for let (let' ["a" := b, "c" := 3]
