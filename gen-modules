@@ -1,1 +1,1 @@
-hprotoc -p Database.RethinkDB.Internal query_language.proto
+hprotoc -p Database.RethinkDB.Internal data/query_language.proto

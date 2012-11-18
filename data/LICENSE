@@ -1,6 +1,6 @@
-RethinkDB Language Drivers for Haskell
+RethinkDB Language Drivers
 
-Copyright 2012 Etienne Laurin
+Copyright 2010-2012 RethinkDB
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this product except in compliance with the License.
