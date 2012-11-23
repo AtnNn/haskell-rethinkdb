@@ -27,7 +27,7 @@ module Database.RethinkDB (
   closeConnection, 
   use,
   run, runMaybe, runEither, runRaw, runJSON, runBatch,
-  next, collect,
+  next, collect, resultsError,
   
   -- * Manipulating databases
   
@@ -88,7 +88,7 @@ module Database.RethinkDB (
   
   Obj, Attribute(..), obj, str, nil,
   
-  -- * Types
+  -- * Types and type classes
   
   Query, ToQuery(..),
   ValueTypeKind(..), ExprTypeKind(..),
@@ -96,6 +96,7 @@ module Database.RethinkDB (
   HasValueType, HaveValueType,
   NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
   CanCompare,
+  Order(..), ToOrder(..),
   Sequence(..),
   Mapping(..), ToMapping(..),
   Results

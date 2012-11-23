@@ -295,37 +295,42 @@ get e k = Expr $ do
                                             fmap uFromString mattr) key
     }
 
-insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query False [Document]
-insert_or_upsert tbl as overwrite = Query
-  (do token <- getToken
-      ref <- tableRef tbl
+insert_or_upsert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
+                    Table -> [a] -> Bool -> WriteQuery [Document]
+insert_or_upsert tbl array overwrite = WriteQuery
+  (do ref <- tableRef tbl
+      as <- mapM value array
       let write = defaultValue {
           QLWriteQuery.type' = QL.INSERT,
           QL.insert = Just $ QL.Insert ref
-                      (Seq.fromList $ map toJsonTerm as) (Just overwrite) }
-      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+                      (Seq.fromList $ as) (Just overwrite) }
+      return $ write)
   (whenSuccess "generated_keys" $ \keys -> Right $ map (\doc -> Document tbl doc) keys)
 
 -- | Insert a document into a table
 -- 
 -- >>> d <- run h $ insert t (object ["name" .= "banana", "color" .= "red"])
 
-insert :: ToJSON a => Table -> a -> Query False Document
+insert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
+          Table -> a -> WriteQuery Document
 insert tb a = fmap head $ insert_or_upsert tb [a] False
 
 -- | Like insert, but for multiple documents at once
-insertMany :: ToJSON a => Table -> [a] -> Query False [Document]
+insertMany :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
+              Table -> [a] -> WriteQuery [Document]
 insertMany tb a = insert_or_upsert tb a False
 
 -- | Like insert, but overwrite any existing document with the same primary key
 -- 
 -- The primary key defined in the Table reference is ignored for this operation
 
-upsert :: ToJSON a => Table -> a -> Query False Document
+upsert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
+          Table -> a -> WriteQuery Document
 upsert tb a = fmap head $ insert_or_upsert tb [a] True
 
 -- | Like upsert, but for a list of values
-upsertMany :: ToJSON a => Table -> [a] -> Query False [Document]
+upsertMany :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
+              Table -> [a] -> WriteQuery [Document]
 upsertMany tb a = insert_or_upsert tb a True
 
 -- | Update a table
@@ -337,10 +342,9 @@ upsertMany tb a = insert_or_upsert tb a True
 
 update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
            MappingFrom map ~ out, MappingTo map ~ ObjectType) =>
-          sel -> map -> Query False ()
-update view m = Query
-  (do token <- getToken 
-      mT <- mapping m
+          sel -> map -> WriteQuery ()
+update view m = WriteQuery
+  (do mT <- mapping m
       write <- case toExpr view of
         Expr _ -> do viewT <- expr view
                      return defaultValue {
@@ -353,14 +357,13 @@ update view m = Query
             QL.point_update = Just $ QL.PointUpdate ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                               (toJsonTerm d) mT }
-      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+      return write)
   (whenSuccess_ ())
 
 -- | Replace the objects return by a query by another object
-replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> Query False ()
-replace view a = Query
-  (do token <- getToken 
-      fun <- mapping (toJSON a)
+replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> WriteQuery ()
+replace view a = WriteQuery
+  (do fun <- mapping (toJSON a)
       write <- case toExpr view of
         Expr f -> do
           (_, e) <- f
@@ -374,14 +377,13 @@ replace view a = Query
             QL.point_mutate = Just $ QL.PointMutate ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                               (toJsonTerm d) fun }
-      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+      return write)
   (whenSuccess_ ())
 
 -- | Delete the result of a query from the database
-delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> Query False ()
-delete view = Query
-  (do token <- getToken 
-      write <- case toExpr view of
+delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> WriteQuery ()
+delete view = WriteQuery
+  (do write <- case toExpr view of
           Expr f -> do
             (_, ex) <- f
             return defaultValue {
@@ -394,7 +396,7 @@ delete view = Query
               QL.point_delete = Just $ QL.PointDelete ref
                               (fromMaybe defaultPrimaryAttr $ fmap uFromString k)
                               (toJsonTerm d) }
-      return $ QL.Query QL.WRITE token Nothing (Just write) Nothing)
+      return write)
   (whenSuccess_ ())
 
 -- * Queries
@@ -406,6 +408,11 @@ data Query (b :: Bool) a where
   ViewQuery ::  { _viewQueryBuild :: QueryM (Table, QL.Query),
                   _viewQueryExtract :: [(Document, Value)] -> Either String a }
                 -> Query True a
+
+data WriteQuery a = WriteQuery {
+  writeQueryBuild :: QueryM QL.WriteQuery,
+  writeQueryExtract :: [Value] -> Either String a
+  }
 
 queryBuild :: Query w a -> QueryM (MaybeView w, QL.Query)
 queryBuild (Query b _) = fmap ((,) NoView) b
@@ -419,6 +426,10 @@ queryExtract _ _ _ = error "GHC was right, this branch is reachable!"
 instance Functor (Query w) where
   fmap f (Query a g) = Query a (fmap f . g)
   fmap f (ViewQuery a g) = ViewQuery a (fmap f . g)
+
+instance Functor WriteQuery where
+  fmap f (WriteQuery a g) = WriteQuery a (fmap f . g)
+
 
 type family If (p :: Bool) (a :: k) (b :: k) :: k
 type instance If True  a b = a
@@ -442,6 +453,17 @@ instance ToBuildQuery (Query w a) where
 
 instance ToQuery (Query w a) a where
   toQuery q = q
+
+instance ToBuildQuery (WriteQuery a) where
+  type BuildViewQuery (WriteQuery a) = False
+  buildQuery (WriteQuery b _) = Query $ do
+    wq <- b
+    tok <- getToken
+    return $ defaultValue { QLQuery.type' = QL.WRITE, QLQuery.token = tok, 
+                            QLQuery.write_query = Just $ wq }  
+
+instance ToQuery (WriteQuery a) a where
+  toQuery w@(WriteQuery _ e) = buildQuery w e
 
 instance ToBuildQuery Table where
   type BuildViewQuery Table = True
@@ -588,7 +610,7 @@ data Results a = Results {
 data QueryViewPair a where
   QueryViewPair :: Query w a -> MaybeView w -> QueryViewPair a
 
--- | TODO. runBatch = undefined
+-- | Query the server and return a lazy query
 runBatch :: ToQuery q [a] => RethinkDBHandle -> q -> IO (Results a)
 runBatch h q = case toQuery q of
   query -> do
@@ -621,7 +643,7 @@ queryExtractResponse query vw r h tok =
                   SuccessEmpty -> Nothing
             in (han, Seq.fromList list, Nothing)
 
--- | TODO: next = undefined
+-- | Read the next value from a lazy query. Fetch it from the server if needed.
 next :: Results a -> IO (Maybe a)
 next res = do
   seq' <- readIORef (resultsSeq res)
@@ -642,12 +664,18 @@ next res = do
           writeIORef (_resultsError res) err
           next res
 
+-- | Return all the results of a lazy query.
 collect :: Results a -> IO [a]
 collect r = do
   ma <- next r
   case ma of
     Nothing -> return []
     Just a -> fmap (a:) (collect r)
+
+-- | Get the last error from a lazy query.
+-- 
+-- If both next and resultsError return Nothing, then
+-- all results have been fetched without error.
 
 resultsError :: Results a -> IO (Maybe String)
 resultsError = readIORef . _resultsError
@@ -834,7 +862,7 @@ instance ToExpr Obj where
     return defaultValue {
       QL.type' = QL.OBJECT, QL.object = Seq.fromList exs }
     where go (k := a) = do
-            ex <- expr a
+            ex <- value a
             return QL.VarTermTuple {
               QLVarTermTuple.var = uFromString k, QLVarTermTuple.term = ex }
 
@@ -884,7 +912,7 @@ instance a ~ ArrayType => Sequence (ValueType a) where
 
 -- | A list of String/Expr pairs
 data Obj = Obj [Attribute]
-data Attribute = forall e . (ToExpr e) => String := e
+data Attribute = forall e . (ToValue e) => String := e
 
 -- | Build an Obj
 obj :: [Attribute] -> Obj

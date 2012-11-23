@@ -11,13 +11,15 @@ import Database.RethinkDB.Driver
 import Text.ProtocolBuffers.Basic hiding (Default)
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
+import qualified Database.RethinkDB.Internal.Query_Language.WriteQuery as QLWriteQuery
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin.OrderBy as QLOrderBy
 import qualified Database.RethinkDB.Internal.Query_Language.Reduction as QLReduction
 
 import qualified Prelude as P
-import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined, return, (.))
+import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined, return, (.), mapM)
 
+import Control.Monad (liftM)
 import Data.Maybe
 import Data.Functor
 import Data.Aeson
@@ -260,8 +262,21 @@ groupedMapReduce group val base reduction e = Expr $ do
          QL.var2 = uFromString v2,
          QLReduction.body = result }} }
 
--- | TODO. forEach = undefined
-forEach = P.error "forEach is not implemented yet"
+-- | Execute a write query for each element of the stream
+-- 
+-- run h $ forEach [1,2,3::Int] (\x -> insert (table "fruits") (obj ["n" := x]))
+
+forEach :: (ToStream a, v `HasToStreamValueOf` a) =>
+           a -> (ValueExpr v -> WriteQuery b) -> WriteQuery ()
+forEach s mkwq = WriteQuery (do
+  arg <- newVar
+  let wq = mkwq (var arg)
+  qlwq <- writeQueryBuild wq
+  as <- stream s
+  return $ defaultValue {
+    QLWriteQuery.type' = QL.FOREACH,
+    QL.for_each = Just $ QL.ForEach as (uFromString arg) (Seq.singleton qlwq) })
+  (whenSuccess_ ())
 
 zip, zip' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
              e -> Expr (StreamType False ObjectType)
@@ -372,15 +387,14 @@ bind val f = Expr $ do
     QLTerm.let' = Just $ QL.Let (Seq.singleton $ QL.VarTermTuple (uFromString v) arg)
                   body }
 
-let' :: (ToValue e) => String -> e -> Expr t -> Expr t
-let' nam val e = Expr $ do
-  arg <- value val
+let' :: [Attribute] -> Expr t -> Expr t
+let' pairs e = Expr $ do
+  varTerms <- mapM (\(k := v) ->
+                     (QL.VarTermTuple (uFromString k)) `liftM` value v) pairs
   (vw, body) <- exprV e
   withView vw $ return defaultValue {
     QLTerm.type' = QL.LET,
-    QLTerm.let' = Just $ QL.Let (Seq.singleton $
-                                 QL.VarTermTuple (uFromString nam) arg)
-                  body }
+    QLTerm.let' = Just $ QL.Let (Seq.fromList $ varTerms) body }
 
 var :: ExprIsView (Expr t) ~ False => String -> Expr t
 var v = mkExpr $ return defaultValue { 
@@ -403,7 +417,7 @@ if' t a b = mkExpr $ do
 jsfun :: ToValue e => String -> e -> Expr (ValueType y)
 jsfun f e = mkExpr $ do 
   v <- newVar
-  expr (let' v e $ js $ f P.++ "(" P.++ v P.++ ")")
+  expr (let' [v := e] $ js $ f P.++ "(" P.++ v P.++ ")")
 
 error, error' :: (ExprTypeIsView t ~ False) => String -> Expr t
 error m = Expr $ withView NoView $ return defaultValue {

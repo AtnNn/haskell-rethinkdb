@@ -1,16 +1,1 @@
 fix groupedMapReduce, it yields an error "could not match stream with object"
-
-insert and co should take arbitrary terms
-
-A successful insert gives an error:
-*** Exception: key missing in response
-
-generalise run and queries:
--- list of (Document, FromJSON)
--- batchresults
-
-display backtraces
-
-use attribute lists for let (let' ["a" := b, "c" := 3]
-
-I feel that parts of the code could be simplified a lot
