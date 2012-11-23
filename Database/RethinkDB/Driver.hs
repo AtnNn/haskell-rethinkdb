@@ -55,16 +55,19 @@ import Data.Bits
 
 -- * Network
 
--- | A connection to the database
+-- | A connection to the database server
 data RethinkDBHandle = RethinkDBHandle {
   rdbHandle :: Handle, 
   rdbToken :: IORef Int64, -- ^ The next token to use
   rdbDatabase :: Database  -- ^ When no database is specified, this one will be used
   }
 
--- | Connect to a RethinkDB server
+-- | Create a new connection to the database server
 -- 
--- >>> h <- openConnection "localhost" Nothing Nothing
+-- /Example:/ connect using the default port (28015) and specifying the
+-- default database for all queries.
+-- 
+-- >>> h <- openConnection "localhost" Nothing (Just "test")
 
 openConnection :: HostName -> Maybe PortID -> Maybe String -> IO RethinkDBHandle
 openConnection host port mdb = do
@@ -76,14 +79,20 @@ openConnection host port mdb = do
   return (RethinkDBHandle h r db')
   where initialMessage = packUInt 0xaf61ba35
 
--- | Change the default database
+-- | Set the default connection
+-- 
+-- The new handle is an alias for the old one. Calling closeConnection on either one
+-- will close both.
 -- 
 -- >>> let h' = h `use` (db "players")
 
 use :: RethinkDBHandle -> Database -> RethinkDBHandle
 use h db' = h { rdbDatabase = db' }
 
--- | Disconnect
+-- | Close an open connection
+-- 
+-- >>> closeConnection h
+
 closeConnection :: RethinkDBHandle -> IO ()
 closeConnection (RethinkDBHandle h _ _) = hClose h
 
@@ -178,9 +187,12 @@ runQLQuery h query = do
 -- | A database, referenced by name
 data Database = Database {
   databaseName :: String
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord)
 
--- | A short function to create a Database reference
+instance Show Database where
+  show (Database d) = show d
+
+-- | Create a Database reference
 db :: String -> Database
 db s = Database s
 
@@ -197,6 +209,10 @@ dbDrop (Database name) = Query
   (const $ Right ())
 
 -- | List the databases on the server
+-- 
+-- >>> run h $ dbList
+-- [test, dev, prod]
+
 dbList :: Query False [Database]
 dbList = Query
   (metaQuery $ return $ QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
@@ -211,12 +227,16 @@ data TableCreateOptions = TableCreateOptions {
 instance Default TableCreateOptions where
   def = TableCreateOptions Nothing Nothing
 
--- | A table
+-- | A table description
 data Table = Table {
-  tableDatabase :: Maybe Database, -- ^ when nothing, use the rdbDatabase
+  tableDatabase :: Maybe Database, -- ^ when Nothing, use the rdbDatabase
   tableName :: String,
-  _tablePrimaryAttr :: Maybe String -- ^ when nothing, "id" is used
-  } deriving (Show, Eq, Ord)
+  _tablePrimaryAttr :: Maybe String -- ^ when Nothing, "id" is used
+  } deriving (Eq, Ord)
+
+instance Show Table where
+  show (Table db' nam pa) =
+    maybe "" (\(Database d) -> d++".") db' ++ nam ++ maybe "" (\x -> "{"++x++"}") pa
 
 tablePrimaryAttr :: Table -> String
 tablePrimaryAttr = fromMaybe (uToString defaultPrimaryAttr) . _tablePrimaryAttr
@@ -238,6 +258,8 @@ table n = Table Nothing n Nothing
 
 -- | Create a table on the server
 -- 
+-- @def@ can be imported from Data.Default
+-- 
 -- >>> t <- run h $ tableCreate (table "fruits") def
 
 tableCreate :: Table -> TableCreateOptions -> Query False Table
@@ -253,7 +275,7 @@ tableCreate (Table mdb table_name primary_key)
         QLCreateTable.cache_size = cache_size
         }
       return $ QL.MetaQuery QL.CREATE_TABLE Nothing (Just create) Nothing)
-               (const $ Right $ Table Nothing table_name primary_key)
+               (const $ Right $ Table mdb table_name primary_key)
 
 -- | Drop a table
 tableDrop :: Table -> Query False ()
@@ -275,13 +297,16 @@ tableList (Database name) = Query
 uTableKey :: Table -> Utf8
 uTableKey (Table _ _ mkey) = fromMaybe defaultPrimaryAttr $ fmap uFromString mkey
 
--- | A document
+-- | A reference to a document
 data Document = Document {
   documentTable :: Table,
   documentKey :: Value
-  } deriving Show
+  } deriving (Eq)
 
--- | Get a document by its primary key
+instance Show Document where
+  show (Document t k) = show t ++ "[" ++ show k ++ "]"
+
+-- | Get a document by primary key
 get :: (ToExpr e, ExprType e ~ StreamType True ObjectType, ToValue k) =>
        e -> k -> ObjectExpr
 get e k = Expr $ do
@@ -315,20 +340,20 @@ insert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
           Table -> a -> WriteQuery Document
 insert tb a = fmap head $ insert_or_upsert tb [a] False
 
--- | Like insert, but for multiple documents at once
+-- | Insert many documents into a table
 insertMany :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
               Table -> [a] -> WriteQuery [Document]
 insertMany tb a = insert_or_upsert tb a False
 
--- | Like insert, but overwrite any existing document with the same primary key
--- 
--- The primary key defined in the Table reference is ignored for this operation
+-- | Insert a document into a table, overwriting a document with the
+--   same primary key if one exists.
 
 upsert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
           Table -> a -> WriteQuery Document
 upsert tb a = fmap head $ insert_or_upsert tb [a] True
 
--- | Like upsert, but for a list of values
+-- | Insert many documents into a table, overwriting any existing documents 
+--   with the same primary key.
 upsertMany :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
               Table -> [a] -> WriteQuery [Document]
 upsertMany tb a = insert_or_upsert tb a True
@@ -360,7 +385,7 @@ update view m = WriteQuery
       return write)
   (whenSuccess_ ())
 
--- | Replace the objects return by a query by another object
+-- | Replace documents in a table
 replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> WriteQuery ()
 replace view a = WriteQuery
   (do fun <- mapping (toJSON a)
@@ -380,7 +405,7 @@ replace view a = WriteQuery
       return write)
   (whenSuccess_ ())
 
--- | Delete the result of a query from the database
+-- | Delete one or more documents from a table
 delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> WriteQuery ()
 delete view = WriteQuery
   (do write <- case toExpr view of
@@ -543,7 +568,14 @@ instance (IsString a, FromJSON a) => ExtractValue StringType a where extractValu
 instance ExtractValue NoneType () where extractValue _ = const $ Just ()
 instance FromJSON a => ExtractValue OtherValueType a where extractValue _ = convert
 
--- | Submit a query to the server, throwing exceptions when there is an error
+-- | Run a query on the connection
+-- 
+-- The return value depends on the type of the second argument.
+-- 
+-- When the return value is polymorphic, type annotations may be required.
+-- 
+-- >>> run h $ table "fruits" :: IO [(Document, Value)]
+
 run :: ToQuery a v => RethinkDBHandle -> a -> IO v
 run h q = do
   r <- runEither h q
@@ -551,7 +583,7 @@ run h q = do
     Left e -> error e
     Right a -> return a
 
--- | Return a (Left String) if there is an error
+-- | Run a query on the connection, returning (Left message) on error
 runEither :: ToQuery a v => RethinkDBHandle -> a -> IO (Either String v)
 runEither h q = case toQuery q of
   -- TODO: just call runBatch and get the resultsSeq
@@ -572,11 +604,11 @@ addDoc tbl x = do
   where getKey k (Object o) = parseMaybe (.: str k) o
         getKey _ _ = Nothing
 
--- | Return Nothing when there is an error
+-- | Run a query on the connection, returning Nothing on error
 runMaybe :: ToQuery a v => RethinkDBHandle -> a -> IO (Maybe v)
 runMaybe h = fmap (either (const Nothing) Just) . runEither h
 
--- | Get the raw response from a query
+-- | Run a query on the connection and return the raw response
 runRaw :: (ToBuildQuery q, JSONQuery (BuildViewQuery q)) =>
           RethinkDBHandle -> q -> IO Response
 runRaw h q = do
@@ -585,7 +617,7 @@ runRaw h q = do
                       QuerySettings tok (rdbDatabase h) initialVars False
   runQLQuery h qlq
 
--- | Get the json response from a query
+-- | Run a query on the connection and return the resulting JSON value
 runJSON :: (JSONQuery (BuildViewQuery q), ToBuildQuery q) =>
            RethinkDBHandle -> q -> IO [Value]
 runJSON h q = run h (jsonQuery (buildQuery q))
@@ -610,7 +642,14 @@ data Results a = Results {
 data QueryViewPair a where
   QueryViewPair :: Query w a -> MaybeView w -> QueryViewPair a
 
--- | Query the server and return a lazy query
+-- | Run a query on the connection and a return a lazy result list
+-- 
+-- >>> res <- runBatch h <- (arrayToStream [1,2,3] :: NumberStream)
+-- >>> next res
+-- Just 1
+-- >>> collect res
+-- [2,3]
+
 runBatch :: ToQuery q [a] => RethinkDBHandle -> q -> IO (Results a)
 runBatch h q = case toQuery q of
   query -> do
@@ -880,10 +919,14 @@ type ObjectExpr = Expr (ValueType ObjectType)
 type ArrayExpr = Expr (ValueType ArrayType)
 type StringExpr = Expr (ValueType StringType)
 type ValueExpr t = Expr (ValueType t)
-type ObjectStream b = Expr (StreamType b ObjectType)
-type ViewExpr = ObjectStream True
+type NumberStream = Expr (StreamType False NumberType)
+type BoolStream = Expr (StreamType False BoolType)
+type ArrayStream = Expr (StreamType False ArrayType)
+type StringStream = Expr (StreamType False StringType)
+type ObjectStream = Expr (StreamType False ObjectType)
+type Selection = Expr (StreamType True ObjectType)
 
--- | What values can be compared with @<@, @<=@, @>@ and @>=@
+-- | What values can be compared with eq, ne, lt, gt, le and ge
 class CanCompare (a :: ValueTypeKind)
 instance CanCompare NumberType
 instance CanCompare StringType
@@ -918,14 +961,12 @@ data Attribute = forall e . (ToValue e) => String := e
 obj :: [Attribute] -> Obj
 obj = Obj
 
--- | Convert a stream into a value
--- 
--- The whole stream is read into the server's memory
+-- | Convert a stream into an array
 
 streamToArray :: (ToExpr e, ExprType e ~ StreamType w t) => e -> Expr (ValueType ArrayType)
 streamToArray = simpleOp QL.STREAMTOARRAY . return . expr
 
--- | Convert a value into a stream
+-- | Convert an array into a stream
 arrayToStream :: (ToExpr e, ExprType e ~ ValueType ArrayType) => e -> Expr (StreamType False t)
 arrayToStream = simpleOp QL.ARRAYTOSTREAM . return . expr
 

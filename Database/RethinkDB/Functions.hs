@@ -93,6 +93,7 @@ map fun a = mkExpr $ do
 
 map' = map
 
+-- | Get all the documents for which the given predicate is true
 filter', filter :: (ToMapping m, ToStream e,
                     MappingFrom m `HasToStreamValueOf` e) =>
                    m -> e -> Expr (ExprType e)
@@ -104,6 +105,7 @@ filter' fil e = Expr $ do
 
 filter = filter'
 
+-- | Get all documents between two primary keys (both keys are inclusive)
 between :: (ToJSON a, ToStream e, ObjectType `HasToStreamValueOf` e) =>
            (Maybe a) -> (Maybe a) -> e -> Expr (ExprType e)
 between a b e = Expr $ do
@@ -154,7 +156,7 @@ asArray :: ToExpr e => e -> ArrayExpr
 asArray e = mkExpr $ expr e
 
 eqJoin :: (ToStream a, ObjectType `HasToStreamValueOf` a,
-           ToExpr b, ExprType b ~ ExprType ViewExpr) =>
+           ToExpr b, ExprType b ~ ExprType Selection) =>
            a -> String -> b -> Expr (StreamType False ObjectType)
 eqJoin this k1 other =
   flip concatMap this $ \row ->
@@ -264,7 +266,7 @@ groupedMapReduce group val base reduction e = Expr $ do
 
 -- | Execute a write query for each element of the stream
 -- 
--- run h $ forEach [1,2,3::Int] (\x -> insert (table "fruits") (obj ["n" := x]))
+-- >>> run h $ forEach [1,2,3::Int] (\x -> insert (table "fruits") (obj ["n" := x]))
 
 forEach :: (ToStream a, v `HasToStreamValueOf` a) =>
            a -> (ValueExpr v -> WriteQuery b) -> WriteQuery ()
@@ -329,7 +331,7 @@ avg k = MapReduce (\x -> toExpr [x ! k :: NumberExpr, 1]) (toExpr [0,0 :: Int])
 
 -- | Get the value of the field of an object
 -- 
--- When GHC thinks the result is ambiguous, it has to be annotated.
+-- When GHC thinks the result is ambiguous, it may have to be annotated.
 -- 
 -- >>> run h $ (get (table "tea") "black" ! "water_temperature" :: NumberExpr)
 -- 95
@@ -413,6 +415,12 @@ if' t a b = mkExpr $ do
   bq <- expr b
   return defaultValue {
     QLTerm.type' = QL.IF, QL.if_ = Just $ QL.If tq aq bq }
+
+-- | A javascript function
+-- 
+-- >>> let squareRoot = jsfun "Math.sqrt" :: NumberExpr -> NumberExpr
+-- >>> run h $ squareRoot 5 :: IO Double
+-- 2.23606797749979
 
 jsfun :: ToValue e => String -> e -> Expr (ValueType y)
 jsfun f e = mkExpr $ do 

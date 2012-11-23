@@ -1,1 +1,0 @@
-fix groupedMapReduce, it yields an error "could not match stream with object"

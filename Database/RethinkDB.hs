@@ -3,16 +3,6 @@
 -- 
 -- Modelled upon the official Javascript and Python API: <http://www.rethinkdb.com/api/>
 -- 
--- /Notes on the Haskell API/
--- 
--- The API is statically typed. It is sometimes necessary to add type annotations.
--- 
--- The Functions sub-module defines many aliases that are more natural in haskell, such
--- as @R.+@ for @add@, @R.drop@ for @skip@ and @R.fold@ for @reduce@, with arguments
--- in the same order as @foldl@.
--- 
--- The official API has nicer backtraces when an error happens.
--- 
 -- /How to use/
 --  
 -- >>> import Database.RethinkDB
@@ -95,6 +85,7 @@ module Database.RethinkDB (
   ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
   HasValueType, HaveValueType,
   NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
+  NumberStream, BoolStream, ObjectStream, ArrayStream, StringStream, Selection,
   CanCompare,
   Order(..), ToOrder(..),
   Sequence(..),
