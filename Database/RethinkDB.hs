@@ -1,5 +1,9 @@
 
 -- | RethinkDB client library for Haskell
+-- 
+-- 
+-- Modelled upon the official Javascript and Python bindings: <http://www.rethinkdb.com/api/>
+
 
 module Database.RethinkDB (
   module Database.RethinkDB.Types,
@@ -20,13 +24,13 @@ import Database.RethinkDB.Driver (
   get, insert, insertMany, upsert, upsertMany,
   update, replace, delete,
   Query, ToQuery(..),
-  run, runMaybe, runEither, runRaw,
+  run, runMaybe, runEither, runRaw, runJSON, runBatch,
   ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
   HasValueType, HaveValueType,
   NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
   CanCompare,
   Sequence(..),
-  Obj, obj, Attribute(..),
+  Obj, obj, Attribute(..), str,
   streamToValue, arrayToStream,
   Mapping(..), ToMapping(..)
   )

@@ -4,9 +4,13 @@ module Database.RethinkDB.Types where
 -- | The type of a RQL expression
 -- 
 -- The type hierarchy has 3 branches:
--- - Regular Stream
--- - Updateable Streams (also called Views)
--- - Values
+-- 
+-- - A read-only sequence: @StreamType False@
+-- 
+-- - A selection (also called a view): @StreamType True@
+-- 
+-- - A value (a JSON object, array or primitive type): @ExprType@
+
 data ExprTypeKind =
     StreamType Bool ValueTypeKind -- ^ When the flag is true, it can be updated or deleted
   | ValueType ValueTypeKind

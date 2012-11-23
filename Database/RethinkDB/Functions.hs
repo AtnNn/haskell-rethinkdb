@@ -2,8 +2,6 @@
              FlexibleContexts, TypeOperators, ViewPatterns #-}
 
 -- | Functions from the ReQL (RethinkDB Query Language)
--- 
--- documentation: http://www.rethinkdb.com/api/
 
 module Database.RethinkDB.Functions where
 
@@ -263,7 +261,7 @@ groupedMapReduce group val base reduction e = Expr $ do
          QLReduction.body = result }} }
 
 -- TODO: write this after the rewrite of run
-forEach = error "forEach is not implemented yet"
+forEach = P.error "forEach is not implemented yet"
 
 zip, zip' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
              e -> Expr (StreamType False ObjectType)
@@ -350,7 +348,7 @@ merge :: (ToExpr a, ExprType a ~ ValueType ObjectType,
          a -> b -> ObjectExpr
 merge this other = simpleOp QL.MAPMERGE [expr this, expr other]
 
--- * Controld Structures, Functions and Javascript
+-- * Control Structures, Functions and Javascript
 
 -- | A javascript expression
 -- 

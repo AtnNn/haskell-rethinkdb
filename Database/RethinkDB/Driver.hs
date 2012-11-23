@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings, KindSignatures, DataKinds, MultiParamTypeClasses, 
              TypeFamilies, ExistentialQuantification, FlexibleInstances, 
              ConstraintKinds, FlexibleContexts, UndecidableInstances, 
-             PolyKinds, FunctionalDependencies, GADTs #-}
+             PolyKinds, FunctionalDependencies, GADTs, ScopedTypeVariables, 
+             RankNTypes, RecordWildCards #-}
 
 -- | The core of the haskell client library for RethinkDB
 
@@ -10,14 +11,18 @@ module Database.RethinkDB.Driver where
 import {-# SOURCE #-} Database.RethinkDB.Functions
 import Database.RethinkDB.Types
 
+--import Data.Traversable (toList)
+import Control.Arrow
+import Data.Aeson.Types (parseMaybe)
+import Data.String
 import Data.Typeable
 import Data.Data
 import GHC.Prim
 
 import qualified Database.RethinkDB.Internal.Types as QL
 import qualified Database.RethinkDB.Internal.Query_Language.Response as QLResponse
+import qualified Database.RethinkDB.Internal.Query_Language.Query as QLQuery
 import qualified Database.RethinkDB.Internal.Query_Language.VarTermTuple as QLVarTermTuple
-import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
 import qualified Database.RethinkDB.Internal.Query_Language.Predicate as QLPredicate
 import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
 import qualified Database.RethinkDB.Internal.Query_Language.ReadQuery as QLReadQuery
@@ -95,13 +100,65 @@ sendAll (RethinkDBHandle h _ _) s = hPut h s
 getNewToken :: RethinkDBHandle -> IO Int64
 getNewToken (RethinkDBHandle _ r _) = atomicModifyIORef r $ \t -> (t + 1, t)
 
+data ErrorCode = ErrorBrokenClient
+               | ErrorBadQuery
+               | ErrorRuntime
+               | ErrorNetwork
+
+instance Show ErrorCode where
+  show ErrorBrokenClient = "broken client error"
+  show ErrorBadQuery = "malformed query error"
+  show ErrorRuntime = "runtime error"
+  show ErrorNetwork = "error talking to server"
+
+data SuccessCode = SuccessEmpty
+                 | SuccessJson
+                 | SuccessPartial
+                 | SuccessStream
+                 deriving Show
+
+-- | The raw response to a query
+data Response = ErrorResponse {
+  errorCode :: ErrorCode,
+  errorMessage :: String,
+  errorBacktrace :: [String]
+  } | SuccessResponse {
+  successCode :: SuccessCode,
+  successString :: [B.ByteString]
+  }
+
+instance Show Response where
+  show ErrorResponse {..} = show errorCode ++ ": " ++
+                            show errorMessage ++ " (" ++
+                            showBacktrace errorBacktrace ++ ")"
+  show SuccessResponse {..} = show successCode ++ ": " ++ show successString
+
+convertResponse :: Either String QL.Response -> Response
+convertResponse (Left s) = ErrorResponse ErrorNetwork s []
+convertResponse (Right QL.Response {..}) = case status_code of
+  QL.SUCCESS_EMPTY   -> SuccessResponse SuccessEmpty   r
+  QL.SUCCESS_JSON    -> SuccessResponse SuccessJson    r
+  QL.SUCCESS_PARTIAL -> SuccessResponse SuccessPartial r
+  QL.SUCCESS_STREAM  -> SuccessResponse SuccessStream  r
+  QL.BROKEN_CLIENT   -> ErrorResponse ErrorBrokenClient e bt
+  QL.BAD_QUERY       -> ErrorResponse ErrorBadQuery     e bt
+  QL.RUNTIME_ERROR   -> ErrorResponse ErrorRuntime      e bt
+  where bt = fromMaybe [] $ fmap (map uToString . toList . QL.frame) backtrace
+        r = map utf8 $ toList response
+        e = fromMaybe "error" $ fmap uToString error_message
+
+showBacktrace :: [String] -> String
+showBacktrace [] = "query"
+showBacktrace bt = ("in " ++ ) . concat . (++ [" query"]) .
+                   intersperse " " . map f . reverse $ bt
+  where f x = x ++ " in"
+
 -- | Execute a raw protobuffer query and return the raw response
-runQLQuery :: RethinkDBHandle -> (Int64 -> QL.Query) -> IO (Either String QL.Response)
+runQLQuery :: RethinkDBHandle -> QL.Query -> IO Response
 runQLQuery h query = do
-  token <- getNewToken h
-  let queryS = messagePut (query token)
+  let queryS = messagePut query
   sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
-  readResponse token
+  fmap convertResponse $ readResponse (QLQuery.token query)
   
   where readResponse t = do
           header <- recvAll h 4
@@ -115,8 +172,7 @@ runQLQuery h query = do
                   n | n == t -> return $ Right response
                     | n > t -> return $ Left "RethinkDB: runQLQuery: invalid response token"
                     | otherwise -> readResponse t)
-              | otherwise ->
-                  return $ Left $ "RethinkDB: runQLQuery: invalid reply length"
+              | otherwise -> return $ Left "RethinkDB: runQLQuery: invalid reply length"
 
 -- * CRUD
 
@@ -130,19 +186,19 @@ db :: String -> Database
 db s = Database s
 
 -- | Create a database on the server
-dbCreate :: String -> Query Database
+dbCreate :: String -> Query False Database
 dbCreate db_name = Query
   (metaQuery $ return $ QL.MetaQuery QL.CREATE_DB (Just $ uFromString db_name) Nothing Nothing)
   (const $ Right $ Database db_name)
 
 -- | Drop a database
-dbDrop :: Database -> Query ()
+dbDrop :: Database -> Query False ()
 dbDrop (Database name) = Query
   (metaQuery $ return $ QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
   (const $ Right ())
 
 -- | List the databases on the server
-dbList :: Query [Database]
+dbList :: Query False [Database]
 dbList = Query
   (metaQuery $ return $ QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
   (maybe (Left "error") Right . sequence . map (fmap Database . convert))
@@ -160,8 +216,11 @@ instance Default TableCreateOptions where
 data Table = Table {
   tableDatabase :: Maybe Database, -- ^ when nothing, use the rdbDatabase
   tableName :: String,
-  tablePrimaryAttr :: Maybe String -- ^ when nothing, "id" is used
+  _tablePrimaryAttr :: Maybe String -- ^ when nothing, "id" is used
   } deriving (Show, Eq, Ord)
+
+tablePrimaryAttr :: Table -> String
+tablePrimaryAttr = fromMaybe (uToString defaultPrimaryAttr) . _tablePrimaryAttr
 
 -- | "id"
 defaultPrimaryAttr :: Utf8
@@ -182,7 +241,7 @@ table n = Table Nothing n Nothing
 -- 
 -- t <- run h $ tableCreate (table "fruits") def
 
-tableCreate :: Table -> TableCreateOptions -> Query Table
+tableCreate :: Table -> TableCreateOptions -> Query False Table
 tableCreate (Table mdb table_name primary_key)
   (TableCreateOptions datacenter cache_size) = Query
   (metaQuery $ do 
@@ -198,7 +257,7 @@ tableCreate (Table mdb table_name primary_key)
                (const $ Right $ Table Nothing table_name primary_key)
 
 -- | Drop a table
-tableDrop :: Table -> Query ()
+tableDrop :: Table -> Query False ()
 tableDrop tbl = Query
   (metaQuery $ do
       ref <- tableRef tbl
@@ -206,7 +265,7 @@ tableDrop tbl = Query
   (const $ Right ())
 
 -- | List the tables in a database
-tableList :: Database -> Query [Table]
+tableList :: Database -> Query False [Table]
 tableList (Database name) = Query 
   (metaQuery $ return $ 
     QL.MetaQuery QL.LIST_TABLES (Just $ uFromString name) Nothing Nothing)
@@ -237,7 +296,7 @@ get e k = Expr $ do
                                             fmap uFromString mattr) key
     }
 
-insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query [Document]
+insert_or_upsert :: ToJSON a => Table -> [a] -> Bool -> Query False [Document]
 insert_or_upsert tbl as overwrite = Query
   (do token <- getToken
       ref <- tableRef tbl
@@ -252,22 +311,22 @@ insert_or_upsert tbl as overwrite = Query
 -- 
 -- d <- run h $ insert t (object ["name" .= "banane", "color" .= "red"])
 
-insert :: ToJSON a => Table -> a -> Query Document
+insert :: ToJSON a => Table -> a -> Query False Document
 insert tb a = fmap head $ insert_or_upsert tb [a] False
 
 -- | Like insert, but for multiple documents at once
-insertMany :: ToJSON a => Table -> [a] -> Query [Document]
+insertMany :: ToJSON a => Table -> [a] -> Query False [Document]
 insertMany tb a = insert_or_upsert tb a False
 
 -- | Like insert, but overwrite any existing document with the same primary key
 -- 
 -- The primary key defined in the Table reference is ignored for this operation
 
-upsert :: ToJSON a => Table -> a -> Query Document
+upsert :: ToJSON a => Table -> a -> Query False Document
 upsert tb a = fmap head $ insert_or_upsert tb [a] True
 
 -- | Like upsert, but for a list of values
-upsertMany :: ToJSON a => Table -> [a] -> Query [Document]
+upsertMany :: ToJSON a => Table -> [a] -> Query False [Document]
 upsertMany tb a = insert_or_upsert tb a True
 
 -- | Update a table
@@ -279,7 +338,7 @@ upsertMany tb a = insert_or_upsert tb a True
 
 update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
            MappingFrom map ~ out, MappingTo map ~ ObjectType) =>
-          sel -> map -> Query ()
+          sel -> map -> Query False ()
 update view m = Query
   (do token <- getToken 
       mT <- mapping m
@@ -299,7 +358,7 @@ update view m = Query
   (whenSuccess_ ())
 
 -- | Replace the objects return by a query by another object
-replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> Query ()
+replace :: (ToExpr sel, ExprIsView sel ~ True, ToJSON a) => sel -> a -> Query False ()
 replace view a = Query
   (do token <- getToken 
       fun <- mapping (toJSON a)
@@ -320,7 +379,7 @@ replace view a = Query
   (whenSuccess_ ())
 
 -- | Delete the result of a query from the database
-delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> Query ()
+delete :: (ToExpr sel, ExprIsView sel ~ True) => sel -> Query False ()
 delete view = Query
   (do token <- getToken 
       write <- case toExpr view of
@@ -342,66 +401,129 @@ delete view = Query
 -- * Queries
 
 -- | A query returning a
-data Query a = Query { 
-  _queryBuild :: QueryM QL.Query,
-  _queryExtract :: [Value] -> Either String a
-  }
+data Query (b :: Bool) a where
+  Query :: { _queryBuild :: QueryM QL.Query, 
+             _queryExtract :: [Value] -> Either String a } -> Query False a
+  ViewQuery ::  { _viewQueryBuild :: QueryM (Table, QL.Query),
+                  _viewQueryExtract :: [(Document, Value)] -> Either String a }
+                -> Query True a
 
-instance Functor Query where
-  fmap f (Query a g)= Query a (fmap f . g)
+queryBuild :: Query w a -> QueryM (MaybeView w, QL.Query)
+queryBuild (Query b _) = fmap ((,) NoView) b
+queryBuild (ViewQuery b _) = fmap (first ViewOf) b
+
+queryExtract :: Query w a -> MaybeView w -> [Value] -> Either String a
+queryExtract (Query _ e)     _            vs = e vs
+queryExtract (ViewQuery _ e) (ViewOf tbl) vs = e =<< mapM (addDoc tbl) vs
+queryExtract _ _ _ = error "GHC was right, this branch is reachable!"
+
+instance Functor (Query w) where
+  fmap f (Query a g) = Query a (fmap f . g)
+  fmap f (ViewQuery a g) = ViewQuery a (fmap f . g)
+
+type family If (p :: Bool) (a :: k) (b :: k) :: k
+type instance If True  a b = a
+type instance If False a b = b
+
 
 -- | Convert things like tables and documents into queries
-class ToQuery a where
-  type QueryType a
-  toQuery :: a -> Query (QueryType a)
+class ToBuildQuery a where
+  type BuildViewQuery a :: Bool
+  buildQuery :: a -> ([If (BuildViewQuery a)
+                       (Document, Value) Value]
+                      -> Either String b) -> Query (BuildViewQuery a) b
 
-instance ToQuery (Query a) where
-  type QueryType (Query a) = a
-  toQuery a = a
+class ToBuildQuery a => ToQuery a b | a -> b where
+  toQuery :: a -> Query (BuildViewQuery a) b
 
-instance ToQuery Table where
-  type QueryType Table = [Value]
-  toQuery tbl = Query
-    (do token <- getToken 
-        ref <- tableRef tbl
-        return $ QL.Query QL.READ token
-                     (Just $ defaultValue {
-                         QLReadQuery.term = defaultValue {
-                             QLTerm.type' = QL.TABLE, 
-                             QLTerm.table = Just $ QL.Table ref
-                             }
-                         }
-                     ) Nothing Nothing)
-    Right
+instance ToBuildQuery (Query w a) where
+  type BuildViewQuery (Query w a) = w
+  buildQuery (Query b _) = Query b
+  buildQuery (ViewQuery b _) = ViewQuery b
 
-instance ToQuery Document where
-  type QueryType Document = Value
-  toQuery (Document tbl d) = Query
-    (do token <- getToken 
-        ref <- tableRef tbl
-        return $ QL.Query QL.READ token
-                     (Just $ defaultValue {
-                         QLReadQuery.term = defaultValue {
-                             QL.type' = QL.GETBYKEY, 
-                             QL.get_by_key = Just $ QL.GetByKey ref
-                                             (uTableKey tbl) (toJsonTerm d) } }
-                     ) Nothing Nothing)
-    (maybe (Left "insufficient results") Right . listToMaybe)
+instance ToQuery (Query w a) a where
+  toQuery q = q
 
-instance ToQuery (Expr t) where
-  type QueryType (Expr t) = [Value]
-  toQuery (SpotExpr doc) = fmap return $ toQuery doc
-  toQuery (Expr f) =
-    Query (do token <- getToken
-              (_, ex) <- f
-              return $ QL.Query QL.READ token
-                (Just $ defaultValue {
-                    QLReadQuery.term = ex
-                    }) Nothing Nothing)
-    Right
+instance ToBuildQuery Table where
+  type BuildViewQuery Table = True
+  buildQuery = buildQuery . toExpr
+
+instance FromJSON a => ToQuery Table [(Document, a)] where
+  toQuery tbl = buildQuery tbl $
+    (maybe (Left "wrong response type") Right . mapMSnd convert)
+
+mapMSnd :: Monad m => (a -> m b) -> [(c,a)] -> m [(c,b)]
+mapMSnd f = mapM $ \(a,b) -> liftM ((,) a) (f b)
+
+instance ToBuildQuery Document where
+  type BuildViewQuery Document = True
+  buildQuery = buildQuery . toExpr
+
+instance FromJSON a => ToQuery Document a where
+  toQuery doc = buildQuery doc $
+    maybe (Left "empty response") Right . ((convert . snd) <=< listToMaybe)
+
+data Proxy t = Proxy
+
+instance ToBuildQuery (Expr (StreamType False v)) where
+  type BuildViewQuery (Expr (StreamType False v)) = False
+  buildQuery = Query . fmap snd . exprToQLQuery
+
+instance ExtractValue v a => ToQuery (Expr (StreamType False v)) [a] where
+  toQuery e = buildQuery e $
+              maybe (Left "cannot convert response") Right
+              . extractListOf (Proxy :: Proxy v)
+
+instance ToBuildQuery (Expr (StreamType True v)) where
+  type BuildViewQuery (Expr (StreamType True v)) = True
+  buildQuery = ViewQuery . fmap (first viewTable) . exprToQLQuery
+
+instance ExtractValue v a => ToQuery (Expr (StreamType True v)) [(Document, a)] where
+  toQuery e = exprViewQuery (maybe (Left "cannot convert response") Right . extract) e
+    where extract = extractListOf (Proxy :: Proxy v)
+
+instance ToBuildQuery (Expr (ValueType v)) where
+  type BuildViewQuery (Expr (ValueType v)) = False
+  buildQuery = Query . fmap snd . exprToQLQuery
+
+instance ExtractValue v a => ToQuery (Expr (ValueType v)) a where
+  toQuery e = buildQuery e $ 
+              maybe (Left "empty response")
+                (maybe (Left "cannot convert response") Right .
+                 extractValue (Proxy :: Proxy v))
+              . listToMaybe
+
+exprToQLQuery :: Expr t -> QueryM (MaybeView (ExprTypeIsView t), QL.Query)
+exprToQLQuery e = do
+  token <- getToken
+  (vw, ex) <- exprV e
+  return $ (,) vw $ QL.Query QL.READ token (
+    Just $ defaultValue { QLReadQuery.term = ex }) Nothing Nothing
+
+exprViewQuery :: (ExprTypeIsView t ~ True) =>
+                 ([Value] -> Either String [a]) -> Expr t -> Query True [(Document, a)]
+exprViewQuery c e = flip ViewQuery (\x -> fmap (zip $ map fst x) (c (map snd x))) $ do
+  token <- getToken
+  (ViewOf tbl, ex) <- exprV e
+  return $ (,) tbl $ QL.Query QL.READ token (
+    Just $ defaultValue { QLReadQuery.term = ex }) Nothing Nothing
+
+extractListOf :: ExtractValue t a => Proxy t -> [Value] -> Maybe [a]
+extractListOf p = sequence . map (extractValue p)
+
+class ExtractValue t v | t -> v where
+  extractValue :: Proxy t -> Value -> Maybe v
+
+instance (Num a, FromJSON a) => ExtractValue NumberType a where extractValue _ = convert
+instance ExtractValue BoolType Bool where extractValue _ = convert
+instance FromJSON a => ExtractValue ObjectType a where extractValue _ = convert
+instance FromJSON a => ExtractValue ArrayType a where extractValue _ = convert
+instance (IsString a, FromJSON a) => ExtractValue StringType a where extractValue _ = convert
+instance ExtractValue NoneType () where extractValue _ = const $ Just ()
+instance FromJSON a => ExtractValue OtherValueType a where extractValue _ = convert
 
 -- | Submit a query to the server, throwing exceptions when there is an error
-run :: ToQuery a => RethinkDBHandle -> a -> IO (QueryType a)
+run :: ToQuery a v => RethinkDBHandle -> a -> IO v
 run h q = do
   r <- runEither h q
   case r of
@@ -409,22 +531,69 @@ run h q = do
     Right a -> return a
 
 -- | Return a (Left String) if there is an error
-runEither :: ToQuery a => RethinkDBHandle -> a -> IO (Either String (QueryType a))
-runEither h q = do
-  let Query f g = toQuery q
-  er <- runQLQuery h (\x -> fst $ runQueryM f $ QuerySettings x (rdbDatabase h) initialVars False)
-  return $ er >>= \r -> (responseErrorMessage r >>
-    (maybe (Left "decode error") Right . sequence . map (decodeAny . utf8) $
-     toList $ QL.response r) >>= g)
+runEither :: ToQuery a v => RethinkDBHandle -> a -> IO (Either String v)
+runEither h q = case toQuery q of
+  -- TODO: just call runBatch and get the resultsSeq
+  query -> do
+    tok <- getNewToken h
+    let ((vw, qlq), _) = runQueryM (queryBuild query) $
+                    QuerySettings tok (rdbDatabase h) initialVars False
+    r <- runQLQuery h qlq
+    return $ case r of
+      ErrorResponse {} -> Left (show r)
+      SuccessResponse _ strs -> queryExtract query vw =<<
+       (maybe (Left "decode error") Right . sequence . map decodeAny $ strs)
+
+addDoc :: Table -> Value -> Either String (Document, Value)
+addDoc tbl x = do
+  id' <- maybe (Left "missign primary key") Right $ getKey (tablePrimaryAttr tbl) x
+  return (Document tbl id', x)
+  where getKey k (Object o) = parseMaybe (.: str k) o
+        getKey _ _ = Nothing
 
 -- | Return Nothing when there is an error
-runMaybe :: ToQuery a => RethinkDBHandle -> a -> IO (Maybe (QueryType a))
+runMaybe :: ToQuery a v => RethinkDBHandle -> a -> IO (Maybe v)
 runMaybe h = fmap (either (const Nothing) Just) . runEither h
 
 -- | Get the raw response from a query
-runRaw :: ToQuery q => RethinkDBHandle -> q -> IO (Either String QL.Response)
-runRaw h q =
-  runQLQuery h (\tok -> fst $ runQueryM (_queryBuild (toQuery q)) $ QuerySettings tok (rdbDatabase h) initialVars False)
+runRaw :: (ToBuildQuery q, JSONQuery (BuildViewQuery q)) =>
+          RethinkDBHandle -> q -> IO Response
+runRaw h q = do
+  tok <- getNewToken h
+  let ((_, qlq), _) = runQueryM (queryBuild (jsonQuery (buildQuery q))) $
+                      QuerySettings tok (rdbDatabase h) initialVars False
+  runQLQuery h qlq
+
+-- | Get the json response from a query
+runJSON :: (JSONQuery (BuildViewQuery q), ToBuildQuery q) =>
+           RethinkDBHandle -> q -> IO [Value]
+runJSON h q = run h (jsonQuery (buildQuery q))
+
+class JSONQuery (b :: Bool) where
+  jsonQuery :: (forall a . ([If b (Document, Value) Value] -> Either String a) -> Query b a)
+               -> Query b [Value]
+
+instance JSONQuery False where
+  jsonQuery f = f Right
+
+instance JSONQuery True where
+  jsonQuery f = f (Right . map snd)
+
+data Results a = Results {
+  resultsHandle :: RethinkDBHandle,
+  resultsToken :: Int64,
+  resultsSeq :: IORef (Seq.Seq a),
+  _resultsError :: IORef (Maybe String)
+  }
+
+runBatch :: ToQuery q a => RethinkDBHandle -> q -> Results a
+runBatch = undefined
+
+next :: Results a -> IO (Maybe a)
+next = undefined
+
+resultsError :: Results a -> IO (Maybe String)
+resultsError = readIORef . _resultsError
 
 -- * Expressions
 
@@ -450,8 +619,8 @@ type instance ExprTypeStreamType (StreamType w t) = t
 
 -- | An RQL expression
 data Expr (t :: ExprTypeKind) where
-  Expr :: QueryM (MaybeView (ExprIsView (Expr t)), QL.Term) -> Expr t -- ^ A protobuf term
-  SpotExpr :: Document -> Expr (StreamType True ObjectType)           -- ^ A single document
+  Expr :: QueryM (MaybeView (ExprIsView (Expr t)), QL.Term) -> Expr t
+  SpotExpr :: Document -> Expr (StreamType True ObjectType)
 
 mkExpr :: ExprIsView (Expr t) ~ False => QueryM QL.Term -> Expr t
 mkExpr q = Expr $ fmap ((,) NoView) q
@@ -564,6 +733,22 @@ instance ToExpr Double where
 
 instance ToValue Double where
   toValue = toExpr
+
+instance ToExpr Char where
+  type ExprType Char = ValueType StringType
+  toExpr c = mkExpr $ return defaultValue {
+    QL.type' = QL.STRING, QL.valuestring = Just $ uFromString [c] }
+
+instance ToExpr T.Text where
+  type ExprType T.Text = ValueType StringType
+  toExpr s = mkExpr $ return defaultValue {
+    QL.type' = QL.STRING, QL.valuestring = Just $ uFromString (T.unpack s) }
+
+instance ToValue T.Text where
+  toValue = toExpr
+
+str :: String -> T.Text
+str = T.pack
 
 instance ToExpr a => ToExpr [a] where
   type ExprType [a] = ValueType ArrayType
@@ -718,7 +903,8 @@ runQueryM :: QueryM a -> QuerySettings -> (a, QuerySettings)
 runQueryM = runState
 
 initialVars :: [String]
-initialVars = concat $ zipWith (\n as -> map (++ show n) as) [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
+initialVars = concat $ zipWith (\n as -> map (++ (if n == 0 then "" else show n)) as)
+              [0 :: Int ..] (map (map return) $ repeat ['a'..'z'])
 
 getToken :: QueryM Int64
 getToken = fmap _queryToken S.get
@@ -821,13 +1007,6 @@ convert v = case fromJSON v of
   _         -> Nothing
 
 -- | Extract the error message from a Response if there is an error
-responseErrorMessage :: QL.Response -> Either String ()
-responseErrorMessage response = 
-  if QL.status_code response `elem` [QL.SUCCESS_EMPTY, QL.SUCCESS_JSON,
-                                     QL.SUCCESS_PARTIAL, QL.SUCCESS_STREAM]
-    then Right ()
-    else Left $ maybe (show $ QL.status_code response) uToString $ QL.error_message response
-
 -- | Help build meta queries
 metaQuery :: QueryM QL.MetaQuery -> QueryM QL.Query
 metaQuery q = do
