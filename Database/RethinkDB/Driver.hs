@@ -11,7 +11,6 @@ module Database.RethinkDB.Driver where
 import {-# SOURCE #-} Database.RethinkDB.Functions
 import Database.RethinkDB.Types
 
---import Data.Traversable (toList)
 import Control.Arrow
 import Data.Aeson.Types (parseMaybe)
 import Data.String
@@ -65,7 +64,7 @@ data RethinkDBHandle = RethinkDBHandle {
 
 -- | Connect to a RethinkDB server
 -- 
--- h <- openConnection "localhost" Nothing Nothing
+-- >>> h <- openConnection "localhost" Nothing Nothing
 
 openConnection :: HostName -> Maybe PortID -> Maybe String -> IO RethinkDBHandle
 openConnection host port mdb = do
@@ -79,7 +78,7 @@ openConnection host port mdb = do
 
 -- | Change the default database
 -- 
--- let h' = h `use` (db "players")
+-- >>> let h' = h `use` (db "players")
 
 use :: RethinkDBHandle -> Database -> RethinkDBHandle
 use h db' = h { rdbDatabase = db' }
@@ -228,18 +227,18 @@ defaultPrimaryAttr = uFromString "id"
 
 -- | Create a simple table refence with no associated database or primary key
 -- 
--- table "music"
+-- >>> table "music"
 -- 
 -- Another way to create table references is to use the Table constructor:
 -- 
--- Table (Just "mydatabase") "music" (Just "tuneid")
+-- >>> Table (Just "mydatabase") "music" (Just "tuneid")
 
 table :: String -> Table
 table n = Table Nothing n Nothing
 
 -- | Create a table on the server
 -- 
--- t <- run h $ tableCreate (table "fruits") def
+-- >>> t <- run h $ tableCreate (table "fruits") def
 
 tableCreate :: Table -> TableCreateOptions -> Query False Table
 tableCreate (Table mdb table_name primary_key)
@@ -309,7 +308,7 @@ insert_or_upsert tbl as overwrite = Query
 
 -- | Insert a document into a table
 -- 
--- d <- run h $ insert t (object ["name" .= "banane", "color" .= "red"])
+-- >>> d <- run h $ insert t (object ["name" .= "banana", "color" .= "red"])
 
 insert :: ToJSON a => Table -> a -> Query False Document
 insert tb a = fmap head $ insert_or_upsert tb [a] False
@@ -331,10 +330,10 @@ upsertMany tb a = insert_or_upsert tb a True
 
 -- | Update a table
 -- 
--- t <- run h $ tableCreate (table "example") def
--- run h $ insertMany t [object ["a" .= 1, "b" .= 11], object ["a" .= 2, "b" .= 12]]
--- run h $ update t (object ["b" .= 20])
--- run h $ t
+-- >>> t <- run h $ tableCreate (table "example") def
+-- >>> run h $ insertMany t [object ["a" .= 1, "b" .= 11], object ["a" .= 2, "b" .= 12]]
+-- >>> run h $ update t (object ["b" .= 20])
+-- >>> run h $ t
 
 update :: (ToExpr sel, ExprType sel ~ StreamType True out, ToMapping map,
            MappingFrom map ~ out, MappingTo map ~ ObjectType) =>
@@ -580,17 +579,75 @@ instance JSONQuery True where
   jsonQuery f = f (Right . map snd)
 
 data Results a = Results {
-  resultsHandle :: RethinkDBHandle,
-  resultsToken :: Int64,
+  resultsHandle :: IORef (Maybe (RethinkDBHandle, Int64)),
   resultsSeq :: IORef (Seq.Seq a),
-  _resultsError :: IORef (Maybe String)
+  _resultsError :: IORef (Maybe String),
+  resultsQueryView :: QueryViewPair [a]
   }
 
-runBatch :: ToQuery q a => RethinkDBHandle -> q -> Results a
-runBatch = undefined
+data QueryViewPair a where
+  QueryViewPair :: Query w a -> MaybeView w -> QueryViewPair a
 
+-- | TODO. runBatch = undefined
+runBatch :: ToQuery q [a] => RethinkDBHandle -> q -> IO (Results a)
+runBatch h q = case toQuery q of
+  query -> do
+    tok <- getNewToken h
+    let ((vw, qlq), _) = runQueryM (queryBuild query) $
+                    QuerySettings tok (rdbDatabase h) initialVars False
+    r <- runQLQuery h qlq
+    let (han, seq', err) = queryExtractResponse query vw r h tok
+    refHan <- newIORef han
+    refSeq <- newIORef seq'
+    refErr <- newIORef err
+    return $ Results refHan refSeq refErr (QueryViewPair query vw)
+
+queryExtractResponse ::
+  Query w [a] -> MaybeView w -> Response -> RethinkDBHandle -> Int64
+  -> (Maybe (RethinkDBHandle, Int64), Seq a, Maybe String)
+queryExtractResponse query vw r h tok =
+    case r of
+      ErrorResponse {} -> (Nothing, Seq.fromList [], Just $ show r)
+      SuccessResponse typ strs ->
+        let rList = queryExtract query vw =<<
+               (maybe (Left "decode error") Right . sequence . map decodeAny $ strs)
+        in case rList of
+          Left err -> (Nothing, Seq.fromList [], Just err)
+          Right list ->
+            let han = case typ of
+                  SuccessPartial -> Just (h, tok)
+                  SuccessStream -> Nothing
+                  SuccessJson -> Nothing
+                  SuccessEmpty -> Nothing
+            in (han, Seq.fromList list, Nothing)
+
+-- | TODO: next = undefined
 next :: Results a -> IO (Maybe a)
-next = undefined
+next res = do
+  seq' <- readIORef (resultsSeq res)
+  case Seq.viewl seq' of
+    car Seq.:< cdr -> do
+      writeIORef (resultsSeq res) cdr
+      return (Just car)
+    Seq.EmptyL -> do
+      mh <- readIORef (resultsHandle res)
+      case (mh, resultsQueryView res) of
+        (Nothing, _) -> return Nothing
+        (Just (h, tok), (QueryViewPair query vw)) -> do
+          resp <- runQLQuery h $ defaultValue {
+            QLQuery.type' = QL.CONTINUE, QLQuery.token = tok }
+          let (han, seq'', err) = queryExtractResponse query vw resp h tok
+          writeIORef (resultsHandle res) han
+          modifyIORef (resultsSeq res) (<> seq'')
+          writeIORef (_resultsError res) err
+          next res
+
+collect :: Results a -> IO [a]
+collect r = do
+  ma <- next r
+  case ma of
+    Nothing -> return []
+    Just a -> fmap (a:) (collect r)
 
 resultsError :: Results a -> IO (Maybe String)
 resultsError = readIORef . _resultsError
@@ -675,7 +732,7 @@ instance ToExpr Document where
   toExpr doc = SpotExpr doc
 
 instance ToValue Document where
-  toValue = streamToValue
+  toValue = streamToArray
 
 instance ToStream Document where
   toStream = toExpr
@@ -689,7 +746,7 @@ instance ToExpr Table where
       QL.table = Just $ QL.Table ref }
 
 instance ToValue Table where
-  toValue = streamToValue
+  toValue = streamToArray
                                   
 instance ToStream Table where
   toStream = toExpr
@@ -702,7 +759,7 @@ instance ToValue (Expr (ValueType t)) where
   toValue e = e
 
 instance ToValue (Expr (StreamType w t)) where
-  toValue = streamToValue
+  toValue = streamToArray
 
 instance ToStream (Expr (ValueType ArrayType)) where
   toStream = arrayToStream
@@ -798,22 +855,22 @@ type ValueExpr t = Expr (ValueType t)
 type ObjectStream b = Expr (StreamType b ObjectType)
 type ViewExpr = ObjectStream True
 
--- | What values can be compared with <, <=, > and >=
+-- | What values can be compared with @<@, @<=@, @>@ and @>=@
 class CanCompare (a :: ValueTypeKind)
 instance CanCompare NumberType
 instance CanCompare StringType
 
 instance Num (Expr (ValueType NumberType)) where
-  (+) = plus
-  (-) = minus
-  (*) = times
+  (+) = add
+  (-) = sub
+  (*) = mul
   abs = jsfun "abs"
   signum = signum'
   fromInteger = toExpr
 
 instance Fractional (Expr (ValueType NumberType)) where
   fromRational n = toExpr (fromRational n :: Double)
-  (/) = divide
+  (/) = div'
 
 -- | A sequence is either a stream or an array
 class Sequence (e :: ExprTypeKind) where
@@ -837,8 +894,8 @@ obj = Obj
 -- 
 -- The whole stream is read into the server's memory
 
-streamToValue :: (ToExpr e, ExprType e ~ StreamType w t) => e -> Expr (ValueType ArrayType)
-streamToValue = simpleOp QL.STREAMTOARRAY . return . expr
+streamToArray :: (ToExpr e, ExprType e ~ StreamType w t) => e -> Expr (ValueType ArrayType)
+streamToArray = simpleOp QL.STREAMTOARRAY . return . expr
 
 -- | Convert a value into a stream
 arrayToStream :: (ToExpr e, ExprType e ~ ValueType ArrayType) => e -> Expr (StreamType False t)

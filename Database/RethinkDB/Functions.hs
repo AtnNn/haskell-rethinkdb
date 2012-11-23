@@ -30,17 +30,17 @@ signum x = bind x (\n -> if' (n `lt` (0 :: NumberExpr)) (-1 :: Int)
                          (if' (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
 signum' = signum
 
-(+), plus, (-), minus, (*), times, (/), divide, mod, mod'
+(+), add, (-), sub, (*), mul, (/), div', mod, mod'
   :: (HaveValueType a b NumberType) => a -> b -> NumberExpr
 
 (+) a b = simpleOp QL.ADD [value a, value b]
 (-) a b = simpleOp QL.SUBTRACT [value a, value b]
 (*) a b = simpleOp QL.MULTIPLY [value a, value b]
 (/) a b = simpleOp QL.DIVIDE [value a, value b]
-plus = (+)
-minus = (-)
-times = (*)
-divide = (/)
+add = (+)
+sub = (-)
+mul = (*)
+div' = (/)
 
 mod a b = simpleOp QL.MODULO [value a, value b]
 mod' = mod
@@ -51,11 +51,11 @@ and a b = simpleOp QL.ALL [value a, value b]
 or' = or
 and' = and
 
-(==), (!=), eq, neq :: (HasValueType a x, HasValueType b y) => a -> b -> BoolExpr
+(==), (!=), eq, ne :: (HasValueType a x, HasValueType b y) => a -> b -> BoolExpr
 eq a b = comparison QL.EQ [value a, value b]
-neq a b = comparison QL.NE [value a, value b]
+ne a b = comparison QL.NE [value a, value b]
 (==) = eq
-(!=) = neq
+(!=) = ne
 
 (>), (>=), (<), (<=), gt, lt, ge, le
   :: (HaveValueType a b v, CanCompare v) => a -> b -> BoolExpr
@@ -204,7 +204,7 @@ union' = union
 -- | A fold
 -- 
 -- >>> run h $ reduce [1,2,3] (0 :: Int) (+)
--- [Number 6]
+-- 6
 
 fold :: (ToValue z, ToValueType (ExprType z) ~ a,
          ToStream e, b `HasToStreamValueOf` e,
@@ -260,7 +260,7 @@ groupedMapReduce group val base reduction e = Expr $ do
          QL.var2 = uFromString v2,
          QLReduction.body = result }} }
 
--- TODO: write this after the rewrite of run
+-- | TODO. forEach = undefined
 forEach = P.error "forEach is not implemented yet"
 
 zip, zip' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
@@ -317,7 +317,7 @@ avg k = MapReduce (\x -> toExpr [x ! k :: NumberExpr, 1]) (toExpr [0,0 :: Int])
 -- When GHC thinks the result is ambiguous, it has to be annotated.
 -- 
 -- >>> run h $ (get (table "tea") "black" ! "water_temperature" :: NumberExpr)
--- [Number 95]
+-- 95
 
 (!) :: (ToExpr a, ExprValueType a ~ ObjectType) => a -> String -> ValueExpr t
 (!) a b = mkExpr $ rapply [expr a] (op QL.GETATTR) {
@@ -353,7 +353,9 @@ merge this other = simpleOp QL.MAPMERGE [expr this, expr other]
 -- | A javascript expression
 -- 
 -- It is often necessary to specify the result type:
--- run h $ (js "1 + 2" :: ExprNumber)
+-- 
+-- >>> run h $ (js "1 + 2" :: NumberExpr)
+-- 3
 
 js :: String -> Expr (ValueType any)
 js s = mkExpr $ return defaultValue {
