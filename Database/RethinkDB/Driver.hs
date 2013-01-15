@@ -8,6 +8,8 @@
 
 module Database.RethinkDB.Driver where
 
+import Debug.Trace (trace, putTraceMsg)
+
 import {-# SOURCE #-} Database.RethinkDB.Functions
 import Database.RethinkDB.Types
 
@@ -165,21 +167,27 @@ showBacktrace bt = ("in " ++ ) . concat . (++ [" query"]) .
 runQLQuery :: RethinkDBHandle -> QL.Query -> IO Response
 runQLQuery h query = do
   let queryS = messagePut query
+  putTraceMsg $ "haskell-rethinkdb: Sending Query (token #" ++ show (QLQuery.token query) ++ ")"
   sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
   fmap convertResponse $ readResponse (QLQuery.token query)
-  
   where readResponse t = do
+          putTraceMsg $ "haskell-rethinkdb: Waiting for the next message from the server"
           header <- recvAll h 4
+          putTraceMsg $ "haskell-rethinkdb: Preparing to receive " ++ show (unpackUInt header) ++ " bytes"
           responseS <- recvAll h (unpackUInt header)
           let eResponse = messageGet responseS
           case eResponse of
             Left errMsg -> return $ Left errMsg
             Right (response, rest)
-              | B.null rest ->
+              | B.null rest -> do
+                putTraceMsg $ "haskell-rethinkdb: Got a message with token #" ++
+                  show (QLResponse.token response)
                 (case QLResponse.token response of
                   n | n == t -> return $ Right response
                     | n > t -> return $ Left "RethinkDB: runQLQuery: invalid response token"
-                    | otherwise -> readResponse t)
+                    | otherwise -> do
+                      putTraceMsg $ "haskell-rethinkdb: Ignoring the message"
+                      readResponse t)
               | otherwise -> return $ Left "RethinkDB: runQLQuery: invalid reply length"
 
 -- * CRUD
