@@ -1,1 +1,4 @@
-hprotoc -p Database.RethinkDB.Internal data/query_language.proto
+#!/bin/bash
+file=${1:-../../src/rdb_protocol/ql2.proto}
+cp $file ql2.proto
+hprotoc -p Database.RethinkDB.Protobuf ql2.proto

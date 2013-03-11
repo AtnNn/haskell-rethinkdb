@@ -1,269 +1,122 @@
-{-# LANGUAGE DataKinds, TypeFamilies, ConstraintKinds, FlexibleInstances, 
-             FlexibleContexts, TypeOperators, ViewPatterns #-}
+{-# LANGUAGE DataKinds, TypeOperators, ConstraintKinds, FlexibleContexts, PolyKinds #-}
 
 -- | Functions from the ReQL (RethinkDB Query Language)
 
 module Database.RethinkDB.Functions where
 
-import Database.RethinkDB.Types
-import Database.RethinkDB.Driver
+import Database.RethinkDB.Term
+import Database.RethinkDB.Type as T
 
-import Text.ProtocolBuffers.Basic hiding (Default)
-import qualified Database.RethinkDB.Internal.Types as QL
-import qualified Database.RethinkDB.Internal.Query_Language.Term as QLTerm
-import qualified Database.RethinkDB.Internal.Query_Language.WriteQuery as QLWriteQuery
-import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
-import qualified Database.RethinkDB.Internal.Query_Language.Builtin.OrderBy as QLOrderBy
-import qualified Database.RethinkDB.Internal.Query_Language.Reduction as QLReduction
+import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
 
 import qualified Prelude as P
-import Prelude (Bool(..), ($), Maybe(..), Int, String, flip, undefined, return, (.), mapM)
 
-import Control.Monad (liftM)
-import Data.Maybe
-import Data.Functor
-import Data.Aeson
-import qualified Data.Sequence as Seq
-
--- * Numbers, Booleans and Comparisons
-
-signum, signum' :: (ToValue e, ToValueType (ExprType e) ~ NumberType) => e -> NumberExpr
-signum x = bind x (\n -> if' (n `lt` (0 :: NumberExpr)) (-1 :: Int)
-                         (if' (n `lt` (0 :: NumberExpr)) (1 :: Int) (0 :: Int)))
-signum' = signum
-
-(+), add, (-), sub, (*), mul, (/), div', mod, mod'
-  :: (HaveValueType a b NumberType) => a -> b -> NumberExpr
-
-(+) a b = simpleOp QL.ADD [value a, value b]
-(-) a b = simpleOp QL.SUBTRACT [value a, value b]
-(*) a b = simpleOp QL.MULTIPLY [value a, value b]
-(/) a b = simpleOp QL.DIVIDE [value a, value b]
+(+), add, (-), sub, (*), mul, (/), div, div', mod, mod'
+  :: (a ~~ Number, b ~~ Number) => a -> b -> Term Number
+(+) a b = op ADD (a, b) []
+(-) a b = op SUB (a, b) []
+(*) a b = op MUL (a, b) []
+(/) a b = op DIV (a, b) []
 add = (+)
 sub = (-)
 mul = (*)
+div = (/)
 div' = (/)
-
-mod a b = simpleOp QL.MODULO [value a, value b]
+mod a b = op MOD (a, b) []
 mod' = mod
 
-or, or', and, and' :: HaveValueType a b BoolType => a -> b -> BoolExpr
-or a b = simpleOp QL.ANY [value a, value b]
-and a b = simpleOp QL.ALL [value a, value b]
+or, or', and, and' :: (a ~~ T.Bool, b ~~ T.Bool) => a -> b -> Term Bool
+or a b = op ANY (a, b) []
+and a b = op ALL (a, b) []
 or' = or
 and' = and
 
-(==), (!=), eq, ne :: (HasValueType a x, HasValueType b y) => a -> b -> BoolExpr
-eq a b = comparison QL.EQ [value a, value b]
-ne a b = comparison QL.NE [value a, value b]
+(==), (!=), eq, ne :: (a ~~~ Datum, b ~~~ Datum) => a -> b -> Term Bool
+eq a b = op EQ (a, b) []
+ne a b = op NE (a, b) []
 (==) = eq
 (!=) = ne
 
 (>), (>=), (<), (<=), gt, lt, ge, le
-  :: (HaveValueType a b v, CanCompare v) => a -> b -> BoolExpr
-gt a b = comparison QL.GT [value a, value b]
-lt a b = comparison QL.LT [value a, value b]
-ge a b = comparison QL.GE [value a, value b]
-le a b = comparison QL.LE [value a, value b]
+  :: (a ~~~ Datum, b ~~~ Datum) => a -> b -> Term Bool
+gt a b = op GT (a, b) []
+lt a b = op LT (a, b) []
+ge a b = op GE (a, b) []
+le a b = op LE (a, b) []
 (>) = gt
 (>=) = ge
 (<) = lt
 (<=) = le
 
-not, not' :: HasValueType a BoolType => a -> BoolExpr
-not a = simpleOp QL.NOT [value a]
+not, not' :: (a ~~ Bool) => a -> Term Bool
+not a = op NOT [a] []
 not' = not
 
 -- * Lists and Streams
 
-length, count :: (ToExpr e, Sequence (ExprType e)) => e -> NumberExpr
-count e = simpleOp QL.LENGTH [expr e]
-length = count
+count :: (a ~~ Sequence) => a -> Term Number
+count e = op COUNT [e] []
 
-(++), concat :: (HaveValueType a b v, CanConcat v) => a -> b -> Expr (ValueType v)
-(++) a b = simpleOp QL.ADD [value a, value b]
+(++), concat :: (a ~~ Sequence, b ~~ Sequence) => a -> b -> Term Sequence
+(++) a b = op UNION (a, b) []
 concat = (++)
 
-map, map' :: (ToMapping m, ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
-       m -> e -> Expr (StreamType False (MappingTo m))
-map fun a = mkExpr $ do
-  mapp <- mapping fun
-  rapply [expr a] $ (op QL.MAP) {
-    QL.map = Just $ QL.Map mapp }
-
+map, map' :: (a ~~ Sequence, f ~~~ Function '[Datum] Datum) => f -> a -> Term Sequence
+map f a = op MAP (a, f) []
 map' = map
 
--- | Get all the documents for which the given predicate is true
-filter', filter :: (ToMapping m, ToStream e,
-                    MappingFrom m `HasToStreamValueOf` e) =>
-                   m -> e -> Expr (ExprType e)
-filter' fil e = Expr $ do
-  mapp <- mapping fil
-  (vw, term) <- exprV e
-  withView vw $ rapply [return term] $ (op QL.FILTER) {
-    QL.filter = Just $ QL.Filter $ mappingToPredicate mapp }
+filter', filter :: (a ~~ Sequence, f ~~~ Function '[Datum] Bool) => f -> a -> Term Sequence
+filter f a = op FILTER (a, f) []
+filter' = filter
 
-filter = filter'
+between :: (a ~~~ Datum, b ~~~ Datum) => a -> b -> Term Sequence -> Term Sequence
+between a b e = op BETWEEN [e] ["left_bound" := a, "right_bound" := b]
 
--- | Get all documents between two primary keys (both keys are inclusive)
-between :: (ToJSON a, ToStream e, ObjectType `HasToStreamValueOf` e) =>
-           (Maybe a) -> (Maybe a) -> e -> Expr (ExprType e)
-between a b e = Expr $ do
-  (vw, term) <- exprV e
-  withView vw $ rapply [return term] (op QL.RANGE) {
-          QL.range = Just $ QL.Range (viewKeyAttr vw)
-                     (fmap toJsonTerm a) (fmap toJsonTerm b) }
+append :: (a ~~~ Datum, b ~~ Sequence) => a -> b -> Term Sequence
+append a b = op APPEND (b, a) []
 
-append :: (HasValueType a ArrayType, HasValueType b x) => a -> b -> ArrayExpr
-append a b = simpleOp QL.ARRAYAPPEND [value a, value b]
-
-concatMap, concatMap' ::
-  (ToMapping m, (MappingTo m) ~ ArrayType,
-   ToStream e, MappingFrom m `HasToStreamValueOf` e) =>
-   m -> e -> Expr (StreamType False t)
-concatMap fun e = mkExpr $ do
-  mapp <- mapping fun
-  rapply [stream e] (op QL.CONCATMAP) {
-    QL.concat_map = Just $ QL.ConcatMap mapp }
-
+concatMap, concatMap' :: (f ~~~ Function '[Datum] Datum, a ~~ Sequence)
+  => f -> a -> Term Sequence
+concatMap f e = op CONCATMAP (e, f) []
 concatMap' = concatMap
 
-innerJoin :: (ToStream a, l `HasToStreamValueOf` a,
-              ToStream b, r `HasToStreamValueOf` b) =>
-             a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
-             Expr (StreamType False ObjectType)
-innerJoin self other p =
-  flip concatMap self
-  (\row -> flip concatMap other
-           (\row2 -> if' (p row row2)
-                     [obj ["left" := row, "right" := row2]]
-                     nil))
+innerJoin, outerJoin :: (f ~~~ Function '[T.Object, T.Object] Bool, a ~~ Sequence, b ~~ Sequence)
+          => f -> a -> b -> Term Sequence
+innerJoin f a b = op INNER_JOIN (a, b, f) []
+outerJoin f a b = op OUTER_JOIN (a, b, f) []
 
-outerJoin :: (ToStream a, l `HasToStreamValueOf` a,
-              ToStream b, r `HasToStreamValueOf` b) =>
-             a -> b -> (ValueExpr l -> ValueExpr r -> BoolExpr) ->
-             Expr (StreamType False ObjectType)
-outerJoin self other p =
-  flip concatMap' self
-  (\row -> bind (flip concatMap' other
-                 (\row2 -> if' (p row row2)
-                           [obj ["left" := row, "right" := row2]]
-                           nil))
-           (\matches ->
-             if' (count matches `gt` (0 :: Int)) (asArray matches) [obj ["left" := row]]))
+eqJoin :: (a ~~ Sequence, b ~~ Sequence) => a -> Key -> b -> Term Sequence
+eqJoin a k b = op EQ_JOIN (a, k, b) []
 
-asArray :: ToExpr e => e -> ArrayExpr
-asArray e = mkExpr $ expr e
-
-eqJoin :: (ToStream a, ObjectType `HasToStreamValueOf` a,
-           ToExpr b, ExprType b ~ ExprType Selection) =>
-           a -> String -> b -> Expr (StreamType False ObjectType)
-eqJoin this k1 other =
-  flip concatMap this $ \row ->
-    bind (get other (row ! k1)) $ \right ->
-      if' (right != ()) [obj ["left" := row, "right" := right]] nil
-
-drop, drop', skip :: (ToStream e, t `HasToStreamValueOf` e,
-         ToExpr n, ExprType n ~ ValueType NumberType) =>
-        e -> n -> Expr (StreamType (ExprIsView e) t)
-drop e n = Expr $ do
-  (vw, ex) <- exprV e
-  withView vw $ rapply [return ex, expr (), expr n] (op QL.SLICE)
+drop, drop' :: (a ~~ Number, b ~~ Sequence) => a -> b -> Term Sequence
+drop a b = op SKIP (b, a) []
 drop' = drop
-skip = drop
 
-take, take', limit :: (ToStream e, t `HasToStreamValueOf` e,
-         ToExpr n, ExprType n ~ ValueType NumberType) =>
-        e -> n -> Expr (StreamType (ExprIsView e) t)
-take e n = Expr $ do
-  (vw, ex) <- exprV e
-  withView vw $ rapply [return ex, expr n, expr ()] (op QL.SLICE)
+take, take' :: (a ~~ Number, b ~~ Sequence) => a -> b -> Term Sequence
+take a b = op LIMIT (a, b) []
 take' = take
-limit  = take
 
-slice :: (ToStream e, t `HasToStreamValueOf` e,
-         ToExpr n, ExprType n ~ ValueType NumberType,
-         ToExpr m, ExprType m ~ ValueType NumberType) =>
-        e -> n -> m -> Expr (StreamType (ExprIsView e) t)
-slice e n m = Expr $ do
-  (vw, ex) <- exprV e
-  withView vw $ rapply [return ex, expr n, expr m] (op QL.SLICE)
+slice :: (a ~~ Number, b ~~ Number, c ~~ Sequence) => a -> b -> c -> Term Sequence
+slice n m s = op SLICE (s, n, m) []
 
-(!!), nth :: (ToStream e, t `HasToStreamValueOf` e,
-        ToExpr n, ExprType n ~ ValueType NumberType) =>
-        e -> n -> ValueExpr t
-nth e n = Expr $ withView NoView $ rapply [stream e, expr n] (op QL.NTH)
-(!!) = nth
+(!!), nth :: (a ~~ Sequence, b ~~ Number) => a -> b -> Term Datum
+nth n s = op NTH (s, n) []
+s !! n = op NTH (s, n) []
 
--- | The empty list expression
-nil :: ValueExpr ArrayType
-nil = toExpr ([] :: [()])
+fold :: (f ~~~ Function '[base, x] Datum, b ~~ base, s ~~ Sequence) => f -> b -> a -> Term Datum
+fold f b s = op REDUCE (f, s) ["base" := b]
 
-union, union' :: (ToStream a, t `HasToStreamValueOf` a,
-           ToStream b, t `HasToStreamValueOf` b) =>
-          a -> b -> Expr (StreamType False t)
-union a b = simpleOp QL.UNION [stream a, stream b]
-union' = union
+fold1 :: (f ~~~ Function '[base, x] Datum, s ~~ Sequence) => f -> a -> Term Datum
+fold1 f b s = op REDUCE (f, s) []
 
--- | A fold
--- 
--- >>> run h $ reduce [1,2,3] (0 :: Int) (+)
--- 6
-
-fold :: (ToValue z, ToValueType (ExprType z) ~ a,
-         ToStream e, b `HasToStreamValueOf` e,
-         ToExpr c, ExprIsView c ~ False) =>
-        (ValueExpr a -> ValueExpr b -> c) -> z -> e -> Expr (ExprType c)
-fold f a e = Expr $ do
-  v1 <- newVar
-  v2 <- newVar
-  aq <- value a
-  result <- expr (f (var v1) (var v2))
-  withView NoView $ rapply [stream e] (op QL.REDUCE) {
-    QL.reduce = Just $ QL.Reduction {
-       QL.base = aq,
-       QL.var1 = uFromString v1,
-       QL.var2 = uFromString v2, 
-       QLReduction.body = result } }
-
-reduce :: (ToValue z, ToValueType (ExprType z) ~ a,
-         ToStream e, b `HasToStreamValueOf` e,
-         ToExpr c, ExprIsView c ~ False) =>
-        e -> z -> (ValueExpr a -> ValueExpr b -> c) -> Expr (ExprType c)
-reduce this base f = fold f base this
-
-distinct :: (ToStream e, v `HasToStreamValueOf` e) =>
-            e -> Expr (StreamType False v)
-distinct e = simpleOp QL.DISTINCT [stream e]
-
--- TODO: does not work
-groupedMapReduce :: (ToValue group, ToValue value,
-                     ToValue acc, ToValueType (ExprType acc) ~ b,
-                     ToValue acc', ToValueType (ExprType acc') ~ b,
-                     ToStream e, a `HasToStreamValueOf` e) =>
-                    (ValueExpr a -> group) ->
-                    (ValueExpr a -> value) ->
-                    acc ->
-                    (ValueExpr b -> ValueExpr v -> acc') ->
-                    e -> 
-                    Expr (StreamType False b)
-groupedMapReduce group val base reduction e = Expr $ do
-  g <- mapping group
-  v <- mapping val
-  v1 <- newVar
-  v2 <- newVar
-  b <- value base
-  result <- value (reduction (var v1) (var v2))
-  withView NoView $ rapply [stream e] (op QL.GROUPEDMAPREDUCE) {
-    QL.grouped_map_reduce = Just $ QL.GroupedMapReduce {
-       QL.group_mapping = g,
-       QL.value_mapping = v,
-       QL.reduction = QL.Reduction {
-         QL.base = b, 
-         QL.var1 = uFromString v1,
-         QL.var2 = uFromString v2,
-         QLReduction.body = result }} }
-
+distinct :: (s ~~ Sequence) => s -> Term Sequence
+distinct s = op DISTINCT [s] []
+{-
+groupedMapReduce ::
+  (group ~~~ Function '[Datum] Datum,
+   map ~~~ Function '[Object] x,
+   reduce ~~~ Function 
+                     
 -- | Execute a write query for each element of the stream
 -- 
 -- >>> run h $ forEach [1,2,3::Int] (\x -> insert (table "fruits") (obj ["n" := x]))
@@ -435,3 +288,4 @@ error' = error
 class CanConcat (a :: ValueTypeKind)
 instance CanConcat StringType
 instance CanConcat ArrayType
+-}

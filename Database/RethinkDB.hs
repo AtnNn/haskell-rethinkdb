@@ -9,6 +9,17 @@
 -- >>> import qualified Database.RethinkDB.Functions as R
 
 module Database.RethinkDB (
+  module Database.RethinkDB.Term,
+  module Database.RethinkDB.Network,
+  module Database.RethinkDB.Crud
+  ) where
+
+import Database.RethinkDB.Term
+import Database.RethinkDB.Network
+import Database.RethinkDB.Crud
+
+{-
+module Database.RethinkDB (
   
   -- * Accessing RethinkDB
   
@@ -98,3 +109,4 @@ import Prelude ()
 import Database.RethinkDB.Types
 import Database.RethinkDB.Driver
 import Database.RethinkDB.Functions
+-}
