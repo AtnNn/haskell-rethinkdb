@@ -44,8 +44,19 @@ instance Instance StreamSelection StreamSelection
 instance Instance StreamSelection Table
 instance Instance Table Table
 instance Instance Database Database
+
 instance Instance ret ret2
          => Instance (Function '[] ret) (Function '[] ret2)
 instance (Instance x2 x,
           Instance (Function xs ret) (Function xs2 ret2))
          => Instance (Function (x ': xs) ret) (Function (x2 ': xs2) ret2)
+
+-- Also accept unknown datums
+instance Instance Null Datum
+instance Instance Bool Datum
+instance Instance Number Datum
+instance Instance String Datum
+instance Instance Object Datum
+instance Instance SingleSelection Datum
+instance Instance Array Datum
+instance Instance Sequence Datum
