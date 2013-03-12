@@ -1,10 +1,10 @@
-{-# LANGUAGE KindSignatures, DataKinds, ExistentialQuantification, GADTs, 
-             TypeFamilies, TypeOperators, PolyKinds, ConstraintKinds, RankNTypes, 
-             MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, 
+{-# LANGUAGE KindSignatures, DataKinds, ExistentialQuantification, GADTs,
+             TypeFamilies, TypeOperators, PolyKinds, ConstraintKinds, RankNTypes,
+             MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances,
              FlexibleContexts, RecordWildCards, GeneralizedNewtypeDeriving #-}
 
 -- | Building RQL queries in Haskell
-module Database.RethinkDB.Term where 
+module Database.RethinkDB.Term where
 
 import Data.List
 import qualified Data.Sequence as S
@@ -55,7 +55,7 @@ instance Show BaseTerm where
     show fun ++ " (" ++ concat (intersperse ", " (mapA show args ++ map show optargs)) ++ ")"
 
 showD :: Datum -> String
-showD d = case Datum.type' d of 
+showD d = case Datum.type' d of
   R_NUM -> show' $ r_num d
   R_BOOL -> show' $ r_bool d
   R_STR -> show' $ r_str d

@@ -26,7 +26,7 @@ dbDrop (Database name) = Query
   (const $ Right ())
 
 -- | List the databases on the server
--- 
+--
 -- >>> run h $ dbList
 -- [test, dev, prod]
 
@@ -63,31 +63,31 @@ defaultPrimaryAttr :: Utf8
 defaultPrimaryAttr = uFromString "id"
 
 -- | Create a simple table refence with no associated database or primary key
--- 
+--
 -- >>> table "music"
--- 
+--
 -- Another way to create table references is to use the Table constructor:
--- 
+--
 -- >>> Table (Just "mydatabase") "music" (Just "tuneid")
 
 table :: String -> Table
 table n = Table Nothing n Nothing
 
 -- | Create a table on the server
--- 
+--
 -- @def@ can be imported from Data.Default
--- 
+--
 -- >>> t <- run h $ tableCreate (table "fruits") def
 
 tableCreate :: Table -> TableCreateOptions -> Query False Table
 tableCreate (Table mdb table_name primary_key)
   (TableCreateOptions datacenter cache_size) = Query
-  (metaQuery $ do 
+  (metaQuery $ do
       curdb <- activeDB
       let create = defaultValue {
         QLCreateTable.datacenter = fmap uFromString datacenter,
         QLCreateTable.table_ref = QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
-                                  (uFromString table_name) Nothing, 
+                                  (uFromString table_name) Nothing,
         QLCreateTable.primary_key = fmap uFromString primary_key,
         QLCreateTable.cache_size = cache_size
         }
@@ -104,8 +104,8 @@ tableDrop tbl = Query
 
 -- | List the tables in a database
 tableList :: Database -> Query False [Table]
-tableList (Database name) = Query 
-  (metaQuery $ return $ 
+tableList (Database name) = Query
+  (metaQuery $ return $
     QL.MetaQuery QL.LIST_TABLES (Just $ uFromString name) Nothing Nothing)
   (maybe (Left "error") Right . sequence .
    map (fmap (\x -> Table (Just (Database name)) x Nothing) . convert))
@@ -150,7 +150,7 @@ insert_or_upsert tbl array overwrite = WriteQuery
   (whenSuccess "generated_keys" $ \keys -> Right $ map (\doc -> Document tbl doc) keys)
 
 -- | Insert a document into a table
--- 
+--
 -- >>> d <- run h $ insert t (object ["name" .= "banana", "color" .= "red"])
 
 insert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
@@ -169,14 +169,14 @@ upsert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
           Table -> a -> WriteQuery Document
 upsert tb a = fmap head $ insert_or_upsert tb [a] True
 
--- | Insert many documents into a table, overwriting any existing documents 
+-- | Insert many documents into a table, overwriting any existing documents
 --   with the same primary key.
 upsertMany :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
               Table -> [a] -> WriteQuery [Document]
 upsertMany tb a = insert_or_upsert tb a True
 
 -- | Update a table
--- 
+--
 -- >>> t <- run h $ tableCreate (table "example") def
 -- >>> run h $ insertMany t [object ["a" .= 1, "b" .= 11], object ["a" .= 2, "b" .= 12]]
 -- >>> run h $ update t (object ["b" .= 20])

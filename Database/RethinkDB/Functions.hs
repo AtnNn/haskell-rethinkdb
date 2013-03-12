@@ -115,10 +115,10 @@ distinct s = op DISTINCT [s] []
 groupedMapReduce ::
   (group ~~~ Function '[Datum] Datum,
    map ~~~ Function '[Object] x,
-   reduce ~~~ Function 
-                     
+   reduce ~~~ Function
+
 -- | Execute a write query for each element of the stream
--- 
+--
 -- >>> run h $ forEach [1,2,3::Int] (\x -> insert (table "fruits") (obj ["n" := x]))
 
 forEach :: (ToStream a, v `HasToStreamValueOf` a) =>
@@ -183,9 +183,9 @@ avg k = MapReduce (\x -> toExpr [x ! k :: NumberExpr, 1]) (toExpr [0,0 :: Int])
 -- * Accessors
 
 -- | Get the value of the field of an object
--- 
+--
 -- When GHC thinks the result is ambiguous, it may have to be annotated.
--- 
+--
 -- >>> run h $ (get (table "tea") "black" ! "water_temperature" :: NumberExpr)
 -- 95
 
@@ -201,7 +201,7 @@ unpick :: HasValueType e ObjectType => [String] -> e -> ObjectExpr
 unpick ks e = mkExpr $ rapply [value e] (op QL.WITHOUT) {
   QL.attrs = Seq.fromList $ P.map uFromString ks }
 
-(!?) :: (HasValueType a ObjectType) => a -> String -> BoolExpr 
+(!?) :: (HasValueType a ObjectType) => a -> String -> BoolExpr
 (!?) a b = mkExpr $ rapply [value a] (op QL.HASATTR) {
   QLBuiltin.attr = Just $ uFromString b }
 
@@ -221,9 +221,9 @@ merge this other = simpleOp QL.MAPMERGE [expr this, expr other]
 -- * Control Structures, Functions and Javascript
 
 -- | A javascript expression
--- 
+--
 -- It is often necessary to specify the result type:
--- 
+--
 -- >>> run h $ (js "1 + 2" :: NumberExpr)
 -- 3
 
@@ -252,7 +252,7 @@ let' pairs e = Expr $ do
     QLTerm.let' = Just $ QL.Let (Seq.fromList $ varTerms) body }
 
 var :: ExprIsView (Expr t) ~ False => String -> Expr t
-var v = mkExpr $ return defaultValue { 
+var v = mkExpr $ return defaultValue {
   QLTerm.type' = QL.VAR,
   QLTerm.var = Just $ uFromString v
   }
@@ -270,13 +270,13 @@ if' t a b = mkExpr $ do
     QLTerm.type' = QL.IF, QL.if_ = Just $ QL.If tq aq bq }
 
 -- | A javascript function
--- 
+--
 -- >>> let squareRoot = jsfun "Math.sqrt" :: NumberExpr -> NumberExpr
 -- >>> run h $ squareRoot 5 :: IO Double
 -- 2.23606797749979
 
 jsfun :: ToValue e => String -> e -> Expr (ValueType y)
-jsfun f e = mkExpr $ do 
+jsfun f e = mkExpr $ do
   v <- newVar
   expr (let' [v := e] $ js $ f P.++ "(" P.++ v P.++ ")")
 

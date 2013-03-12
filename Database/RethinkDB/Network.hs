@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module Database.RethinkDB.Network where 
+module Database.RethinkDB.Network where
 
 import Network
 import System.IO (Handle, hClose)
@@ -31,13 +31,13 @@ import Database.RethinkDB.Crud
 data RethinkDBHandle = RethinkDBHandle {
   rdbHandle :: Handle,
   rdbToken :: IORef Int64, -- ^ The next token to use
-  rdbDatabase :: Database  -- ^ The default database 
+  rdbDatabase :: Database  -- ^ The default database
   }
 
 -- | Create a new connection to the database server
--- 
+--
 -- /Example:/ connect using the default port
--- 
+--
 -- >>> h <- openConnection "localhost" 28015
 
 openConnection :: HostName -> Integer -> IO RethinkDBHandle
@@ -49,7 +49,7 @@ openConnection host port = do
   return (RethinkDBHandle h r db')
 
 magicNumber = packUInt $ fromEnum V0_1
- 
+
 -- | Convert a 4-bte byestring to an int
 unpackUInt :: ByteString -> Int
 unpackUInt s = case unpack s of
@@ -61,7 +61,7 @@ unpackUInt s = case unpack s of
 
 -- | Convert an int to a 4-byte bytestring
 packUInt :: Int -> B.ByteString
-packUInt n = pack $ map fromIntegral $ 
+packUInt n = pack $ map fromIntegral $
                [n `mod` 256, (n `shiftR` 8) `mod` 256,
                 (n `shiftR` 16) `mod` 256, (n `shiftR` 24) `mod` 256]
 
@@ -124,7 +124,7 @@ runQLQuery h query = do
   let queryS = messagePut query
   sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
   fmap convertResponse $ readResponse (Query.token query)
-  
+
   where readResponse t = do
           header <- recvAll h 4
           responseS <- recvAll h (unpackUInt header)
@@ -140,17 +140,17 @@ runQLQuery h query = do
               | otherwise -> return $ Left "RethinkDB: runQLQuery: invalid reply length"
 
 -- | Set the default database
--- 
+--
 -- The new handle is an alias for the old one. Calling closeConnection on either one
 -- will close both.
--- 
+--
 -- >>> let h' = use h (db "players")
 
 use :: RethinkDBHandle -> Database -> RethinkDBHandle
 use h db' = h { rdbDatabase = db' }
 
 -- | Close an open connection
--- 
+--
 -- >>> closeConnection h
 
 closeConnection :: RethinkDBHandle -> IO ()
