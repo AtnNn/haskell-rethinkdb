@@ -1,11 +1,13 @@
 {-# LANGUAGE KindSignatures, DataKinds, ExistentialQuantification, GADTs,
              TypeFamilies, TypeOperators, PolyKinds, ConstraintKinds, RankNTypes,
              MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances,
-             FlexibleContexts, RecordWildCards, GeneralizedNewtypeDeriving #-}
+             FlexibleContexts, RecordWildCards, GeneralizedNewtypeDeriving,
+             ViewPatterns #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.Term where
 
+import Data.Maybe
 import Data.String
 import Data.List
 import qualified Data.Sequence as S
@@ -28,20 +30,55 @@ import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
 import qualified Database.RethinkDB.Type as T
 import Database.RethinkDB.Objects
 
+type F1 = Term T.Datum -> Term T.Datum
+type F2 = Term T.Datum -> Term T.Datum -> Term T.Datum
+
 -- | An RQL term
 data Term (t :: T.Type) =
   Term (State QuerySettings BaseTerm) |
   MapReduce {
-    mrMap :: Term T.Datum -> Term T.Datum,
-    mrBase :: Term T.Datum,
-    mrReduce :: Term T.Datum -> Term T.Datum -> Term T.Datum,
-    mrFinalize :: Term T.Datum -> Term T.Datum }
+    termSequence :: Term T.Datum,
+    termMap :: Maybe F1,
+    termBase :: Maybe (Term T.Datum),
+    termReduce :: Maybe F2,
+    termFinalize :: Maybe F1 }
 
 data BaseTerm = BaseTerm {
     termType :: TermType,
     termDatum :: Maybe Datum,
     termArgs :: BaseArray,
     termOptArgs :: [BaseAttribute] }
+
+tvSequence :: Term t -> Maybe (State QuerySettings BaseTerm)
+tvSequence (Term s Nothing Nothing Nothing Nothing) = Just s
+tvSequence _ = Nothing
+
+tvFinalize :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1)
+tvFinalize (Term s Nothing Nothing Nothing f) = Just (s, f)
+tvFinalize _ = Nothing
+
+tvMap :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1, Maybe F1)
+tvMap (Term s m Nothing Nothing f) = Just (s, m, f)
+tvMap _ = Nothing
+
+tvReduce :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe (Term T.Datum),
+                             Maybe F2, Maybe F1)
+tvReduce (Term s Nothing b r f) = Just (s, b, r, f)
+tvReduce _ = Nothing
+
+tvMapReduce :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1,
+                                Maybe (Term T.Datum), Maybe F2, Maybe F1)
+tvMapReduce (Term s m b r f) = Just (s, m, b, r, f)
+tvMapReduce _ = Nothing
+
+baseTerm :: Term t -> State QuerySettings BaseTerm
+baseTerm (tvSequence -> Just s) = s
+baseTerm Term {..} = let
+  s = Term termSequence Nothing Nothing Nothing Nothing
+  m = maybe s (\f -> bop MAP (s, f) []) termMap
+  r = maybe m (\f -> bop REDUCE (m, f) (maybe [] (\x -> ["base":=x]) termBase)) termReduce
+  f = maybe r ($ m)
+  in baseTerm f
 
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
@@ -89,10 +126,8 @@ class Arr a where
 
 cons :: Expr e => e -> Array -> Array
 cons x xs = Array $ do
-  let Term t = expr x
-  bt <- t
-  let Array a = xs
-  xs' <- a
+  bt <- baseTerm (expr x)
+  xs' <- baseArray xs
   return $ Cons bt xs'
 
 instance Arr () where
@@ -133,8 +168,8 @@ obj = Object . mapM base
       where base (k := e) = BaseAttribute k <$> baseTerm (expr e)
 
 -- | Build a term
-op :: Arr a => TermType -> a -> [Attribute] -> Term c
-op t a b = Term $ do
+baseOp :: Arr a => TermType -> a -> [Attribute] -> State QuerySettings BaseTerm
+baseOp t a b =  do
   a' <- baseArray (arr a)
   b' <- baseObject (obj b)
   return $ BaseTerm t Nothing a' b'
@@ -142,14 +177,14 @@ op t a b = Term $ do
 type a ~~ b = (Expr a, T.Instance b (ExprType a))
 
 datumTerm :: DatumType -> Datum -> Term t
-datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) Nil []
-
+datumTerm t d = undefined -- Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) Nil []
+{-
 instance Num (Term T.Number) where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
   a + b = op ADD (a, b) []
   a * b = op MUL (a, b) []
   -- TODO
-
+-}
 instance Expr Text.Text where
   type ExprType Text.Text = T.String
   expr t = datumTerm R_STR defaultValue { r_str = Just (uFromString $ Text.unpack t) }
