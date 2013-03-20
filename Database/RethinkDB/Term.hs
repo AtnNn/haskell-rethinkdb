@@ -34,51 +34,13 @@ type F1 = Term T.Datum -> Term T.Datum
 type F2 = Term T.Datum -> Term T.Datum -> Term T.Datum
 
 -- | An RQL term
-data Term (t :: T.Type) =
-  Term (State QuerySettings BaseTerm) |
-  MapReduce {
-    termSequence :: Term T.Datum,
-    termMap :: Maybe F1,
-    termBase :: Maybe (Term T.Datum),
-    termReduce :: Maybe F2,
-    termFinalize :: Maybe F1 }
+data Term (t :: T.Type) = Term { baseTerm :: State QuerySettings BaseTerm }
 
 data BaseTerm = BaseTerm {
     termType :: TermType,
     termDatum :: Maybe Datum,
     termArgs :: BaseArray,
     termOptArgs :: [BaseAttribute] }
-
-tvSequence :: Term t -> Maybe (State QuerySettings BaseTerm)
-tvSequence (Term s Nothing Nothing Nothing Nothing) = Just s
-tvSequence _ = Nothing
-
-tvFinalize :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1)
-tvFinalize (Term s Nothing Nothing Nothing f) = Just (s, f)
-tvFinalize _ = Nothing
-
-tvMap :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1, Maybe F1)
-tvMap (Term s m Nothing Nothing f) = Just (s, m, f)
-tvMap _ = Nothing
-
-tvReduce :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe (Term T.Datum),
-                             Maybe F2, Maybe F1)
-tvReduce (Term s Nothing b r f) = Just (s, b, r, f)
-tvReduce _ = Nothing
-
-tvMapReduce :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1,
-                                Maybe (Term T.Datum), Maybe F2, Maybe F1)
-tvMapReduce (Term s m b r f) = Just (s, m, b, r, f)
-tvMapReduce _ = Nothing
-
-baseTerm :: Term t -> State QuerySettings BaseTerm
-baseTerm (tvSequence -> Just s) = s
-baseTerm Term {..} = let
-  s = Term termSequence Nothing Nothing Nothing Nothing
-  m = maybe s (\f -> bop MAP (s, f) []) termMap
-  r = maybe m (\f -> bop REDUCE (m, f) (maybe [] (\x -> ["base":=x]) termBase)) termReduce
-  f = maybe r ($ m)
-  in baseTerm f
 
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
@@ -146,6 +108,9 @@ instance (Expr a, Expr b, Expr c) => Arr (a, b, c) where
 instance (Expr a, Expr b, Expr c, Expr d) => Arr (a, b, c, d) where
   arr (a,b,c,d) = cons a $ cons b $ cons c $ cons d $ arr ()
 
+instance Arr Array where
+  arr = id
+
 -- | A list of String/Expr pairs
 data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
@@ -168,29 +133,46 @@ obj = Object . mapM base
       where base (k := e) = BaseAttribute k <$> baseTerm (expr e)
 
 -- | Build a term
-baseOp :: Arr a => TermType -> a -> [Attribute] -> State QuerySettings BaseTerm
-baseOp t a b =  do
+op :: Arr a => TermType -> a -> [Attribute] -> Term t
+op t a b = Term $ do
   a' <- baseArray (arr a)
   b' <- baseObject (obj b)
   return $ BaseTerm t Nothing a' b'
 
 type a ~~ b = (Expr a, T.Instance b (ExprType a))
 
+class Expr f => f ~~~ t
+instance (T.Instance a' a, T.Instance b b')
+  => (Term a -> Term b) ~~~ T.Function '[a'] b'
+instance (T.Instance a' a, T.Instance b' b, T.Instance c c')
+  => (Term a -> Term b -> Term c) ~~~ T.Function '[a', b'] c'
+
 datumTerm :: DatumType -> Datum -> Term t
-datumTerm t d = undefined -- Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) Nil []
-{-
+datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) Nil []
+
+str :: String -> Term T.String
+str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
+
 instance Num (Term T.Number) where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
   a + b = op ADD (a, b) []
   a * b = op MUL (a, b) []
   -- TODO
--}
+
 instance Expr Text.Text where
   type ExprType Text.Text = T.String
   expr t = datumTerm R_STR defaultValue { r_str = Just (uFromString $ Text.unpack t) }
 
 instance IsString (Term T.String) where
   fromString s = datumTerm R_STR defaultValue { r_str = Just (uFromString $ s) }
+
+instance Expr (Term a -> Term b) where
+  type ExprType (Term a -> Term b) = T.Function '[a] b
+  expr f = undefined
+
+instance Expr (Term a -> Term b -> Term c) where
+  type ExprType (Term a -> Term b -> Term c) = T.Function '[a, b] c
+  expr f = undefined
 
 buildTerm :: Term t -> State QuerySettings Term2
 buildTerm = fmap buildBaseTerm . baseTerm
@@ -217,3 +199,19 @@ buildQuery term token db = defaultValue {
   Query2.type' = START,
   query = Just $ fst $ runState (buildTerm term) (def {queryToken = token,
                                                        queryDefaultDatabase = db }) }
+
+type SequenceType s = SequenceType' (ExprType s)
+type family SequenceType' (t :: T.Type) :: T.Type
+type instance SequenceType' T.StreamSelection = T.StreamSelection
+type instance SequenceType' T.Table = T.StreamSelection
+type instance SequenceType' T.Sequence = T.Sequence
+type instance SequenceType' T.Stream = T.Stream
+type instance SequenceType' T.Array = T.Array
+
+type ElemType s = ElemType' (ExprType s)
+type family ElemType' (t :: T.Type) :: T.Type
+type instance ElemType' T.StreamSelection = T.SingleSelection
+type instance ElemType' T.Table = T.SingleSelection
+type instance ElemType' T.Sequence = T.Datum
+type instance ElemType' T.Stream = T.Datum
+type instance ElemType' T.Array = T.Datum
