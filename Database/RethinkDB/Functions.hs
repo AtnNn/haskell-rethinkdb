@@ -5,6 +5,11 @@
 
 module Database.RethinkDB.Functions where
 
+import Data.Text (Text)
+import Control.Monad.State
+import Control.Applicative
+import Data.Maybe
+
 -- TODO: replace Term Sequence with Term Stream or Term Array
 
 import Database.RethinkDB.Term
@@ -193,109 +198,44 @@ error m = op ERROR [str m] []
 error' = error
 
 -- | Create a Database reference
-db :: P.String -> O.Database
+db :: Text -> O.Database
 db s = O.Database s
-{-
+
 -- | Create a database on the server
-dbCreate :: String -> Query False Database
-dbCreate db_name = Query
-  (metaQuery $ return $ QL.MetaQuery QL.CREATE_DB (Just $ uFromString db_name) Nothing Nothing)
-  (const $ Right $ Database db_name)
+dbCreate :: P.String -> Term T.Object
+dbCreate db_name = op DB_CREATE [str db_name] []
 
 -- | Drop a database
-dbDrop :: Database -> Query False ()
-dbDrop (Database name) = Query
-  (metaQuery $ return $ QL.MetaQuery QL.DROP_DB (Just $ uFromString name) Nothing Nothing)
-  (const $ Right ())
+dbDrop :: Database -> Term T.Object
+dbDrop (O.Database name) = op DB_DROP [name] []
 
 -- | List the databases on the server
 --
--- >>> run h $ dbList
--- [test, dev, prod]
+dbList :: Term Sequence
+dbList = op DB_LIST () []
 
-dbList :: Query False [Database]
-dbList = Query
-  (metaQuery $ return $ QL.MetaQuery QL.LIST_DBS Nothing Nothing Nothing)
-  (maybe (Left "error") Right . sequence . map (fmap Database . convert))
-
--- | Options used to create a table
-data TableCreateOptions = TableCreateOptions {
-  tableDataCenter :: Maybe String,
-  tableCacheSize :: Maybe Int64
-  }
-
-instance Default TableCreateOptions where
-  def = TableCreateOptions Nothing Nothing
-
--- | A table description
-data Table = Table {
-  tableDatabase :: Maybe Database, -- ^ when Nothing, use the rdbDatabase
-  tableName :: String,
-  _tablePrimaryAttr :: Maybe String -- ^ when Nothing, "id" is used
-  } deriving (Eq, Ord)
-
-instance Show Table where
-  show (Table db' nam pa) =
-    maybe "" (\(Database d) -> d++".") db' ++ nam ++ maybe "" (\x -> "{"++x++"}") pa
-
-tablePrimaryAttr :: Table -> String
-tablePrimaryAttr = fromMaybe (uToString defaultPrimaryAttr) . _tablePrimaryAttr
-
--- | "id"
-defaultPrimaryAttr :: Utf8
-defaultPrimaryAttr = uFromString "id"
-
--- | Create a simple table refence with no associated database or primary key
---
--- >>> table "music"
---
--- Another way to create table references is to use the Table constructor:
---
--- >>> Table (Just "mydatabase") "music" (Just "tuneid")
-
-table :: String -> Table
-table n = Table Nothing n Nothing
+-- | Create a simple table refence with no associated database
+table :: Text -> Table
+table n = O.Table Nothing n
 
 -- | Create a table on the server
---
--- @def@ can be imported from Data.Default
---
--- >>> t <- run h $ tableCreate (table "fruits") def
-
-tableCreate :: Table -> TableCreateOptions -> Query False Table
-tableCreate (Table mdb table_name primary_key)
-  (TableCreateOptions datacenter cache_size) = Query
-  (metaQuery $ do
-      curdb <- activeDB
-      let create = defaultValue {
-        QLCreateTable.datacenter = fmap uFromString datacenter,
-        QLCreateTable.table_ref = QL.TableRef (uFromString $ databaseName $ fromMaybe curdb mdb)
-                                  (uFromString table_name) Nothing,
-        QLCreateTable.primary_key = fmap uFromString primary_key,
-        QLCreateTable.cache_size = cache_size
-        }
-      return $ QL.MetaQuery QL.CREATE_TABLE Nothing (Just create) Nothing)
-               (const $ Right $ Table mdb table_name primary_key)
+tableCreate :: Table -> TableCreateOptions -> Term T.Object
+tableCreate (O.Table mdb table_name) opts = Term $ do
+  (O.Database dbname) <- queryDefaultDatabase <$> get
+  baseTerm $ op TABLE_CREATE (maybe dbname databaseName mdb, table_name) $ catMaybes [
+    ("datacenter" :=) <$> tableDataCenter opts,
+    ("cache_size" :=) <$> tableCacheSize opts,
+    ("primary_key" :=) <$> tablePrimaryKey opts ]
 
 -- | Drop a table
-tableDrop :: Table -> Query False ()
-tableDrop tbl = Query
-  (metaQuery $ do
-      ref <- tableRef tbl
-      return $ QL.MetaQuery QL.DROP_TABLE Nothing Nothing $ Just $ ref)
-  (const $ Right ())
+tableDrop :: Table -> Term Object
+tableDrop (O.Table mdb table_name) = Term $ do
+  (O.Database dbname) <- queryDefaultDatabase <$> get
+  baseTerm $ op TABLE_DROP (maybe dbname databaseName mdb, table_name) []
 
 -- | List the tables in a database
-tableList :: Database -> Query False [Table]
-tableList (Database name) = Query
-  (metaQuery $ return $
-    QL.MetaQuery QL.LIST_TABLES (Just $ uFromString name) Nothing Nothing)
-  (maybe (Left "error") Right . sequence .
-   map (fmap (\x -> Table (Just (Database name)) x Nothing) . convert))
-
--- | Get the primary key of the table as a Utf8, or "id" if there is none
-uTableKey :: Table -> Utf8
-uTableKey (Table _ _ mkey) = fromMaybe defaultPrimaryAttr $ fmap uFromString mkey
+tableList :: Database -> Term Sequence
+tableList (Database name) = op DB_LIST [name] []
 
 -- | A reference to a document
 data Document = Document {

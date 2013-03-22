@@ -2,12 +2,11 @@
              TypeFamilies, TypeOperators, PolyKinds, ConstraintKinds, RankNTypes,
              MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances,
              FlexibleContexts, RecordWildCards, GeneralizedNewtypeDeriving,
-             ViewPatterns #-}
+             ViewPatterns, OverloadedStrings #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.Term where
 
-import Data.Maybe
 import Data.String
 import Data.List
 import qualified Data.Sequence as S
@@ -114,8 +113,6 @@ instance Arr Array where
 -- | A list of String/Expr pairs
 data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
-type Key = Text.Text
-
 data Attribute = forall e . (Expr e) => Key := e
 
 data BaseAttribute = BaseAttribute Key BaseTerm
@@ -152,6 +149,9 @@ datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) Nil 
 
 str :: String -> Term T.String
 str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
+
+instance Expr Int64 where
+  expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
 
 instance Num (Term T.Number) where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
