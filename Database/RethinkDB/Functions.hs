@@ -1,4 +1,5 @@
-{-# LANGUAGE DataKinds, TypeOperators, ConstraintKinds, FlexibleContexts, PolyKinds, 
+{-# LANGUAGE DataKinds, TypeOperators, ConstraintKinds, FlexibleContexts,
+             PolyKinds, ScopedTypeVariables,
              OverloadedStrings, FlexibleInstances #-}
 
 -- | Functions from the ReQL (RethinkDB Query Language)
@@ -18,122 +19,122 @@ import Database.RethinkDB.Type as T
 
 import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
 
-import Prelude (($), return)
+import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 
 (+), add, (-), sub, (*), mul, (/), div, div', mod, mod'
-  :: (a ~~ Number, b ~~ Number) => a -> b -> Term Number
-(+) a b = op ADD (a, b) []
-(-) a b = op SUB (a, b) []
-(*) a b = op MUL (a, b) []
-(/) a b = op DIV (a, b) []
+  :: (a ~~ Double, b ~~ Double) => a -> b -> Term Double
+(+) a b = op ADD (a, b) ()
+(-) a b = op SUB (a, b) ()
+(*) a b = op MUL (a, b) ()
+(/) a b = op DIV (a, b) ()
 add = (+)
 sub = (-)
 mul = (*)
 div = (/)
 div' = (/)
-mod a b = op MOD (a, b) []
+mod a b = op MOD (a, b) ()
 mod' = mod
 
-or, or', and, and' :: (a ~~ T.Bool, b ~~ T.Bool) => a -> b -> Term Bool
-or a b = op ANY (a, b) []
-and a b = op ALL (a, b) []
+or, or', and, and' :: (a ~~ Bool, b ~~ Bool) => a -> b -> Term Bool
+or a b = op ANY (a, b) ()
+and a b = op ALL (a, b) ()
 or' = or
 and' = and
 
 (==), (!=), eq, ne :: (a ~~ Datum, b ~~ Datum) => a -> b -> Term Bool
-eq a b = op EQ (a, b) []
-ne a b = op NE (a, b) []
+eq a b = op EQ (a, b) ()
+ne a b = op NE (a, b) ()
 (==) = eq
 (!=) = ne
 
 (>), (>=), (<), (<=), gt, lt, ge, le
   :: (a ~~ Datum, b ~~ Datum) => a -> b -> Term Bool
-gt a b = op GT (a, b) []
-lt a b = op LT (a, b) []
-ge a b = op GE (a, b) []
-le a b = op LE (a, b) []
+gt a b = op GT (a, b) ()
+lt a b = op LT (a, b) ()
+ge a b = op GE (a, b) ()
+le a b = op LE (a, b) ()
 (>) = gt
 (>=) = ge
 (<) = lt
 (<=) = le
 
 not, not' :: (a ~~ Bool) => a -> Term Bool
-not a = op NOT [a] []
+not a = op NOT [a] ()
 not' = not
 
 -- * Lists and Streams
 
-count :: (a ~~ Sequence) => a -> Term Number
-count e = op COUNT [e] []
+count :: (a ~~ Sequence) => a -> Term Double
+count e = op COUNT [e] ()
 
 (++), concat :: (a ~~ Sequence, b ~~ Sequence) => a -> b -> Term Sequence
-(++) a b = op UNION (a, b) []
+(++) a b = op UNION (a, b) ()
 concat = (++)
 
 map, map' :: (a ~~ Sequence, f ~~~ Function '[Datum] Datum) => f -> a -> Term Sequence
-map f a = op MAP (a, f) []
+map f a = op MAP (a, f) ()
 map' = map
 
 filter', filter :: (a ~~ Sequence, f ~~~ Function '[Datum] Bool) => f -> a -> Term (SequenceType a)
-filter f a = op FILTER (a, f) []
+filter f a = op FILTER (a, f) ()
 filter' = filter
 
 between :: (a ~~ Datum, b ~~ Datum, s ~~ Sequence) => a -> b -> s -> Term (SequenceType s)
 between a b e = op BETWEEN [e] ["left_bound" := a, "right_bound" := b]
 
 append :: (a ~~ Datum, b ~~ Sequence) => a -> b -> Term Sequence
-append a b = op APPEND (b, a) []
+append a b = op APPEND (b, a) ()
 
 concatMap, concatMap' :: (f ~~~ Function '[Datum] Datum, a ~~ Sequence)
   => f -> a -> Term Sequence
-concatMap f e = op CONCATMAP (e, f) []
+concatMap f e = op CONCATMAP (e, f) ()
 concatMap' = concatMap
 
-innerJoin, outerJoin :: (f ~~~ Function '[T.Object, T.Object] Bool, a ~~ Sequence, b ~~ Sequence)
+innerJoin, outerJoin :: (f ~~~ Function '[Object, Object] Bool, a ~~ Sequence, b ~~ Sequence)
           => f -> a -> b -> Term Stream
-innerJoin f a b = op INNER_JOIN (a, b, f) []
-outerJoin f a b = op OUTER_JOIN (a, b, f) []
+innerJoin f a b = op INNER_JOIN (a, b, f) ()
+outerJoin f a b = op OUTER_JOIN (a, b, f) ()
 
 eqJoin :: (a ~~ Sequence, b ~~ Sequence) => a -> Key -> b -> Term Stream
-eqJoin a k b = op EQ_JOIN (a, expr k, b) []
+eqJoin a k b = op EQ_JOIN (a, expr k, b) ()
 
-drop, drop' :: (a ~~ Number, b ~~ Sequence) => a -> b -> Term (SequenceType b)
-drop a b = op SKIP (b, a) []
+drop, drop' :: (a ~~ Double, b ~~ Sequence) => a -> b -> Term (SequenceType b)
+drop a b = op SKIP (b, a) ()
 drop' = drop
 
-take, take' :: (a ~~ Number, b ~~ Sequence) => a -> b -> Term (SequenceType b)
-take a b = op LIMIT (a, b) []
+take, take' :: (a ~~ Double, b ~~ Sequence) => a -> b -> Term (SequenceType b)
+take a b = op LIMIT (a, b) ()
 take' = take
 
-slice :: (a ~~ Number, b ~~ Number, c ~~ Sequence) => a -> b -> c -> Term (SequenceType c)
-slice n m s = op SLICE (s, n, m) []
+slice :: (a ~~ Double, b ~~ Double, c ~~ Sequence) => a -> b -> c -> Term (SequenceType c)
+slice n m s = op SLICE (s, n, m) ()
 
-(!!), nth :: (a ~~ Sequence, b ~~ Number) => a -> b -> Term (ElemType a)
-nth n s = op NTH (s, n) []
-s !! n = op NTH (s, n) []
+(!!), nth :: (a ~~ Sequence, b ~~ Double) => a -> b -> Term (ElemType a)
+nth n s = op NTH (s, n) ()
+s !! n = op NTH (s, n) ()
 
 fold :: (f ~~~ Function '[x, Datum] x, b ~~ x, s ~~ Sequence) => f -> b -> s -> Term x
 fold f b s = op REDUCE (f, s) ["base" := b]
 
 fold1 :: (f ~~~ Function '[x, Datum] x, s ~~ Sequence) => f -> s -> Term x
-fold1 f s = op REDUCE (f, s) []
+fold1 f s = op REDUCE (f, s) ()
 
 distinct :: (s ~~ Sequence) => s -> Term Sequence
-distinct s = op DISTINCT [s] []
+distinct s = op DISTINCT [s] ()
 
 groupedMapReduce ::
   (group ~~~ Function '[Datum] Datum,
-   map ~~~ Function '[T.Object] Datum,
+   map ~~~ Function '[Object] Datum,
    reduce ~~~ Function '[Datum, Datum] Datum)
    => group -> map -> reduce -> Term Stream
-groupedMapReduce g m r = op GROUPED_MAP_REDUCE (g, m, r) []
+groupedMapReduce g m r = op GROUPED_MAP_REDUCE (g, m, r) ()
 
-forEach :: (s ~~ Sequence, f ~~~ Function '[Datum] Datum) => s -> f -> Term T.Object
-forEach s f = op FOREACH (s, f) []
+forEach :: (s ~~ Sequence, f ~~~ Function '[Datum] Datum) => s -> f -> Term Object
+forEach s f = op FOREACH (s, f) ()
 
 mergeRightLeft :: (a ~~ Sequence) => a -> Term Sequence
-mergeRightLeft a = op ZIP [a] []
+mergeRightLeft a = op ZIP [a] ()
 
 data Order = Asc  { orderAttr :: Key }
            | Desc { orderAttr :: Key }
@@ -142,10 +143,10 @@ orderBy :: (s ~~ Sequence) => [Order] -> s -> Term Sequence
 orderBy o s = Term $ do
   s' <- baseTerm (expr s)
   o' <- baseArray $ arr $ P.map buildOrder o
-  return $ BaseTerm ORDERBY P.Nothing (Cons s' o') []
+  return $ BaseTerm ORDERBY P.Nothing (s' : o') []
   where
-    buildOrder (Asc k) = op ASC [k] []
-    buildOrder (Desc k) = op DESC [k] []
+    buildOrder (Asc k) = op ASC [k] ()
+    buildOrder (Desc k) = op DESC [k] ()
 
 {-
 groupBy,groupBy' :: (ToStream e, ObjectType `HasToStreamValueOf` e) =>
@@ -154,47 +155,48 @@ groupBy ks (MapReduce m b r f) e = map f (groupedMapReduce (pick ks) m b r e)
 groupBy' = groupBy
 -}
 
-sum, sum' :: (s ~~ Sequence) => s -> Term Number
-sum = fold ((+) :: Term Number -> Term Number -> Term Number) (0 :: Term Number)
+sum, sum' :: (s ~~ Sequence) => s -> Term Double
+sum = fold ((+) :: Term Double -> Term Double -> Term Double) (0 :: Term Double)
 sum' = sum
 
-avg :: (s ~~ Sequence) => s -> Term Number
+avg :: (s ~~ Sequence) => s -> Term Double
 avg s = sum s / count s
 
 -- * Accessors
 
 (!) :: (s ~~ Sequence) => s -> Key -> Term Datum
-(!) s k = op GETATTR (s, k) []
+(!) s k = op GETATTR (s, k) ()
 
-pluck :: (o ~~ T.Object) => [Key] -> o -> Term T.Object
-pluck ks e = op PLUCK (cons e $ arr (P.map expr ks)) []
+pluck :: (o ~~ Object) => [Key] -> o -> Term Object
+pluck ks e = op PLUCK (cons e $ arr (P.map expr ks)) ()
 
-without :: (o ~~ T.Object) => [Key] -> o -> Term T.Object
-without ks e = op WITHOUT (cons e $ arr (P.map expr ks)) []
+without :: (o ~~ Object) => [Key] -> o -> Term Object
+without ks e = op WITHOUT (cons e $ arr (P.map expr ks)) ()
 
-member :: (o ~~ T.Object) => [Key] -> o -> Term Bool
-member ks o = op CONTAINS (cons o $ arr (P.map expr ks)) []
+member :: (o ~~ Object) => [Key] -> o -> Term Bool
+member ks o = op CONTAINS (cons o $ arr (P.map expr ks)) ()
 
-merge :: (a ~~ T.Object, b ~~ T.Object) => a -> b -> Term T.Object
-merge a b = op MERGE (a, b) []
+merge :: (a ~~ Object, b ~~ Object) => a -> b -> Term Object
+merge a b = op MERGE (a, b) ()
 
 class Javascript r where
   js :: P.String -> r
 
 instance Javascript (Term Datum) where
-  js s = op JAVASCRIPT [str s] []
+  js s = op JAVASCRIPT [str s] ()
 
 instance Javascript (Term Datum -> Term Datum) where
-  js s x = op FUNCALL (op JAVASCRIPT [str s] [], x) []
+  js s x = op FUNCALL (op JAVASCRIPT [str s] (), x) ()
 
 instance Javascript (Term Datum -> Term Datum -> Term Datum) where
-  js s x y = op FUNCALL (op JAVASCRIPT [str s] [], x, y) []
+  js s x y = op FUNCALL (op JAVASCRIPT [str s] (), x, y) ()
 
-if' :: (a ~~ Bool, b ~~ Top, c ~~ Top) => a -> b -> c -> Term Top
-if' a b c = op BRANCH (a, b, c) []
+if' :: (a ~~ Bool, Expr b, Expr c)
+    => a -> b -> c -> Term (CommonType (ExprType a) (ExprType b))
+if' a b c = op BRANCH (a, b, c) ()
 
-error, error' :: P.String -> Term Top
-error m = op ERROR [str m] []
+error, error' :: (s ~~ String) => s -> Term Top
+error m = op ERROR [m] ()
 error' = error
 
 -- | Create a Database reference
@@ -202,64 +204,47 @@ db :: Text -> O.Database
 db s = O.Database s
 
 -- | Create a database on the server
-dbCreate :: P.String -> Term T.Object
-dbCreate db_name = op DB_CREATE [str db_name] []
+dbCreate :: P.String -> Term Object
+dbCreate db_name = op DB_CREATE [str db_name] ()
 
 -- | Drop a database
-dbDrop :: Database -> Term T.Object
-dbDrop (O.Database name) = op DB_DROP [name] []
+dbDrop :: Database -> Term Object
+dbDrop (O.Database name) = op DB_DROP [name] ()
 
 -- | List the databases on the server
 --
 dbList :: Term Sequence
-dbList = op DB_LIST () []
+dbList = op DB_LIST () ()
 
 -- | Create a simple table refence with no associated database
 table :: Text -> Table
-table n = O.Table Nothing n
+table n = O.Table Nothing n Nothing
 
 -- | Create a table on the server
-tableCreate :: Table -> TableCreateOptions -> Term T.Object
-tableCreate (O.Table mdb table_name) opts = Term $ do
-  (O.Database dbname) <- queryDefaultDatabase <$> get
-  baseTerm $ op TABLE_CREATE (maybe dbname databaseName mdb, table_name) $ catMaybes [
+tableCreate :: Table -> TableCreateOptions -> Term Object
+tableCreate (O.Table mdb table_name pkey) opts =
+  op TABLE_CREATE (MaybeDatabase mdb, table_name) $ catMaybes [
     ("datacenter" :=) <$> tableDataCenter opts,
     ("cache_size" :=) <$> tableCacheSize opts,
-    ("primary_key" :=) <$> tablePrimaryKey opts ]
+    ("primary_key" :=) <$> pkey ]
 
 -- | Drop a table
 tableDrop :: Table -> Term Object
-tableDrop (O.Table mdb table_name) = Term $ do
-  (O.Database dbname) <- queryDefaultDatabase <$> get
-  baseTerm $ op TABLE_DROP (maybe dbname databaseName mdb, table_name) []
+tableDrop (O.Table mdb table_name _) =
+  op TABLE_DROP (MaybeDatabase mdb, table_name) ()
 
 -- | List the tables in a database
 tableList :: Database -> Term Sequence
-tableList (Database name) = op DB_LIST [name] []
+tableList (O.Database name) = op DB_LIST [name] ()
 
--- | A reference to a document
-data Document = Document {
-  documentTable :: Table,
-  documentKey :: Value
-  } deriving (Eq)
+get :: (s ~~ Table, k ~~ Datum) => k -> s -> Term SingleSelection
+get e k = op FUNCALL (\(x :: Term Datum) ->
+                       if' (x == ())
+                           (error $ str "The document does not exist")
+                            x,
+                      op GET (e, k) ()) ()
 
-instance Show Document where
-  show (Document t k) = show t ++ "[" ++ show k ++ "]"
-
--- | Get a document by primary key
-get :: (ToExpr e, ExprType e ~ StreamType True ObjectType, ToValue k) =>
-       e -> k -> ObjectExpr
-get e k = Expr $ do
-  (vw, _) <- exprV e
-  let tbl@(Table _ _ mattr) = viewTable vw
-  ref <- tableRef tbl
-  key <- value k
-  withView NoView $ return defaultValue {
-    QL.type' = QL.GETBYKEY,
-    QL.get_by_key = Just $ QL.GetByKey ref (fromMaybe defaultPrimaryAttr $
-                                            fmap uFromString mattr) key
-    }
-
+{-
 insert_or_upsert :: (ToValue a, ToValueType (ExprType a) ~ ObjectType) =>
                     Table -> [a] -> Bool -> WriteQuery [Document]
 insert_or_upsert tbl array overwrite = WriteQuery
