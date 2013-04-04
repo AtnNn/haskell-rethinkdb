@@ -1,224 +1,24 @@
-{-# LANGUAGE OverloadedStrings, KindSignatures, DataKinds, MultiParamTypeClasses, 
-             TypeFamilies, ExistentialQuantification, FlexibleInstances, 
-             ConstraintKinds, FlexibleContexts, UndecidableInstances, 
-             PolyKinds, FunctionalDependencies, GADTs, ScopedTypeVariables, 
-             RankNTypes, RecordWildCards #-}
-
--- | The core of the haskell client library for RethinkDB
-
 module Database.RethinkDB.Driver where
 
-import {-# SOURCE #-} Database.RethinkDB.Functions
-import Database.RethinkDB.Types
+import Database.RethinkDB.Functions
+import Database.RethinkDB.Network
+import Database.RethinkDB.Term
 
-import Control.Arrow
-import Data.Aeson.Types (parseMaybe)
-import Data.String
-import Data.Typeable
-import Data.Data
-import GHC.Prim
+run :: Result r => RethinkDBHandle -> Term -> IO r
+run h t = withNewToken h $ \token -> do
+  q <- buildQuery t token (rdbDatabase h)
+  r <- runQLQuery h q
+  convertResponse r
 
-import qualified Database.RethinkDB.Internal.Types as QL
-import qualified Database.RethinkDB.Internal.Query_Language.Response as QLResponse
-import qualified Database.RethinkDB.Internal.Query_Language.Query as QLQuery
-import qualified Database.RethinkDB.Internal.Query_Language.VarTermTuple as QLVarTermTuple
-import qualified Database.RethinkDB.Internal.Query_Language.Predicate as QLPredicate
-import qualified Database.RethinkDB.Internal.Query_Language.Builtin as QLBuiltin
-import qualified Database.RethinkDB.Internal.Query_Language.ReadQuery as QLReadQuery
-import qualified Database.RethinkDB.Internal.Query_Language.WriteQuery as QLWriteQuery
-import qualified Database.RethinkDB.Internal.Query_Language.Mapping as QLMapping
-import qualified Database.RethinkDB.Internal.Query_Language.Term as QL (type')
-import qualified Database.RethinkDB.Internal.Query_Language.MetaQuery.CreateTable as QLCreateTable
+class Result r where
+  convertResponse :: BaseTerm -> Response -> IO r
 
-import Text.ProtocolBuffers.Basic hiding (Default)
-import Text.ProtocolBuffers.WireMessage
+class Result Response where
+    run _ r = r
 
 
 
-import Data.List
-import Control.Monad.State as S
-import qualified Data.HashMap.Strict as HM
-import Data.Default
-import qualified Data.Attoparsec.Lazy as Attoparsec
-import Data.Foldable (toList)
-import qualified Data.Text as T
-import Data.Aeson
-import qualified Data.Aeson.Parser (value)
-import qualified Data.Sequence as Seq
-import Data.Monoid
-import Data.Maybe
-
-import qualified Data.ByteString.Lazy as B
-import Data.IORef
-import Data.Bits
-
--- * Network
-
-
--- | Get a request token and increment the token counter
-getNewToken :: RethinkDBHandle -> IO Int64
-getNewToken (RethinkDBHandle _ r _) = atomicModifyIORef r $ \t -> (t + 1, t)
-
-
--- * Queries
-
--- | A query returning a
-data Query (b :: Bool) a where
-  Query :: { _queryBuild :: QueryM QL.Query, 
-             _queryExtract :: [Value] -> Either String a } -> Query False a
-  ViewQuery ::  { _viewQueryBuild :: QueryM (Table, QL.Query),
-                  _viewQueryExtract :: [(Document, Value)] -> Either String a }
-                -> Query True a
-
-data WriteQuery a = WriteQuery {
-  writeQueryBuild :: QueryM QL.WriteQuery,
-  writeQueryExtract :: [Value] -> Either String a
-  }
-
-queryBuild :: Query w a -> QueryM (MaybeView w, QL.Query)
-queryBuild (Query b _) = fmap ((,) NoView) b
-queryBuild (ViewQuery b _) = fmap (first ViewOf) b
-
-queryExtract :: Query w a -> MaybeView w -> [Value] -> Either String a
-queryExtract (Query _ e)     _            vs = e vs
-queryExtract (ViewQuery _ e) (ViewOf tbl) vs = e =<< mapM (addDoc tbl) vs
-queryExtract _ _ _ = error "GHC was right, this branch is reachable!"
-
-instance Functor (Query w) where
-  fmap f (Query a g) = Query a (fmap f . g)
-  fmap f (ViewQuery a g) = ViewQuery a (fmap f . g)
-
-instance Functor WriteQuery where
-  fmap f (WriteQuery a g) = WriteQuery a (fmap f . g)
-
-
-type family If (p :: Bool) (a :: k) (b :: k) :: k
-type instance If True  a b = a
-type instance If False a b = b
-
-
--- | Convert things like tables and documents into queries
-class ToBuildQuery a where
-  type BuildViewQuery a :: Bool
-  buildQuery :: a -> ([If (BuildViewQuery a)
-                       (Document, Value) Value]
-                      -> Either String b) -> Query (BuildViewQuery a) b
-
-class ToBuildQuery a => ToQuery a b | a -> b where
-  toQuery :: a -> Query (BuildViewQuery a) b
-
-instance ToBuildQuery (Query w a) where
-  type BuildViewQuery (Query w a) = w
-  buildQuery (Query b _) = Query b
-  buildQuery (ViewQuery b _) = ViewQuery b
-
-instance ToQuery (Query w a) a where
-  toQuery q = q
-
-instance ToBuildQuery (WriteQuery a) where
-  type BuildViewQuery (WriteQuery a) = False
-  buildQuery (WriteQuery b _) = Query $ do
-    wq <- b
-    tok <- getToken
-    return $ defaultValue { QLQuery.type' = QL.WRITE, QLQuery.token = tok, 
-                            QLQuery.write_query = Just $ wq }  
-
-instance ToQuery (WriteQuery a) a where
-  toQuery w@(WriteQuery _ e) = buildQuery w e
-
-instance ToBuildQuery Table where
-  type BuildViewQuery Table = True
-  buildQuery = buildQuery . toExpr
-
-instance FromJSON a => ToQuery Table [(Document, a)] where
-  toQuery tbl = buildQuery tbl $
-    (maybe (Left "wrong response type") Right . mapMSnd convert)
-
-mapMSnd :: Monad m => (a -> m b) -> [(c,a)] -> m [(c,b)]
-mapMSnd f = mapM $ \(a,b) -> liftM ((,) a) (f b)
-
-instance ToBuildQuery Document where
-  type BuildViewQuery Document = True
-  buildQuery = buildQuery . toExpr
-
-instance FromJSON a => ToQuery Document a where
-  toQuery doc = buildQuery doc $
-    maybe (Left "empty response") Right . ((convert . snd) <=< listToMaybe)
-
-data Proxy t = Proxy
-
-instance ToBuildQuery (Expr (StreamType False v)) where
-  type BuildViewQuery (Expr (StreamType False v)) = False
-  buildQuery = Query . fmap snd . exprToQLQuery
-
-instance ExtractValue v a => ToQuery (Expr (StreamType False v)) [a] where
-  toQuery e = buildQuery e $
-              maybe (Left "cannot convert response") Right
-              . extractListOf (Proxy :: Proxy v)
-
-instance ToBuildQuery (Expr (StreamType True v)) where
-  type BuildViewQuery (Expr (StreamType True v)) = True
-  buildQuery = ViewQuery . fmap (first viewTable) . exprToQLQuery
-
-instance ExtractValue v a => ToQuery (Expr (StreamType True v)) [(Document, a)] where
-  toQuery e = exprViewQuery (maybe (Left "cannot convert response") Right . extract) e
-    where extract = extractListOf (Proxy :: Proxy v)
-
-instance ToBuildQuery (Expr (ValueType v)) where
-  type BuildViewQuery (Expr (ValueType v)) = False
-  buildQuery = Query . fmap snd . exprToQLQuery
-
-instance ExtractValue v a => ToQuery (Expr (ValueType v)) a where
-  toQuery e = buildQuery e $ 
-              maybe (Left "empty response")
-                (maybe (Left "cannot convert response") Right .
-                 extractValue (Proxy :: Proxy v))
-              . listToMaybe
-
-exprToQLQuery :: Expr t -> QueryM (MaybeView (ExprTypeIsView t), QL.Query)
-exprToQLQuery e = do
-  token <- getToken
-  (vw, ex) <- exprV e
-  return $ (,) vw $ QL.Query QL.READ token (
-    Just $ defaultValue { QLReadQuery.term = ex }) Nothing Nothing
-
-exprViewQuery :: (ExprTypeIsView t ~ True) =>
-                 ([Value] -> Either String [a]) -> Expr t -> Query True [(Document, a)]
-exprViewQuery c e = flip ViewQuery (\x -> fmap (zip $ map fst x) (c (map snd x))) $ do
-  token <- getToken
-  (ViewOf tbl, ex) <- exprV e
-  return $ (,) tbl $ QL.Query QL.READ token (
-    Just $ defaultValue { QLReadQuery.term = ex }) Nothing Nothing
-
-extractListOf :: ExtractValue t a => Proxy t -> [Value] -> Maybe [a]
-extractListOf p = sequence . map (extractValue p)
-
-class ExtractValue t v | t -> v where
-  extractValue :: Proxy t -> Value -> Maybe v
-
-instance (Num a, FromJSON a) => ExtractValue NumberType a where extractValue _ = convert
-instance ExtractValue BoolType Bool where extractValue _ = convert
-instance FromJSON a => ExtractValue ObjectType a where extractValue _ = convert
-instance FromJSON a => ExtractValue ArrayType a where extractValue _ = convert
-instance (IsString a, FromJSON a) => ExtractValue StringType a where extractValue _ = convert
-instance ExtractValue NoneType () where extractValue _ = const $ Just ()
-instance FromJSON a => ExtractValue OtherValueType a where extractValue _ = convert
-
--- | Run a query on the connection
--- 
--- The return value depends on the type of the second argument.
--- 
--- When the return value is polymorphic, type annotations may be required.
--- 
--- >>> run h $ table "fruits" :: IO [(Document, Value)]
-
-run :: ToQuery a v => RethinkDBHandle -> a -> IO v
-run h q = do
-  r <- runEither h q
-  case r of
-    Left e -> error e
-    Right a -> return a
-
+{-
 -- | Run a query on the connection, returning (Left message) on error
 runEither :: ToQuery a v => RethinkDBHandle -> a -> IO (Either String v)
 runEither h q = case toQuery q of
@@ -279,7 +79,7 @@ data QueryViewPair a where
   QueryViewPair :: Query w a -> MaybeView w -> QueryViewPair a
 
 -- | Run a query on the connection and a return a lazy result list
--- 
+--
 -- >>> res <- runBatch h <- (arrayToStream [1,2,3] :: NumberStream)
 -- >>> next res
 -- Just 1
@@ -348,7 +148,7 @@ collect r = do
     Just a -> fmap (a:) (collect r)
 
 -- | Get the last error from a lazy query.
--- 
+--
 -- If both next and resultsError return Nothing, then
 -- all results have been fetched without error.
 
@@ -390,7 +190,7 @@ mkView t q = Expr $ fmap ((,) (ViewOf t)) q
 
 viewKeyAttr :: MaybeView b -> Utf8
 viewKeyAttr v = fromMaybe defaultPrimaryAttr $ fmap uFromString $
-    case v of 
+    case v of
       ViewOf (Table _ _ k) -> k
       NoView -> Nothing
 
@@ -444,13 +244,13 @@ instance ToExpr Table where
   type ExprType Table = StreamType True ObjectType
   toExpr tbl = mkView tbl $ do
     ref <- tableRef tbl
-    return defaultValue { 
+    return defaultValue {
       QL.type' = QL.TABLE,
       QL.table = Just $ QL.Table ref }
 
 instance ToValue Table where
   toValue = streamToArray
-                                  
+
 instance ToStream Table where
   toStream = toExpr
 
@@ -477,7 +277,7 @@ instance ToExpr Int where
 
 instance ToValue Int where
   toValue = toExpr
-  
+
 instance ToExpr Integer where
   type ExprType Integer = ValueType NumberType
   toExpr n = mkExpr $ return $ defaultValue {
@@ -621,7 +421,7 @@ class ToMapping map where
 instance ToMapping Obj where
   type MappingFrom Obj = ObjectType
   type MappingTo Obj = ObjectType
-  toMapping v = Mapping $ do 
+  toMapping v = Mapping $ do
     ex <- expr v
     return $ defaultValue { QLMapping.body = ex }
 
@@ -630,7 +430,7 @@ instance ToMapping Value where
   type MappingTo Value = ObjectType
   toMapping v = Mapping $ return $ defaultValue { QLMapping.body = toJsonTerm v }
 
-instance (ToValue b, a ~ Expr (ValueType t)) => ToMapping (a -> b) where 
+instance (ToValue b, a ~ Expr (ValueType t)) => ToMapping (a -> b) where
   type MappingFrom (a -> b) = ExprValueType a
   type MappingTo (a -> b) = ToValueType (ExprType b)
   toMapping f = Mapping $ do
@@ -643,7 +443,7 @@ instance (ToValue b, a ~ Expr (ValueType t)) => ToMapping (a -> b) where
 instance ToMapping (Expr (ValueType t)) where
   type MappingFrom (Expr (ValueType t)) = ObjectType
   type MappingTo (Expr (ValueType t)) = t
-  toMapping e = Mapping $ do 
+  toMapping e = Mapping $ do
     ex <- expr e
     return defaultValue { QLMapping.body = ex }
 
@@ -711,7 +511,7 @@ exprV e = case toExpr e of
   Expr f -> f
   SpotExpr (Document tbl@(Table _ _ mkey) d) -> do
     ref <- tableRef tbl
-    return $ ((,) (ViewOf tbl)) defaultValue { 
+    return $ ((,) (ViewOf tbl)) defaultValue {
       QL.type' = QL.GETBYKEY,
       QL.get_by_key = Just $ QL.GetByKey ref
              (fromMaybe defaultPrimaryAttr $ fmap uFromString mkey)
@@ -825,7 +625,7 @@ dumpTermPart p a = case dataTypeName (dataTypeOf a) of
          show (uToString (fromJust $ cast a))
        | ".Double" `isSuffixOf` name ->
            show (fromJust $ cast a :: Double)
-       | ".Seq" `isSuffixOf` name -> dumpSeq a 
+       | ".Seq" `isSuffixOf` name -> dumpSeq a
        | otherwise -> dataTypeName (dataTypeOf a) -- showConstr (toConstr a)
   where fieldValues t = gmapQ maybeDump t
         fields t = catMaybes $ zipWith (\x y -> fmap ((x ++ ": ") ++) y)
@@ -840,7 +640,8 @@ dumpTermPart p a = case dataTypeName (dataTypeOf a) of
           "ExtField" -> Nothing
           _ -> Just $ dumpTermPart (p ++ "  ") t
         dumpSeq t = let elems :: Data a => a -> [String]
-                        elems tt = case showConstr (toConstr tt) of 
+                        elems tt = case showConstr (toConstr tt) of
                           "empty" -> []
                           _ -> gmapQi 0 (dumpTermPart (p ++ "  ")) tt : gmapQi 1 elems tt
           in "[" ++ concat (intersperse ", " $ elems t) ++ "]"
+-}

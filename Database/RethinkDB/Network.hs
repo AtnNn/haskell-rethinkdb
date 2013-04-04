@@ -1,38 +1,56 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 
 module Database.RethinkDB.Network where
 
 import Network
 import System.IO (Handle, hClose)
-import Data.ByteString.Lazy (pack, unpack, hPut, hGet, ByteString)
+import Data.ByteString.Lazy (pack, unpack, hPut, hGet)
 import qualified Data.ByteString.Lazy as B
+import qualified Data.Text as T
 import Data.Int
-import Data.IORef
+import Control.Concurrent.MVar
 import Data.Bits
-import Data.List
 import Data.Monoid
-import Data.Sequence
 import Data.Foldable
-import Data.Word
+import Control.Exception.Base
+import Data.Aeson hiding (Success)
 
+import Text.ProtocolBuffers.Basic
 import Text.ProtocolBuffers
 
 import Database.RethinkDB.Protobuf.Ql2.Query2 as Query
-import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
 import Database.RethinkDB.Protobuf.Ql2.Response2 as Response
 import Database.RethinkDB.Protobuf.Ql2.Response2.ResponseType
 import Database.RethinkDB.Protobuf.Ql2.Backtrace
-import Database.RethinkDB.Protobuf.Ql2.Datum
+import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
+import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
+import Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
 import Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
 
-import Database.RethinkDB.Crud
+import Database.RethinkDB.Objects as O
+import Database.RethinkDB.Term
 
 -- | A connection to the database server
 data RethinkDBHandle = RethinkDBHandle {
   rdbHandle :: Handle,
-  rdbToken :: IORef Int64, -- ^ The next token to use
+  rdbToken :: MVar Int64, -- ^ The next token to use
   rdbDatabase :: Database  -- ^ The default database
   }
+
+instance Show RethinkDBHandle where
+  show (RethinkDBHandle h _ _) = "RethinkDB Connection " ++ show h
+
+withNewToken :: RethinkDBHandle -> (Int64 -> IO a) -> IO a
+withNewToken (RethinkDBHandle _ v _) io =
+    mask $ \restore -> do
+      t <- takeMVar v
+      let t' = t + 1
+      a <- restore (io t') `onException` putMVar v t'
+      putMVar v t'
+      return a
+
+withConnection :: RethinkDBHandle -> IO a -> IO a
+withConnection (RethinkDBHandle _ v _) io = withMVar v (\_ -> io)
 
 -- | Create a new connection to the database server
 --
@@ -44,13 +62,14 @@ openConnection :: HostName -> Integer -> IO RethinkDBHandle
 openConnection host port = do
   h <- connectTo host (PortNumber (fromInteger port))
   hPut h magicNumber
-  r <- newIORef 1
+  r <- newMVar 1
   let db' = Database "test"
   return (RethinkDBHandle h r db')
 
+magicNumber :: ByteString
 magicNumber = packUInt $ fromEnum V0_1
 
--- | Convert a 4-bte byestring to an int
+-- | Convert a 4-byte byestring to an int
 unpackUInt :: ByteString -> Int
 unpackUInt s = case unpack s of
   [a,b,c,d] -> fromIntegral a .|.
@@ -68,11 +87,12 @@ packUInt n = pack $ map fromIntegral $
 -- | The raw response to a query
 data Response = ErrorResponse {
   errorCode :: ErrorCode,
+  errorTerm :: BaseTerm,
   errorMessage :: String,
   errorBacktrace :: Maybe Backtrace
   } | SuccessResponse {
   successCode :: SuccessCode,
-  successDatums :: [Datum]
+  successDatums :: [O.Datum]
   }
 
 data ErrorCode = ErrorBrokenClient
@@ -86,10 +106,8 @@ instance Show ErrorCode where
   show ErrorRuntime = "runtime error"
   show ErrorNetwork = "error talking to server"
 
-data SuccessCode = SuccessEmpty
-                 | SuccessJson
-                 | SuccessPartial
-                 | SuccessStream
+data SuccessCode = SuccessPartial RethinkDBHandle BaseTerm
+                 | Success
                  deriving Show
 
 instance Show Response where
@@ -98,7 +116,7 @@ instance Show Response where
                             show errorBacktrace ++ ")"
   show SuccessResponse {..} = show successCode ++ ": " ++ show successDatums
 
--- | Receive a fixed amoutn of data
+-- | Receive a fixed amount of data
 recvAll :: RethinkDBHandle -> Int -> IO ByteString
 recvAll (RethinkDBHandle h _ _) n = hGet h n
 
@@ -106,15 +124,15 @@ recvAll (RethinkDBHandle h _ _) n = hGet h n
 sendAll :: RethinkDBHandle -> ByteString -> IO ()
 sendAll (RethinkDBHandle h _ _) s = hPut h s
 
-convertResponse :: Either String Response2 -> Response
-convertResponse (Left s) = ErrorResponse ErrorNetwork s defaultValue
-convertResponse (Right Response2 {..}) = case type' of
-  SUCCESS_ATOM     -> SuccessResponse SuccessJson    r
-  SUCCESS_PARTIAL  -> SuccessResponse SuccessPartial r
-  SUCCESS_SEQUENCE -> SuccessResponse SuccessStream  r
-  CLIENT_ERROR     -> ErrorResponse ErrorBrokenClient e bt
-  COMPILE_ERROR    -> ErrorResponse ErrorBadQuery     e bt
-  RUNTIME_ERROR    -> ErrorResponse ErrorRuntime      e bt
+convertResponse :: RethinkDBHandle -> BaseTerm -> Either String Response2 -> Response
+convertResponse h q (Left s) = ErrorResponse ErrorNetwork q s defaultValue
+convertResponse h q (Right Response2 {..}) = case type' of
+  SUCCESS_ATOM     -> SuccessResponse Success              (map convertDatum r)
+  SUCCESS_PARTIAL  -> SuccessResponse (SuccessPartial h q) (map convertDatum r)
+  SUCCESS_SEQUENCE -> SuccessResponse Success              (map convertDatum r)
+  CLIENT_ERROR     -> ErrorResponse ErrorBrokenClient q e bt
+  COMPILE_ERROR    -> ErrorResponse ErrorBadQuery     q e bt
+  RUNTIME_ERROR    -> ErrorResponse ErrorRuntime      q e bt
   where bt = backtrace
         r = toList response
         e = show response -- TODO: nice error with backtrace
@@ -155,3 +173,13 @@ use h db' = h { rdbDatabase = db' }
 
 closeConnection :: RethinkDBHandle -> IO ()
 closeConnection (RethinkDBHandle h _ _) = hClose h
+
+convertDatum :: Datum.Datum -> O.Datum
+convertDatum Datum { type' = R_NULL } = Null
+convertDatum Datum { type' = R_BOOL, r_bool = Just b } = Bool b
+convertDatum Datum { type' = R_ARRAY, r_array = a } = toJSON (map convertDatum $ toList a)
+convertDatum Datum { type' = R_OBJECT, r_object = o } = object $ map pair $ toList o
+    where pair (AssocPair k v)  = (T.pack $ uToString k) .= convertDatum v
+convertDatum Datum { type' = R_STR, r_str = Just str } = toJSON (uToString str)
+convertDatum Datum { type' = R_NUM, r_num = Just n } = toJSON n
+convertDatum d = error ("Invalid Datum: " ++ show d)

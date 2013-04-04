@@ -1,5 +1,13 @@
-module MapReduce where
+module Database.RethinkDB.MapReduce where
 
+import Control.Monad.State
+
+import Database.RethinkDB.Term
+
+termToMapReduce :: (Term -> Term) -> State QuerySettings (Term, Term, Term)
+termToMapReduce = undefined
+
+{-
 data MapReduce = MapReduce {
     termSequence :: Term T.Datum,
     termMap :: Maybe F1,
@@ -28,12 +36,4 @@ tvMapReduce :: Term t -> Maybe (State QuerySettings BaseTerm, Maybe F1,
                                 Maybe (Term T.Datum), Maybe F2, Maybe F1)
 tvMapReduce (Term s m b r f) = Just (s, m, b, r, f)
 tvMapReduce _ = Nothing
-
-baseTerm :: Term t -> State QuerySettings BaseTerm
-baseTerm (tvSequence -> Just s) = s
-baseTerm Term {..} = let
-  s = Term termSequence Nothing Nothing Nothing Nothing
-  m = maybe s (\f -> bop MAP (s, f) []) termMap
-  r = maybe m (\f -> bop REDUCE (m, f) (maybe [] (\x -> ["base":=x]) termBase)) termReduce
-  f = maybe r ($ m)
-  in baseTerm f
+-}
