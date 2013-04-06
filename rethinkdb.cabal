@@ -1,5 +1,5 @@
 name:                rethinkdb
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            RethinkDB client library for haskell
 homepage:            http://code.atnnn.com/projects/haskell-rethinkdb
 license:             Apache
@@ -14,8 +14,27 @@ library
   exposed-modules:     Database.RethinkDB,
                        Database.RethinkDB.Driver,
                        Database.RethinkDB.Functions,
-                       Database.RethinkDB.Types
-  other-modules:       Database.RethinkDB.Internal.Types
+                       Database.RethinkDB.Objects,
+                       Database.RethinkDB.Term,
+                       Database.RethinkDB.Network,
+                       Database.RethinkDB.MapReduce
+  other-modules:       Database.RethinkDB.Protobuf.Ql2
+                       Database.RethinkDB.Protobuf.Ql2.Backtrace
+                       Database.RethinkDB.Protobuf.Ql2.Datum
+                       Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
+                       Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
+                       Database.RethinkDB.Protobuf.Ql2.Frame
+                       Database.RethinkDB.Protobuf.Ql2.Frame.FrameType
+                       Database.RethinkDB.Protobuf.Ql2.Query2
+                       Database.RethinkDB.Protobuf.Ql2.Query2.AssocPair
+                       Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
+                       Database.RethinkDB.Protobuf.Ql2.Response2
+                       Database.RethinkDB.Protobuf.Ql2.Response2.ResponseType
+                       Database.RethinkDB.Protobuf.Ql2.Term2
+                       Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair
+                       Database.RethinkDB.Protobuf.Ql2.Term2.TermType
+                       Database.RethinkDB.Protobuf.Ql2.VersionDummy
+                       Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
   build-depends:       base,
                        protocol-buffers,
                        unordered-containers,
@@ -27,4 +46,6 @@ library
                        data-default,
                        network,
                        ghc-prim,
-                       mtl
+                       mtl,
+                       vector,
+                       protocol-buffers-descriptor

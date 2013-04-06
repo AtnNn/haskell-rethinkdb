@@ -1,22 +1,30 @@
 module Database.RethinkDB.Driver where
 
-import Database.RethinkDB.Functions
+import Data.Aeson hiding (Result)
+import Control.Monad
+
 import Database.RethinkDB.Network
 import Database.RethinkDB.Term
 
 run :: Result r => RethinkDBHandle -> Term -> IO r
 run h t = withNewToken h $ \token -> do
-  q <- buildQuery t token (rdbDatabase h)
-  r <- runQLQuery h q
-  convertResponse r
+  let (q, bt) = buildQuery t token (rdbDatabase h)
+  r <- runQLQuery h q bt
+  convertResult r
 
 class Result r where
-  convertResponse :: BaseTerm -> Response -> IO r
+  convertResult :: Response -> IO r
 
-class Result Response where
-    run _ r = r
+instance Result Response where
+    convertResult r = return r
 
+instance FromJSON a => Result (Cursor a) where
+  convertResult r = fmap (fmap (unsafe . fromJSON)) $ makeCursor r
+    where unsafe (Data.Aeson.Error e) = error e
+          unsafe (Data.Aeson.Success a) = a
 
+instance FromJSON a => Result [a] where
+  convertResult = cursorAll <=< convertResult
 
 {-
 -- | Run a query on the connection, returning (Left message) on error

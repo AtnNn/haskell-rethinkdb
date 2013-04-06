@@ -15,6 +15,7 @@ import Control.Applicative
 import Data.Default
 import qualified Data.Text as T
 import qualified Data.Aeson as J
+import Data.Foldable (toList)
 
 import Text.ProtocolBuffers hiding (Key, cons, Default)
 import Text.ProtocolBuffers.Basic hiding (Default)
@@ -25,7 +26,10 @@ import Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair
 import Database.RethinkDB.Protobuf.Ql2.Query2 as Query2
 import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
 import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
+import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL
+import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL
 import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
+import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL
 
 import Database.RethinkDB.Objects as O
 
@@ -259,8 +263,26 @@ buildTermAssoc = S.fromList . map buildTermAttribute
 buildTermAttribute :: BaseAttribute -> AssocPair
 buildTermAttribute (BaseAttribute k v) = AssocPair (uFromString $ T.unpack k) (buildBaseTerm v)
 
-buildQuery :: Term -> Int64 -> Database -> Query2
-buildQuery term token db = defaultValue {
-  Query2.type' = START,
-  query = Just $ fst $ runState (buildTerm term) (def {queryToken = token,
-                                                       queryDefaultDatabase = db }) }
+buildQuery :: Term -> Int64 -> Database -> (Query2, BaseTerm)
+buildQuery term token db = (defaultValue {
+                              Query2.type' = START,
+                              query = Just pterm },
+                            bterm)
+  where bterm =
+         fst $ runState (baseTerm term) (def {queryToken = token,
+                                              queryDefaultDatabase = db })
+        pterm = buildBaseTerm bterm
+
+type Backtrace = [Frame]
+
+data Frame = FramePos Int64 | FrameOpt Key
+
+instance Show Frame where
+    show (FramePos n) = show n
+    show (FrameOpt k) = show k
+
+convertBacktrace :: QL.Backtrace -> Backtrace
+convertBacktrace = concatMap convertFrame . toList . QL.frames
+    where convertFrame QL.Frame { type' = QL.POS, pos = Just n } = [FramePos n]
+          convertFrame QL.Frame { type' = QL.OPT, opt = Just k } = [FrameOpt (T.pack $ uToString k)]
+          convertFrame _ = []
