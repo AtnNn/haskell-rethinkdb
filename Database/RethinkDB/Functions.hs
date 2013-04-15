@@ -112,11 +112,11 @@ slice n m s = op SLICE (s, n, m) ()
 nth n s = op NTH (s, n) ()
 s !! n = op NTH (s, n) ()
 
-fold :: (Expr b, Expr s) => (Term -> Term -> Term) -> b -> s -> Term
-fold f b s = op REDUCE (f, s) ["base" := b]
+reduce :: (Expr b, Expr s) => (Term -> Term -> Term) -> b -> s -> Term
+reduce f b s = op REDUCE (f, s) ["base" := b]
 
-fold1 :: (Expr s) => (Term -> Term -> Term) -> s -> Term
-fold1 f s = op REDUCE (f, s) ()
+reduce1 :: (Expr s) => (Term -> Term -> Term) -> s -> Term
+reduce1 f s = op REDUCE (f, s) ()
 
 distinct :: (Expr s) => s -> Term
 distinct s = op DISTINCT [s] ()
@@ -146,7 +146,7 @@ groupBy g mr = Term $ do
 groupBy' = groupBy
 
 sum, sum' :: (Expr s) => s -> Term
-sum = fold ((+) :: Term -> Term -> Term) (0 :: Term)
+sum = reduce ((+) :: Term -> Term -> Term) (0 :: Term)
 sum' = sum
 
 avg :: (Expr s) => s -> Term
