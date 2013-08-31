@@ -1,6 +1,7 @@
 module Database.RethinkDB.MapReduce where
 
 import Control.Monad.State
+import Control.Monad.Writer
 
 import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
 
@@ -10,11 +11,6 @@ import {-# SOURCE #-} qualified Database.RethinkDB.Functions as R
 
 termToMapReduce :: (Term -> Term) -> State QuerySettings (Term, Term, Term)
 termToMapReduce = undefined
-
-data MapReduce =
-    None Term |
-    Map [Term] |
-    MapReduce [Term] Term [Term]
 
 toReduce :: MapReduce -> MapReduce
 toReduce (Map x) = MapReduce x idt []
@@ -54,8 +50,27 @@ toMapReduce v t@(BaseTerm type' _ args optargs) = let
                                     (expr (R.sum :: Term -> Term)) []
                 _ -> rebuild
 
+data MapReduce =
+    None Term |
+    Map [Term] |
+    MapReduce [Term] Term [Term]
+
+-- (TERMTYPE a (mapreduce maps reduce finals)) -> mapreduce maps reduce ((\x -> TERMTYPE a x) : finals)
+
 rebuild0 :: TermType -> [MapReduce] -> [(Key, MapReduce)] -> MapReduce
-rebuild0 = undefined
+rebuild0 ttype args optargs = MapReduce maps reduce finals where
+  ([(MapReduce maps reduce tailFinals)], headFinals) = extract False ttype args optargs
+  finals = headFinals : tailFinals
 
 rebuildx :: TermType -> [MapReduce] -> [(Key, MapReduce)] -> MapReduce
-rebuildx = undefined
+rebuildx ttype args optargs = MapReduce maps reduce finals where
+  (mrs, headFinals) = extract True ttype args optargs
+  maps = undefined mrs
+  reduce = undefined mrs
+  finals = undefined mrs
+
+extract :: Bool -> TermType -> [MapReduce] -> [(Key, MapReduce)] -> ([MapReduce], Term)
+extract = undefined
+
+extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([Term] -> Term)
+extractList = undefined
