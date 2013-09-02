@@ -12,90 +12,84 @@ module Database.RethinkDB (
   module Database.RethinkDB.Network,
   module Database.RethinkDB.Objects,
   module Database.RethinkDB.Driver,
-  module Database.RethinkDB.Functions
-{-
+  module Database.RethinkDB.Functions,
+
   -- * Accessing RethinkDB
 
-  RethinkDBHandle,
-  openConnection,
-  closeConnection,
-  use,
-  run, runMaybe, runEither, runRaw, runJSON, runBatch,
-  next, collect, resultsError,
+  --RethinkDBHandle,
+  --openConnection,
+  --closeConnection,
+  --use,
+  --run, -- runMaybe, runEither, runRaw, runJSON, runBatch,
+  -- next, collect, resultsError,
 
   -- * Manipulating databases
 
   Database(..),
-  db, dbCreate, dbDrop, dbList,
+  -- db, dbCreate, dbDrop, dbList,
 
   -- * Manipulating Tables
 
-  Table(..), tablePrimaryAttr, TableCreateOptions(..),
-  table, tableCreate, tableDrop, tableList,
+  Table(..), -- tablePrimaryAttr, TableCreateOptions(..),
+  -- table, tableCreate, tableDrop, tableList,
 
   -- * Writing data
 
   Document(..),
-  insert, insertMany, upsert, upsertMany,
-  update, replace, delete,
+  -- insert, -- insertMany, upsert, upsertMany,
+  -- update, replace, delete,
 
   -- * Selecting data
 
-  get, filter', between,
+  -- get, filter', between,
 
   -- * Joins
 
-  innerJoin, outerJoin, eqJoin, zip',
+  -- innerJoin, outerJoin, eqJoin, -- zip',
 
   -- * Transformations
 
-  map', concatMap', orderBy, skip, limit,
-  slice, nth, pluck, without, union',
+  -- map', concatMap', orderBy, -- skip, limit,
+  -- slice, nth, pluck, without, -- union',
 
   -- * Aggregation
 
-  reduce, count, distinct, groupedMapReduce, groupBy',
+  -- reduce, count, distinct, -- groupedMapReduce, groupBy',
 
   -- * Reductions
 
-  count', sum', avg,
+  -- count', sum', avg,
 
   -- * Document manipulation
 
-  pick, unpick, merge, append, (!), (!?),
+  -- pick, unpick, merge, append, (!), (!?),
 
   -- * Operators
 
-  concat,
-  add, sub, mul, div', mod, and', or',
-  eq, ne, gt, ge, lt, le, not',
+  -- concat,
+  -- add, sub, mul, div', mod, and', or',
+  -- eq, ne, gt, ge, lt, le, not',
 
   -- * Control structures
 
-  bind, let', var, if', forEach, error', js, jsfun,
+  -- bind, let', var, if', forEach, error', js, jsfun,
 
   -- * Sequence conversion
 
-  streamToArray, arrayToStream, asArray,
+  -- streamToArray, arrayToStream, asArray,
 
   -- * Short constructors
 
-  Obj, Attribute(..), obj, str, nil,
+  -- Obj, Attribute(..), obj, str, -- nil,
 
   -- * Types and type classes
 
-  Query, ToQuery(..),
-  ValueTypeKind(..), ExprTypeKind(..),
-  ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
-  HasValueType, HaveValueType,
-  NumberExpr, BoolExpr, ObjectExpr, ArrayExpr, StringExpr, ValueExpr,
-  NumberStream, BoolStream, ObjectStream, ArrayStream, StringStream, Selection,
-  CanCompare,
-  Order(..), ToOrder(..),
-  Sequence(..),
-  Mapping(..), ToMapping(..),
-  Results
--}
+  -- Query, ToQuery(..),
+  -- ValueTypeKind(..), ExprTypeKind(..),
+  -- ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
+   -- HasValueType, HaveValueType,
+  Order(..),
+
   ) where
 
 import Prelude ()

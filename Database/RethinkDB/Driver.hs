@@ -7,7 +7,8 @@ import Database.RethinkDB.Network
 import Database.RethinkDB.Term
 
 run :: Result r => RethinkDBHandle -> Term -> IO r
-run h t = withNewToken h $ \token -> do
+run h t = do
+  token <- newToken h
   let (q, bt) = buildQuery t token (rdbDatabase h)
   r <- runQLQuery h q bt
   convertResult r

@@ -72,5 +72,5 @@ rebuildx ttype args optargs = MapReduce maps reduce finals where
 extract :: Bool -> TermType -> [MapReduce] -> [(Key, MapReduce)] -> ([MapReduce], Term)
 extract = undefined
 
-extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([Term] -> Term)
+-- extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([Term] -> Term)
 extractList = undefined

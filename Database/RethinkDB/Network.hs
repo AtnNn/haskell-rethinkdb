@@ -1,25 +1,36 @@
-{-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns #-}
 
-module Database.RethinkDB.Network where
+module Database.RethinkDB.Network (
+  RethinkDBHandle
+  ) where
 
-import Control.Monad
-import Data.Typeable
-import Network
-import System.IO (Handle, hClose)
-import Data.ByteString.Lazy (pack, unpack, hPut, hGet)
+import Control.Monad (when, forever)
+import Data.Typeable (Typeable)
+import Network (HostName, connectTo, PortID(PortNumber))
+import System.IO (Handle, hClose, hIsEOF)
+import Data.ByteString.Lazy (pack, unpack, hPut, hGet, ByteString)
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.UTF8 as BS (fromString)
 import qualified Data.Text as T
-import Data.Int
-import Control.Concurrent.MVar
-import Control.Concurrent
-import Data.Bits
-import Data.Monoid
+import Control.Concurrent (
+  writeChan, MVar, Chan, modifyMVar, readMVar, forkIO, readChan,
+  myThreadId, newMVar, ThreadId, withMVar, newChan,
+  newEmptyMVar, putMVar)
+import Data.Bits (shiftL, (.|.), shiftR)
+import Data.Monoid ((<>))
 import Data.Foldable hiding (forM_)
-import Control.Exception.Base
-import Data.Aeson hiding (Success)
+import Control.Exception (catches, Exception, throwIO)
+import Data.Aeson (toJSON, object, (.=), Value(Null, Bool))
+import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef)
+import Data.Map (Map)
+import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
+import Control.Monad.Fix (fix)
+import Data.Int (Int64)
 
-import Text.ProtocolBuffers.Basic
-import Text.ProtocolBuffers
+import Text.ProtocolBuffers.Basic (uToString)
+import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
 
 import Database.RethinkDB.Protobuf.Ql2.Query2 as Query
 import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
@@ -31,29 +42,40 @@ import Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
 import Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
 
 import Database.RethinkDB.Objects as O
-import Database.RethinkDB.Term
+import Database.RethinkDB.Term (
+  BaseTerm, Backtrace, convertBacktrace)
+
+type Token = Int64
 
 -- | A connection to the database server
 data RethinkDBHandle = RethinkDBHandle {
   rdbHandle :: Handle,
-  rdbToken :: MVar Int64, -- ^ The next token to use
-  rdbDatabase :: Database  -- ^ The default database
+  rdbWriteLock :: MVar (),
+  rdbToken :: IORef Token, -- ^ The next token to use
+  rdbDatabase :: Database,  -- ^ The default database
+  rdbWait :: IORef (Map Token (Chan Response, BaseTerm)),
+  rdbThread :: ThreadId
   }
 
+data Cursor a = Cursor {
+  cursorMBox :: MVar Response,
+  cursorBuffer :: MVar (Either RethinkDBError ([O.Datum], Bool)),
+  cursorMap :: O.Datum -> a }
+
+instance Functor Cursor where
+  fmap f Cursor{ .. } = Cursor { cursorMap = f . cursorMap, .. }
+
 instance Show RethinkDBHandle where
-  show (RethinkDBHandle h _ _) = "RethinkDB Connection " ++ show h
+  show RethinkDBHandle{ rdbHandle } = "RethinkDB Connection " ++ show rdbHandle
 
-withNewToken :: RethinkDBHandle -> (Int64 -> IO a) -> IO a
-withNewToken (RethinkDBHandle _ v _) io =
-    mask $ \restore -> do
-      t <- takeMVar v
-      let t' = t + 1
-      a <- restore (io t') `onException` putMVar v t'
-      putMVar v t'
-      return a
+newToken :: RethinkDBHandle -> IO Int64
+newToken RethinkDBHandle{rdbToken} =
+  atomicModifyIORef' rdbToken $ \x -> (x+1, x)
 
-withConnection :: RethinkDBHandle -> IO a -> IO a
-withConnection (RethinkDBHandle _ v _) io = withMVar v (\_ -> io)
+data RethinkDBConnectionError =
+  RethinkDBConnectionError ByteString
+  deriving (Show, Typeable)
+instance Exception RethinkDBConnectionError
 
 -- | Create a new connection to the database server
 --
@@ -61,13 +83,31 @@ withConnection (RethinkDBHandle _ v _) io = withMVar v (\_ -> io)
 --
 -- >>> h <- openConnection "localhost" 28015
 
-openConnection :: HostName -> Integer -> IO RethinkDBHandle
-openConnection host port = do
+openConnection :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
+openConnection host port mauth = do
   h <- connectTo host (PortNumber (fromInteger port))
   hPut h magicNumber
-  r <- newMVar 1
+  let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
+  hPut h $ packUInt (fromIntegral $ B.length auth)
+  hPut h auth
+  res <- hGetNullTerminatedString h
+  when (res /= "SUCCESS") $ throwIO (RethinkDBConnectionError res)
+  r <- newIORef 1
   let db' = Database "test"
-  return (RethinkDBHandle h r db')
+  wlock <- newMVar ()
+  waits <- newIORef M.empty
+  let rdb = RethinkDBHandle h wlock r db' waits undefined
+  tid <- forkIO $ readResponses rdb
+  return rdb{ rdbThread = tid }
+
+hGetNullTerminatedString :: Handle -> IO ByteString
+hGetNullTerminatedString h = go "" where
+  go acc = do
+    end <- hIsEOF h
+    if end then return acc else do
+      c <- B.hGet h 1
+      if c == B.pack [0] then return acc else
+        go (acc <> c)
 
 magicNumber :: ByteString
 magicNumber = packUInt $ fromEnum V0_1
@@ -87,6 +127,10 @@ packUInt n = pack $ map fromIntegral $
                [n `mod` 256, (n `shiftR` 8) `mod` 256,
                 (n `shiftR` 16) `mod` 256, (n `shiftR` 24) `mod` 256]
 
+withHandle :: RethinkDBHandle -> (Handle -> IO a) -> IO a
+withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
+  withMVar rdbWriteLock $ \_ -> f rdbHandle
+
 data RethinkDBError = RethinkDBError {
   errorCode :: ErrorCode,
   errorTerm :: BaseTerm,
@@ -104,67 +148,105 @@ data Response = ErrorResponse {
   successDatums :: [O.Datum]
   }
 
-data ErrorCode = ErrorBrokenClient
-               | ErrorBadQuery
-               | ErrorRuntime
-               | ErrorNetwork
+data ErrorCode =
+  ErrorBrokenClient |
+  ErrorBadQuery |
+  ErrorRuntime
 
 instance Show ErrorCode where
   show ErrorBrokenClient = "broken client error"
   show ErrorBadQuery = "malformed query error"
   show ErrorRuntime = "runtime error"
-  show ErrorNetwork = "error talking to server"
 
-data SuccessCode = SuccessPartial RethinkDBHandle BaseTerm Int64
-                 | Success
-                 deriving Show
+data SuccessCode =
+  SuccessPartial RethinkDBHandle Int64 |
+  Success
+  deriving Show
 
 instance Show Response where
-  show (ErrorResponse RethinkDBError {..}) = show errorCode ++ ": " ++
-                            show errorMessage ++ " (" ++
-                            show errorBacktrace ++ ")"
+  show (ErrorResponse RethinkDBError {..}) =
+    show errorCode ++ ": " ++
+    show errorMessage ++ " (" ++
+    show errorBacktrace ++ ")"
   show SuccessResponse {..} = show successCode ++ ": " ++ show successDatums
 
--- | Receive a fixed amount of data
-recvAll :: RethinkDBHandle -> Int -> IO ByteString
-recvAll (RethinkDBHandle h _ _) n = hGet h n
+convertResponse :: RethinkDBHandle -> BaseTerm -> Int64 -> Response2 -> Response
+convertResponse h q t Response2{ .. } = case type' of
+  SUCCESS_ATOM -> SuccessResponse Success (map convertDatum r)
+  SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) (map convertDatum r)
+  SUCCESS_SEQUENCE -> SuccessResponse Success (map convertDatum r)
+  CLIENT_ERROR -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
+  COMPILE_ERROR -> ErrorResponse $ RethinkDBError ErrorBadQuery q e bt
+  RUNTIME_ERROR -> ErrorResponse $ RethinkDBError ErrorRuntime q e bt
+  where
+    bt = maybe [] convertBacktrace backtrace
+    r = toList response
+    e = show response -- TODO: nice error with backtrace
 
--- | Send a bytestring
-sendAll :: RethinkDBHandle -> ByteString -> IO ()
-sendAll (RethinkDBHandle h _ _) s = hPut h s
-
-convertResponse :: RethinkDBHandle -> BaseTerm -> Int64 -> Either String Response2 -> Response
-convertResponse _ q _ (Left s) = ErrorResponse (RethinkDBError ErrorNetwork q s [])
-convertResponse h q t (Right Response2 {..}) = case type' of
-  SUCCESS_ATOM     -> SuccessResponse Success                (map convertDatum r)
-  SUCCESS_PARTIAL  -> SuccessResponse (SuccessPartial h q t) (map convertDatum r)
-  SUCCESS_SEQUENCE -> SuccessResponse Success                (map convertDatum r)
-  CLIENT_ERROR     -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
-  COMPILE_ERROR    -> ErrorResponse $ RethinkDBError ErrorBadQuery     q e bt
-  RUNTIME_ERROR    -> ErrorResponse $ RethinkDBError ErrorRuntime      q e bt
-  where bt = maybe [] convertBacktrace backtrace
-        r = toList response
-        e = show response -- TODO: nice error with backtrace
-
-runQLQuery :: RethinkDBHandle -> Query2 -> BaseTerm -> IO Response
+runQLQuery :: RethinkDBHandle -> Query2 -> BaseTerm -> IO (MVar Response)
 runQLQuery h query term = do
-  let queryS = messagePut query
-  sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
-  fmap (convertResponse h term (Query.token query)) $ readResponse (Query.token query)
+  tok <- newToken h
+  mbox <- addMBox h tok term
+  sendQLQuery h query{ Query.token = tok }
+  return mbox
 
-  where readResponse t = do
-          header <- recvAll h 4
-          responseS <- recvAll h (unpackUInt header)
-          let eResponse = messageGet responseS
-          case eResponse of
-            Left errMsg -> return $ Left errMsg
-            Right (response, rest)
-              | B.null rest ->
-                (case Response.token response of
-                  n | n == t -> return $ Right response
-                    | n > t -> return $ Left "RethinkDB: runQLQuery: invalid response token"
-                    | otherwise -> readResponse t)
-              | otherwise -> return $ Left "RethinkDB: runQLQuery: invalid reply length"
+addMBox :: RethinkDBHandle -> Token -> BaseTerm -> IO (MVar Response)
+addMBox h tok term = do
+  chan <- newChan
+  atomicModifyIORef' (rdbWait h) $ \mboxes -> 
+    (M.insert tok (chan, term) mboxes, ())
+  mbox <- newEmptyMVar
+  forkIO $ fix $ \loop -> do
+    response <- readChan chan
+    putMVar mbox response
+    when (not $ isLastResponse response) loop
+  return mbox
+
+sendQLQuery :: RethinkDBHandle -> Query2 -> IO ()
+sendQLQuery h query = do
+  let queryS = messagePut query
+  withHandle h $ \s ->
+    hPut s $ packUInt (fromIntegral $ B.length queryS) <> queryS
+
+data RethinkDBReadError =
+  RethinkDBReadError String
+  deriving (Show, Typeable)
+instance Exception RethinkDBReadError
+
+readResponses :: RethinkDBHandle -> IO ()
+readResponses h' = do
+  tid <- myThreadId
+  forever $ flip catches handlers $
+    readSingleResponse h'{ rdbThread = tid }
+  where
+    handlers = []
+
+readSingleResponse :: RethinkDBHandle -> IO ()
+readSingleResponse h = do
+  header <- hGet (rdbHandle h) 4
+  rawResponse <- hGet (rdbHandle h) (unpackUInt header)
+  let parsedResponse = messageGet rawResponse
+  case parsedResponse of
+    Left errMsg -> throwIO $ RethinkDBReadError errMsg
+    Right (response, rest)
+      | B.null rest -> dispatch (Response.token response) response
+      | otherwise -> throwIO $ RethinkDBReadError "RethinkDB: readResponses: invalid reply length"
+
+  where
+  dispatch tok response = do
+    mboxes <- readIORef $ rdbWait h
+    case M.lookup tok mboxes of
+      Nothing -> return ()
+      Just (mbox, term) -> do
+        let convertedResponse = convertResponse h term tok response
+        writeChan mbox convertedResponse
+        when (isLastResponse convertedResponse) $
+          atomicModifyIORef' (rdbWait h) $ \m -> (M.delete tok m, ())
+
+isLastResponse :: Response -> Bool
+isLastResponse ErrorResponse{} = True
+isLastResponse SuccessResponse{ successCode = Success } = True
+isLastResponse SuccessResponse{ successCode = SuccessPartial{} } = False
 
 -- | Set the default database
 --
@@ -181,68 +263,53 @@ use h db' = h { rdbDatabase = db' }
 -- >>> closeConnection h
 
 closeConnection :: RethinkDBHandle -> IO ()
-closeConnection (RethinkDBHandle h _ _) = hClose h
+closeConnection RethinkDBHandle{ rdbHandle } = hClose rdbHandle
 
 convertDatum :: Datum.Datum -> O.Datum
-convertDatum Datum { type' = R_NULL } = Null
-convertDatum Datum { type' = R_BOOL, r_bool = Just b } = Bool b
-convertDatum Datum { type' = R_ARRAY, r_array = a } = toJSON (map convertDatum $ toList a)
-convertDatum Datum { type' = R_OBJECT, r_object = o } = object $ map pair $ toList o
-    where pair (AssocPair k v)  = (T.pack $ uToString k) .= convertDatum v
-convertDatum Datum { type' = R_STR, r_str = Just s } = toJSON (uToString s)
-convertDatum Datum { type' = R_NUM, r_num = Just n } = toJSON n
+convertDatum Datum { type' = Just R_NULL } = Null
+convertDatum Datum { type' = Just R_BOOL, r_bool = Just b } = Bool b
+convertDatum Datum { type' = Just R_ARRAY, r_array = a } = toJSON (map convertDatum $ toList a)
+convertDatum Datum { type' = Just R_OBJECT, r_object = o } = object $ map pair $ toList o
+    where pair (AssocPair (Just k) (Just v))  = (T.pack $ uToString $ k) .= convertDatum v
+convertDatum Datum { type' = Just R_STR, r_str = Just s } = toJSON (uToString s)
+convertDatum Datum { type' = Just R_NUM, r_num = Just n } = toJSON n
 convertDatum d = error ("Invalid Datum: " ++ show d)
 
-data Cursor a = Cursor {
-  cursorStop :: IO (),
-  cursorNext :: IO (Either (Maybe RethinkDBError) a) }
-
-instance Functor Cursor where
-  fmap f (Cursor s c) = Cursor s $ fmap (fmap f) c
-
 stopResponse :: Response -> IO ()
-stopResponse SuccessResponse { successCode = SuccessPartial h _ tok } = do
-  let queryS = messagePut defaultValue { Query.type' = STOP, Query.token = tok}
-  sendAll h $ packUInt (fromIntegral $ B.length queryS) <> queryS
+stopResponse SuccessResponse { successCode = SuccessPartial h tok } = do
+  let query = defaultValue { Query.type' = STOP, Query.token = tok}
+  sendQLQuery h query
 stopResponse _ = return ()
 
-nextResponse :: Response -> IO (Maybe Response)
-nextResponse SuccessResponse { successCode = SuccessPartial h bt tok } = do
+nextResponse :: Response -> IO ()
+nextResponse SuccessResponse { successCode = SuccessPartial h tok } = do
   let query = defaultValue { Query.type' = CONTINUE, Query.token = tok}
-  r <- runQLQuery h query bt
-  return $ Just r
-nextResponse _ = return Nothing
+  sendQLQuery h query
+nextResponse _ = return ()
 
-makeCursor :: Response -> IO (Cursor O.Datum)
-makeCursor resp = do
-  v <- newEmptyMVar
-  _ <- forkFinally (go v resp) (const $ stopResponse resp)
-  return $ Cursor (stopResponse resp) (takeMVar v)
-  where go v r@SuccessResponse {successDatums = datums} = do
-          forM_ datums $ \d -> putMVar v (Right d)
-          nr <- nextResponse r
-          maybe (forever $ putMVar v (Left Nothing)) (go v) nr
-        go v ErrorResponse { errorResponse = e } =
-          forever $ putMVar v (Left (Just e))
+makeCursor :: MVar Response -> IO (Cursor O.Datum)
+makeCursor cursorMBox = do
+  cursorBuffer <- newMVar (Right ([], False))
+  return Cursor{..}
+  where cursorMap = id
+
+next :: Cursor a -> IO (Maybe a)
+next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
+  case mbuffer of
+    Left err -> throwIO err
+    Right ([], True) -> return (Right ([], True), Nothing)
+    Right (x:xs, end) -> return $ (Right (xs, end), Just (cursorMap x))
+    Right ([], False) -> cursorFetchBatch c >>= loop
+
+cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([O.Datum], Bool))
+cursorFetchBatch c = do
+  response <- readMVar (cursorMBox c)
+  case response of
+    ErrorResponse e -> return $ Left e
+    SuccessResponse Success datums -> return $ Right (datums, True)
+    SuccessResponse SuccessPartial{} datums -> return $ Right (datums, False)
 
 cursorAll :: Cursor a -> IO [a]
-cursorAll (Cursor _ next) = go []
-  where go acc = do
-          x <- next
-          case x of
-            Left Nothing -> return (reverse acc)
-            Left (Just err) -> throw err
-            Right a -> go (a : acc)
-
-cursorTake :: Int -> Cursor a -> IO [a]
-cursorTake n (Cursor _ next) = go n []
-  where go 0 acc = return (reverse acc)
-        go i acc = do
-          x <- next
-          case x of
-            Left Nothing -> return (reverse acc)
-            Left (Just err) -> throw err
-            Right a -> go (i - 1) (a : acc)
-
-cursorHead :: Cursor a -> IO a
-cursorHead = fmap head . cursorTake 1
+cursorAll c = fmap reverse $ ($ []) $ fix $ \loop acc -> do
+  ma <- next c
+  return $ case ma of Nothing -> acc; Just a -> a : acc

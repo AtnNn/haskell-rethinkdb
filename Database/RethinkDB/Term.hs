@@ -69,12 +69,13 @@ instance Show BaseTerm where
 
 showD :: Datum.Datum -> String
 showD d = case Datum.type' d of
-  R_NUM -> show' $ r_num d
-  R_BOOL -> show' $ r_bool d
-  R_STR -> show' $ r_str d
-  R_ARRAY -> show $ r_array d
-  R_OBJECT -> show $ r_object d
-  R_NULL -> "null"
+  Just R_NUM -> show' $ r_num d
+  Just R_BOOL -> show' $ r_bool d
+  Just R_STR -> show' $ r_str d
+  Just R_ARRAY -> show $ r_array d
+  Just R_OBJECT -> show $ r_object d
+  Just R_NULL -> "null"
+  Nothing -> "Nothing"
   where show' Nothing = "Nothing"
         show' (Just a) = show a
 
@@ -150,7 +151,7 @@ op t a b = Term $ do
   return $ BaseTerm t Nothing a' b'
 
 datumTerm :: DatumType -> Datum.Datum -> Term
-datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = t }) [] []
+datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = Just t }) [] []
 
 str :: String -> Term
 str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
@@ -283,6 +284,6 @@ instance Show Frame where
 
 convertBacktrace :: QL.Backtrace -> Backtrace
 convertBacktrace = concatMap convertFrame . toList . QL.frames
-    where convertFrame QL.Frame { type' = QL.POS, pos = Just n } = [FramePos n]
-          convertFrame QL.Frame { type' = QL.OPT, opt = Just k } = [FrameOpt (T.pack $ uToString k)]
+    where convertFrame QL.Frame { type' = Just QL.POS, pos = Just n } = [FramePos n]
+          convertFrame QL.Frame { type' = Just QL.OPT, opt = Just k } = [FrameOpt (T.pack $ uToString k)]
           convertFrame _ = []
