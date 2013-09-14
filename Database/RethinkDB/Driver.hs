@@ -8,236 +8,24 @@ import Database.RethinkDB.Term
 
 run :: Result r => RethinkDBHandle -> Term -> IO r
 run h t = do
-  token <- newToken h
-  let (q, bt) = buildQuery t token (rdbDatabase h)
+  let (q, bt) = buildQuery t 0 (rdbDatabase h)
   r <- runQLQuery h q bt
   convertResult r
 
 class Result r where
-  convertResult :: Response -> IO r
+  convertResult :: MVar Response -> IO r
 
 instance Result Response where
-    convertResult r = return r
+    convertResult r = takeMVar
 
 instance FromJSON a => Result (Cursor a) where
-  convertResult r = fmap (fmap (unsafe . fromJSON)) $ makeCursor r
-    where unsafe (Data.Aeson.Error e) = error e
-          unsafe (Data.Aeson.Success a) = a
+  convertResult r = fmap (unsafe . fromJSON) $ makeCursor r
+    where
+      unsafe (Data.Aeson.Error e) = error e
+      unsafe (Data.Aeson.Success a) = a
 
 instance FromJSON a => Result [a] where
   convertResult = cursorAll <=< convertResult
-
-{-
--- | Run a query on the connection, returning (Left message) on error
-runEither :: ToQuery a v => RethinkDBHandle -> a -> IO (Either String v)
-runEither h q = case toQuery q of
-  -- TODO: just call runBatch and get the resultsSeq
-  query -> do
-    tok <- getNewToken h
-    let ((vw, qlq), _) = runQueryM (queryBuild query) $
-                    QuerySettings tok (rdbDatabase h) initialVars False
-    r <- runQLQuery h qlq
-    return $ case r of
-      ErrorResponse {} -> Left (show r)
-      SuccessResponse _ strs -> queryExtract query vw =<<
-       (maybe (Left "decode error") Right . sequence . map decodeAny $ strs)
-
-addDoc :: Table -> Value -> Either String (Document, Value)
-addDoc tbl x = do
-  id' <- maybe (Left "missign primary key") Right $ getKey (tablePrimaryAttr tbl) x
-  return (Document tbl id', x)
-  where getKey k (Object o) = parseMaybe (.: str k) o
-        getKey _ _ = Nothing
-
--- | Run a query on the connection, returning Nothing on error
-runMaybe :: ToQuery a v => RethinkDBHandle -> a -> IO (Maybe v)
-runMaybe h = fmap (either (const Nothing) Just) . runEither h
-
--- | Run a query on the connection and return the raw response
-runRaw :: (ToBuildQuery q, JSONQuery (BuildViewQuery q)) =>
-          RethinkDBHandle -> q -> IO Response
-runRaw h q = do
-  tok <- getNewToken h
-  let ((_, qlq), _) = runQueryM (queryBuild (jsonQuery (buildQuery q))) $
-                      QuerySettings tok (rdbDatabase h) initialVars False
-  runQLQuery h qlq
-
--- | Run a query on the connection and return the resulting JSON value
-runJSON :: (JSONQuery (BuildViewQuery q), ToBuildQuery q) =>
-           RethinkDBHandle -> q -> IO [Value]
-runJSON h q = run h (jsonQuery (buildQuery q))
-
-class JSONQuery (b :: Bool) where
-  jsonQuery :: (forall a . ([If b (Document, Value) Value] -> Either String a) -> Query b a)
-               -> Query b [Value]
-
-instance JSONQuery False where
-  jsonQuery f = f Right
-
-instance JSONQuery True where
-  jsonQuery f = f (Right . map snd)
-
-data Results a = Results {
-  resultsHandle :: IORef (Maybe (RethinkDBHandle, Int64)),
-  resultsSeq :: IORef (Seq.Seq a),
-  _resultsError :: IORef (Maybe String),
-  resultsQueryView :: QueryViewPair [a]
-  }
-
-data QueryViewPair a where
-  QueryViewPair :: Query w a -> MaybeView w -> QueryViewPair a
-
--- | Run a query on the connection and a return a lazy result list
---
--- >>> res <- runBatch h <- (arrayToStream [1,2,3] :: NumberStream)
--- >>> next res
--- Just 1
--- >>> collect res
--- [2,3]
-
-runBatch :: ToQuery q [a] => RethinkDBHandle -> q -> IO (Results a)
-runBatch h q = case toQuery q of
-  query -> do
-    tok <- getNewToken h
-    let ((vw, qlq), _) = runQueryM (queryBuild query) $
-                    QuerySettings tok (rdbDatabase h) initialVars False
-    r <- runQLQuery h qlq
-    let (han, seq', err) = queryExtractResponse query vw r h tok
-    refHan <- newIORef han
-    refSeq <- newIORef seq'
-    refErr <- newIORef err
-    return $ Results refHan refSeq refErr (QueryViewPair query vw)
-
-queryExtractResponse ::
-  Query w [a] -> MaybeView w -> Response -> RethinkDBHandle -> Int64
-  -> (Maybe (RethinkDBHandle, Int64), Seq a, Maybe String)
-queryExtractResponse query vw r h tok =
-    case r of
-      ErrorResponse {} -> (Nothing, Seq.fromList [], Just $ show r)
-      SuccessResponse typ strs ->
-        let rList = queryExtract query vw =<<
-               (maybe (Left "decode error") Right . sequence . map decodeAny $ strs)
-        in case rList of
-          Left err -> (Nothing, Seq.fromList [], Just err)
-          Right list ->
-            let han = case typ of
-                  SuccessPartial -> Just (h, tok)
-                  SuccessStream -> Nothing
-                  SuccessJson -> Nothing
-                  SuccessEmpty -> Nothing
-            in (han, Seq.fromList list, Nothing)
-
--- | Read the next value from a lazy query. Fetch it from the server if needed.
-next :: Results a -> IO (Maybe a)
-next res = do
-  seq' <- readIORef (resultsSeq res)
-  case Seq.viewl seq' of
-    car Seq.:< cdr -> do
-      writeIORef (resultsSeq res) cdr
-      return (Just car)
-    Seq.EmptyL -> do
-      mh <- readIORef (resultsHandle res)
-      case (mh, resultsQueryView res) of
-        (Nothing, _) -> return Nothing
-        (Just (h, tok), (QueryViewPair query vw)) -> do
-          resp <- runQLQuery h $ defaultValue {
-            QLQuery.type' = QL.CONTINUE, QLQuery.token = tok }
-          let (han, seq'', err) = queryExtractResponse query vw resp h tok
-          writeIORef (resultsHandle res) han
-          modifyIORef (resultsSeq res) (<> seq'')
-          writeIORef (_resultsError res) err
-          next res
-
--- | Return all the results of a lazy query.
-collect :: Results a -> IO [a]
-collect r = do
-  ma <- next r
-  case ma of
-    Nothing -> return []
-    Just a -> fmap (a:) (collect r)
-
--- | Get the last error from a lazy query.
---
--- If both next and resultsError return Nothing, then
--- all results have been fetched without error.
-
-resultsError :: Results a -> IO (Maybe String)
-resultsError = readIORef . _resultsError
-
--- * Expressions
-
--- | Can the Expr be written to? (updated or deleted)
-type family ExprTypeIsView (expr :: ExprTypeKind) :: Bool
-type instance ExprTypeIsView (StreamType w o) = w
-type instance ExprTypeIsView (ValueType v) = False
-
-type ExprIsView e = ExprTypeIsView (ExprType e)
-
-type family ExprTypeNoView (t :: ExprTypeKind) :: ExprTypeKind
-type instance ExprTypeNoView (StreamType b t) = StreamType False t
-type instance ExprTypeNoView (ValueType t) = ValueType t
-
--- | The type of the value of an Expr
-type family ExprValueType expr :: ValueTypeKind
-type instance ExprValueType (Expr (ValueType v)) = v
-type instance ExprValueType (Expr (StreamType w v)) = v
-
--- | The type of the stream of an Expr
-type family ExprTypeStreamType (t :: ExprTypeKind) :: ValueTypeKind
-type instance ExprTypeStreamType (StreamType w t) = t
-
--- | An RQL expression
-data Expr (t :: ExprTypeKind) where
-  Expr :: QueryM (MaybeView (ExprIsView (Expr t)), QL.Term) -> Expr t
-  SpotExpr :: Document -> Expr (StreamType True ObjectType)
-
-mkExpr :: ExprIsView (Expr t) ~ False => QueryM QL.Term -> Expr t
-mkExpr q = Expr $ fmap ((,) NoView) q
-
-mkView :: ExprIsView (Expr t) ~ True => Table -> QueryM QL.Term -> Expr t
-mkView t q = Expr $ fmap ((,) (ViewOf t)) q
-
-viewKeyAttr :: MaybeView b -> Utf8
-viewKeyAttr v = fromMaybe defaultPrimaryAttr $ fmap uFromString $
-    case v of
-      ViewOf (Table _ _ k) -> k
-      NoView -> Nothing
-
-viewTable :: MaybeView True -> Table
-viewTable v = case v of ViewOf t -> t
-
-data MaybeView (w :: Bool) where
- NoView :: MaybeView False
- ViewOf :: Table -> MaybeView True
-
--- | Convert something into an Expr
-class ToExpr (o :: *) where
-  type ExprType o :: ExprTypeKind
-  toExpr :: o -> Expr (ExprType o)
-
--- | The result type of toValue
-type family ToValueType (t :: ExprTypeKind) :: ValueTypeKind
-type instance ToValueType (StreamType w t) = ArrayType
-type instance ToValueType (ValueType t) = t
-
--- | Convert something into a value Expr
-class ToValue e where
-  toValue :: e -> Expr (ValueType (ToValueType (ExprType e)))
-
-type family FromMaybe (a :: k) (m :: Maybe k) :: k
-type instance FromMaybe a Nothing = a
-type instance FromMaybe a (Just b) = b
-
-type HasToStreamValueOf a b = FromMaybe a (ToStreamValue b) ~ a
-
-type ToStreamValue e = ToStreamTypeValue (ExprType e)
-
-type family ToStreamTypeValue (t :: ExprTypeKind) :: Maybe ValueTypeKind
-type instance ToStreamTypeValue (StreamType w t) = Just t
-type instance ToStreamTypeValue (ValueType t) = Nothing
-
-class ToExpr e => ToStream e where
-  toStream :: e -> Expr (StreamType (ExprIsView e) (FromMaybe a (ToStreamValue e)))
 
 instance ToExpr Document where
   type ExprType Document = StreamType True 'ObjectType
@@ -352,29 +140,6 @@ instance ToExpr Obj where
 
 instance ToValue Obj where
   toValue = toExpr
-
--- | Aliases for type constraints on expressions
-type HasValueType a v = (ToValue a, ToValueType (ExprType a) ~ v)
-type HaveValueType a b v = (HasValueType a v, HasValueType b v)
-
--- | Simple aliases for different Expr types
-type NumberExpr = Expr (ValueType NumberType)
-type BoolExpr = Expr (ValueType BoolType)
-type ObjectExpr = Expr (ValueType ObjectType)
-type ArrayExpr = Expr (ValueType ArrayType)
-type StringExpr = Expr (ValueType StringType)
-type ValueExpr t = Expr (ValueType t)
-type NumberStream = Expr (StreamType False NumberType)
-type BoolStream = Expr (StreamType False BoolType)
-type ArrayStream = Expr (StreamType False ArrayType)
-type StringStream = Expr (StreamType False StringType)
-type ObjectStream = Expr (StreamType False ObjectType)
-type Selection = Expr (StreamType True ObjectType)
-
--- | What values can be compared with eq, ne, lt, gt, le and ge
-class CanCompare (a :: ValueTypeKind)
-instance CanCompare NumberType
-instance CanCompare StringType
 
 instance Num (Expr (ValueType NumberType)) where
   (+) = add

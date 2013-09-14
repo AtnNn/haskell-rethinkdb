@@ -1,7 +1,20 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns #-}
 
 module Database.RethinkDB.Network (
-  RethinkDBHandle
+  RethinkDBHandle,
+  openConnection,
+  closeConnection,
+  use,
+  runQLQuery,
+  Cursor,
+  makeCursor,
+  next,
+  cursorAll,
+  Response(..),
+  SuccessCode(..),
+  ErrorCode(..),
+  RethinkDBError(..),
+  RethinkDBConnectionError(..),
   ) where
 
 import Control.Monad (when, forever)
@@ -16,7 +29,7 @@ import qualified Data.Text as T
 import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, readMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, withMVar, newChan,
-  newEmptyMVar, putMVar)
+  newEmptyMVar, putMVar, addMVarFinalizer)
 import Data.Bits (shiftL, (.|.), shiftR)
 import Data.Monoid ((<>))
 import Data.Foldable hiding (forM_)
@@ -196,10 +209,15 @@ addMBox h tok term = do
   atomicModifyIORef' (rdbWait h) $ \mboxes -> 
     (M.insert tok (chan, term) mboxes, ())
   mbox <- newEmptyMVar
+  addMVarFinalizer mbox $
+    atomicModifyIORef' (rdbWait h) $ \mboxes -> 
+      (M.delete tok mboxes, ())
   forkIO $ fix $ \loop -> do
     response <- readChan chan
     putMVar mbox response
-    when (not $ isLastResponse response) loop
+    when (not $ isLastResponse response) $ do
+      nextResponse response
+      loop
   return mbox
 
 sendQLQuery :: RethinkDBHandle -> Query2 -> IO ()
@@ -309,6 +327,7 @@ cursorFetchBatch c = do
     SuccessResponse Success datums -> return $ Right (datums, True)
     SuccessResponse SuccessPartial{} datums -> return $ Right (datums, False)
 
+-- | TODO: optimise this
 cursorAll :: Cursor a -> IO [a]
 cursorAll c = fmap reverse $ ($ []) $ fix $ \loop acc -> do
   ma <- next c

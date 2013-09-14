@@ -1,9 +1,9 @@
 module Database.RethinkDB.Objects where
 
-import Data.Default
-import Data.Int
+import Data.Default (def, Default)
+import Data.Int (Int64)
 import Data.Text as Text
-import Data.Aeson
+import Data.Aeson (Value)
 
 type Key = Text
 
