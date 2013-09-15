@@ -1,4 +1,10 @@
-module Database.RethinkDB.Objects where
+module Database.RethinkDB.Objects (
+  Database(..),
+  TableCreateOptions(..),
+  Table(..),
+  Datum,
+  Key
+  ) where
 
 import Data.Default (def, Default)
 import Data.Int (Int64)
@@ -35,14 +41,5 @@ instance Show Table where
   show (Table db' nam mkey) =
     maybe "" (\(Database d) -> Text.unpack d++".") db' ++ Text.unpack nam ++
     maybe "" (\k -> "[" ++ show k ++ "]") mkey
-
--- | A reference to a document
-data Document = Document {
-  documentTable :: Table,
-  documentKey :: Datum
-  } deriving (Eq)
-
-instance Show Document where
-  show (Document t k) = show t ++ "[" ++ show k ++ "]"
 
 type Datum = Value

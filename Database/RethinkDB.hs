@@ -8,87 +8,84 @@
 -- >>> import qualified Database.RethinkDB.Functions as R
 
 module Database.RethinkDB (
-  module Database.RethinkDB.Term,
-  module Database.RethinkDB.Network,
-  module Database.RethinkDB.Objects,
-  module Database.RethinkDB.Driver,
-  module Database.RethinkDB.Functions,
-
   -- * Accessing RethinkDB
 
-  --RethinkDBHandle,
-  --openConnection,
-  --closeConnection,
-  --use,
-  --run, -- runMaybe, runEither, runRaw, runJSON, runBatch,
-  -- next, collect, resultsError,
+  RethinkDBHandle,
+  connect,
+  close,
+  use,
+  run, run',
+  next, collect,
+  Response,
+  Result(..),
+  RethinkDBError(..),
+  SuccessCode(..),
+  ErrorCode(..),
 
   -- * Manipulating databases
 
   Database(..),
-  -- db, dbCreate, dbDrop, dbList,
+  db, dbCreate, dbDrop, dbList,
 
   -- * Manipulating Tables
 
-  Table(..), -- tablePrimaryAttr, TableCreateOptions(..),
-  -- table, tableCreate, tableDrop, tableList,
+  Table(..), TableCreateOptions(..),
+  table, tableCreate, tableDrop, tableList,
 
   -- * Writing data
 
-  Document(..),
-  -- insert, -- insertMany, upsert, upsertMany,
-  -- update, replace, delete,
+  insert, upsert,
+  update, replace, delete,
 
   -- * Selecting data
 
-  -- get, filter', between,
+  get, filter, between,
 
   -- * Joins
 
-  -- innerJoin, outerJoin, eqJoin, -- zip',
+  innerJoin, outerJoin, eqJoin, mergeRightLeft,
 
   -- * Transformations
 
-  -- map', concatMap', orderBy, -- skip, limit,
-  -- slice, nth, pluck, without, -- union',
+  map, concatMap, orderBy, drop, take,
+  slice, (!!), pluck, without, (++),
 
   -- * Aggregation
 
-  -- reduce, count, distinct, -- groupedMapReduce, groupBy',
+  reduce, distinct, groupBy,
 
   -- * Reductions
 
-  -- count', sum', avg,
+  count, sum, avg,
 
   -- * Document manipulation
 
-  -- pick, unpick, merge, append, (!), (!?),
+  merge, append, (!),
 
   -- * Operators
 
-  -- concat,
-  -- add, sub, mul, div', mod, and', or',
-  -- eq, ne, gt, ge, lt, le, not',
+  (+), (-), (*), (/), mod, (&&), (||),
+  (==), (!=), (>), (<), (<=), (>=), not,
 
   -- * Control structures
 
-  -- bind, let', var, if', forEach, error', js, jsfun,
+  Javascript(js), if', forEach, error,
 
   -- * Sequence conversion
 
-  -- streamToArray, arrayToStream, asArray,
+  coerceTo,
 
   -- * Short constructors
 
-  -- Obj, Attribute(..), obj, str, -- nil,
+  obj, Object(..), Attribute(..), str,
 
   -- * Types and type classes
 
-  -- Query, ToQuery(..),
-  -- ValueTypeKind(..), ExprTypeKind(..),
-  -- ExprIsView, ExprValueType, Expr(..), ToExpr(..), ToValue(..),
-   -- HasValueType, HaveValueType,
   Order(..),
+  
+  -- * Other
+  
+  member,
 
   ) where
 

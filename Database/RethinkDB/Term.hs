@@ -6,13 +6,13 @@ module Database.RethinkDB.Term where
 
 import qualified Data.Vector as V
 import qualified Data.HashMap.Lazy as M
-import Data.Maybe
-import Data.String
-import Data.List
+import Data.Maybe (fromMaybe, catMaybes)
+import Data.String (IsString, fromString)
+import Data.List (intersperse)
 import qualified Data.Sequence as S
-import Control.Monad.State
-import Control.Applicative
-import Data.Default
+import Control.Monad.State (State, get, put, runState)
+import Control.Applicative ((<$>))
+import Data.Default (Default, def)
 import qualified Data.Text as T
 import qualified Data.Aeson as J
 import Data.Foldable (toList)
@@ -20,16 +20,23 @@ import Data.Foldable (toList)
 import Text.ProtocolBuffers hiding (Key, cons, Default)
 import Text.ProtocolBuffers.Basic hiding (Default)
 
-import Database.RethinkDB.Protobuf.Ql2.Term2 as Term2
+import Database.RethinkDB.Protobuf.Ql2.Term2 (Term2(datum, args, optargs))
+import qualified Database.RethinkDB.Protobuf.Ql2.Term2 as Term2 (Term2(type'))
 import Database.RethinkDB.Protobuf.Ql2.Term2.TermType as TermType
-import Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair
-import Database.RethinkDB.Protobuf.Ql2.Query2 as Query2
-import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
-import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
-import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL
-import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL
+  (TermType(
+      MAKE_ARRAY, MAKE_OBJ, DATUM, GET, ADD, MUL, BRANCH,
+      LT, EQ, FUNC, VAR, TABLE, DB, FUNCALL, ERROR))
+import Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair (AssocPair(AssocPair))
+import qualified Database.RethinkDB.Protobuf.Ql2.Query2 as Query2 (Query2(type'))
+import Database.RethinkDB.Protobuf.Ql2.Query2 (Query2(query))
+import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType (QueryType(START))
+import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum (Datum(type'))
+import Database.RethinkDB.Protobuf.Ql2.Datum (r_str, r_num, r_bool, r_array, r_object)
+import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL (Backtrace, frames)
+import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL (Frame(type', pos, Frame, opt))
 import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL
+  (DatumType(R_NUM, R_BOOL, R_STR, R_ARRAY, R_OBJECT, R_NULL))
+import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL (FrameType(POS, OPT))
 
 import Database.RethinkDB.Objects as O
 
@@ -123,9 +130,9 @@ instance Arr Array where
 -- | A list of String/Expr pairs
 data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
-data Attribute = forall e . (Expr e) => Key := e
+data Attribute = forall e . (Expr e) => T.Text := e
 
-data BaseAttribute = BaseAttribute Key BaseTerm
+data BaseAttribute = BaseAttribute T.Text BaseTerm
 
 instance Show BaseAttribute where
   show (BaseAttribute a b) = T.unpack a ++ ": " ++ show b
@@ -203,21 +210,6 @@ instance Expr Table where
 instance Expr Database where
   expr (Database name) = op DB [name] ()
 
-newtype MaybeDatabase = MaybeDatabase (Maybe Database)
-
-instance Expr MaybeDatabase where
-  expr (MaybeDatabase Nothing) = withQuerySettings $ \QuerySettings {..} ->
-    expr queryDefaultDatabase
-  expr (MaybeDatabase (Just db)) = expr db
-
-instance Expr Document where
-  expr doc@(Document table key) =
-    op FUNCALL (\(x :: Term) -> op BRANCH (op TermType.EQ (x, ()) (),
-                                 op ERROR [str $ "The document " ++ show doc ++
-                                           " does not exist"] (),
-                                 x) (),
-                op GET (table, key) ()) ()
-
 instance Expr J.Value where
   expr J.Null = expr ()
   expr (J.Bool b) = expr b
@@ -274,9 +266,15 @@ buildQuery term token db = (defaultValue {
                                               queryDefaultDatabase = db })
         pterm = buildBaseTerm bterm
 
+instance Show Term where
+  show t = show . snd $ buildQuery t 0 (Database "")
+
+termToProtobuf :: Term -> Query2
+termToProtobuf t = fst $ buildQuery t 0 (Database "")
+
 type Backtrace = [Frame]
 
-data Frame = FramePos Int64 | FrameOpt Key
+data Frame = FramePos Int64 | FrameOpt T.Text
 
 instance Show Frame where
     show (FramePos n) = show n

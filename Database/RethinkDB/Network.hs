@@ -1,15 +1,17 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns #-}
 
 module Database.RethinkDB.Network (
-  RethinkDBHandle,
-  openConnection,
-  closeConnection,
+  RethinkDBHandle(..),
+  connect,
+  close,
   use,
   runQLQuery,
   Cursor,
   makeCursor,
   next,
-  cursorAll,
+  collect,
+  stopResponse,
+  nextResponse,
   Response(..),
   SuccessCode(..),
   ErrorCode(..),
@@ -29,7 +31,7 @@ import qualified Data.Text as T
 import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, readMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, withMVar, newChan,
-  newEmptyMVar, putMVar, addMVarFinalizer)
+  newEmptyMVar, putMVar, mkWeakMVar)
 import Data.Bits (shiftL, (.|.), shiftR)
 import Data.Monoid ((<>))
 import Data.Foldable hiding (forM_)
@@ -96,8 +98,8 @@ instance Exception RethinkDBConnectionError
 --
 -- >>> h <- openConnection "localhost" 28015
 
-openConnection :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
-openConnection host port mauth = do
+connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
+connect host port mauth = do
   h <- connectTo host (PortNumber (fromInteger port))
   hPut h magicNumber
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
@@ -109,9 +111,9 @@ openConnection host port mauth = do
   let db' = Database "test"
   wlock <- newMVar ()
   waits <- newIORef M.empty
-  let rdb = RethinkDBHandle h wlock r db' waits undefined
+  let rdb = RethinkDBHandle h wlock r db' waits
   tid <- forkIO $ readResponses rdb
-  return rdb{ rdbThread = tid }
+  return $ rdb tid
 
 hGetNullTerminatedString :: Handle -> IO ByteString
 hGetNullTerminatedString h = go "" where
@@ -123,7 +125,7 @@ hGetNullTerminatedString h = go "" where
         go (acc <> c)
 
 magicNumber :: ByteString
-magicNumber = packUInt $ fromEnum V0_1
+magicNumber = packUInt $ fromEnum V0_2
 
 -- | Convert a 4-byte byestring to an int
 unpackUInt :: ByteString -> Int
@@ -209,7 +211,7 @@ addMBox h tok term = do
   atomicModifyIORef' (rdbWait h) $ \mboxes -> 
     (M.insert tok (chan, term) mboxes, ())
   mbox <- newEmptyMVar
-  addMVarFinalizer mbox $
+  _ <- mkWeakMVar mbox $ do
     atomicModifyIORef' (rdbWait h) $ \mboxes -> 
       (M.delete tok mboxes, ())
   forkIO $ fix $ \loop -> do
@@ -231,11 +233,12 @@ data RethinkDBReadError =
   deriving (Show, Typeable)
 instance Exception RethinkDBReadError
 
-readResponses :: RethinkDBHandle -> IO ()
+readResponses :: (ThreadId -> RethinkDBHandle) -> IO ()
 readResponses h' = do
   tid <- myThreadId
+  let h = h' tid
   forever $ flip catches handlers $
-    readSingleResponse h'{ rdbThread = tid }
+    readSingleResponse h
   where
     handlers = []
 
@@ -268,7 +271,7 @@ isLastResponse SuccessResponse{ successCode = SuccessPartial{} } = False
 
 -- | Set the default database
 --
--- The new handle is an alias for the old one. Calling closeConnection on either one
+-- The new handle is an alias for the old one. Calling close on either one
 -- will close both.
 --
 -- >>> let h' = use h (db "players")
@@ -280,8 +283,8 @@ use h db' = h { rdbDatabase = db' }
 --
 -- >>> closeConnection h
 
-closeConnection :: RethinkDBHandle -> IO ()
-closeConnection RethinkDBHandle{ rdbHandle } = hClose rdbHandle
+close :: RethinkDBHandle -> IO ()
+close RethinkDBHandle{ rdbHandle } = hClose rdbHandle
 
 convertDatum :: Datum.Datum -> O.Datum
 convertDatum Datum { type' = Just R_NULL } = Null
@@ -328,7 +331,7 @@ cursorFetchBatch c = do
     SuccessResponse SuccessPartial{} datums -> return $ Right (datums, False)
 
 -- | TODO: optimise this
-cursorAll :: Cursor a -> IO [a]
-cursorAll c = fmap reverse $ ($ []) $ fix $ \loop acc -> do
+collect :: Cursor a -> IO [a]
+collect c = fmap reverse $ ($ []) $ fix $ \loop acc -> do
   ma <- next c
   return $ case ma of Nothing -> acc; Just a -> a : acc

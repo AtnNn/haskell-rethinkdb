@@ -2,6 +2,7 @@ module Database.RethinkDB.MapReduce where
 
 import Control.Monad.State
 import Control.Monad.Writer
+import qualified Data.Text as T
 
 import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
 
@@ -57,7 +58,7 @@ data MapReduce =
 
 -- (TERMTYPE a (mapreduce maps reduce finals)) -> mapreduce maps reduce ((\x -> TERMTYPE a x) : finals)
 
-rebuild0 :: TermType -> [MapReduce] -> [(Key, MapReduce)] -> MapReduce
+rebuild0 :: TermType -> [MapReduce] -> [(T.Text, MapReduce)] -> MapReduce
 rebuild0 ttype args optargs = MapReduce maps reduce finals where
   ([(MapReduce maps reduce tailFinals)], headFinals) = extract False ttype args optargs
   finals = headFinals : tailFinals

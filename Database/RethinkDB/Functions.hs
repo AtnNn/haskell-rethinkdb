@@ -1,6 +1,4 @@
-{-# LANGUAGE DataKinds, TypeOperators, ConstraintKinds, FlexibleContexts,
-             PolyKinds, ScopedTypeVariables,
-             OverloadedStrings, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, OverloadedStrings #-}
 
 -- | Functions from the ReQL (RethinkDB Query Language)
 
@@ -20,63 +18,45 @@ import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
 import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 
-(+), add, (-), sub, (*), mul, (/), div, div', mod, mod'
+(+), (-), (*), (/), mod
   :: (Expr a, Expr b) => a -> b -> Term
 (+) a b = op ADD (a, b) ()
 (-) a b = op SUB (a, b) ()
 (*) a b = op MUL (a, b) ()
 (/) a b = op DIV (a, b) ()
-add = (+)
-sub = (-)
-mul = (*)
-div = (/)
-div' = (/)
 mod a b = op MOD (a, b) ()
-mod' = mod
 
-or, or', and, and' :: (Expr a, Expr b) => a -> b -> Term
-or a b = op ANY (a, b) ()
-and a b = op ALL (a, b) ()
-or' = or
-and' = and
+(||), (&&) :: (Expr a, Expr b) => a -> b -> Term
+a || b = op ANY (a, b) ()
+a && b = op ALL (a, b) ()
 
-(==), (!=), eq, ne :: (Expr a, Expr b) => a -> b -> Term
-eq a b = op EQ (a, b) ()
-ne a b = op NE (a, b) ()
-(==) = eq
-(!=) = ne
+(==), (!=) :: (Expr a, Expr b) => a -> b -> Term
+a == b = op EQ (a, b) ()
+a != b = op NE (a, b) ()
 
-(>), (>=), (<), (<=), gt, lt, ge, le
+(>), (>=), (<), (<=)
   :: (Expr a, Expr b) => a -> b -> Term
-gt a b = op GT (a, b) ()
-lt a b = op LT (a, b) ()
-ge a b = op GE (a, b) ()
-le a b = op LE (a, b) ()
-(>) = gt
-(>=) = ge
-(<) = lt
-(<=) = le
+a > b = op GT (a, b) ()
+a < b = op LT (a, b) ()
+a >=b = op GE (a, b) ()
+a <=b = op LE (a, b) ()
 
-not, not' :: (Expr a) => a -> Term
+not :: (Expr a) => a -> Term
 not a = op NOT [a] ()
-not' = not
 
 -- * Lists and Streams
 
 count :: (Expr a) => a -> Term
 count e = op COUNT [e] ()
 
-(++), concat :: (Expr a, Expr b) => a -> b -> Term
-(++) a b = op UNION (a, b) ()
-concat = (++)
+(++) :: (Expr a, Expr b) => a -> b -> Term
+a ++ b = op UNION (a, b) ()
 
-map, map' :: (Expr a) => (Term -> Term) -> a -> Term
+map :: (Expr a) => (Term -> Term) -> a -> Term
 map f a = op MAP (a, f) ()
-map' = map
 
-filter', filter :: (Expr a) => (Term -> Term) -> a -> Term
+filter :: (Expr a) => (Term -> Term) -> a -> Term
 filter f a = op FILTER (a, f) ()
-filter' = filter
 
 between :: (Expr a, Expr b, Expr s) => a -> b -> s -> Term
 between a b e = op BETWEEN [e] ["left_bound" := a, "right_bound" := b]
@@ -84,32 +64,26 @@ between a b e = op BETWEEN [e] ["left_bound" := a, "right_bound" := b]
 append :: (Expr a, Expr b) => a -> b -> Term
 append a b = op APPEND (b, a) ()
 
-concatMap, concatMap' :: (Expr a)
-  => (Term -> Term) -> a -> Term
+concatMap :: (Expr a) => (Term -> Term) -> a -> Term
 concatMap f e = op CONCATMAP (e, f) ()
-concatMap' = concatMap
 
-innerJoin, outerJoin :: (Expr a, Expr b)
-          => (Term -> Term) -> a -> b -> Term
+innerJoin, outerJoin :: (Expr a, Expr b) => (Term -> Term) -> a -> b -> Term
 innerJoin f a b = op INNER_JOIN (a, b, f) ()
 outerJoin f a b = op OUTER_JOIN (a, b, f) ()
 
 eqJoin :: (Expr a, Expr b) => a -> Key -> b -> Term
 eqJoin a k b = op EQ_JOIN (a, expr k, b) ()
 
-drop, drop' :: (Expr a, Expr b) => a -> b -> Term
+drop :: (Expr a, Expr b) => a -> b -> Term
 drop a b = op SKIP (b, a) ()
-drop' = drop
 
-take, take' :: (Expr a, Expr b) => a -> b -> Term
+take :: (Expr a, Expr b) => a -> b -> Term
 take a b = op LIMIT (a, b) ()
-take' = take
 
 slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> Term
 slice n m s = op SLICE (s, n, m) ()
 
-(!!), nth :: (Expr a, Expr b) => a -> b -> Term
-nth n s = op NTH (s, n) ()
+(!!) :: (Expr a, Expr b) => a -> b -> Term
 s !! n = op NTH (s, n) ()
 
 reduce :: (Expr b, Expr s) => (Term -> Term -> Term) -> b -> s -> Term
@@ -127,8 +101,9 @@ forEach s f = op FOREACH (s, f) ()
 mergeRightLeft :: (Expr a) => a -> Term
 mergeRightLeft a = op ZIP [a] ()
 
-data Order = Asc  { orderAttr :: Key }
-           | Desc { orderAttr :: Key }
+data Order =
+  Asc { orderAttr :: Key } |
+  Desc { orderAttr :: Key }
 
 orderBy :: (Expr s) => [Order] -> s -> Term
 orderBy o s = Term $ do
@@ -139,15 +114,13 @@ orderBy o s = Term $ do
     buildOrder (Asc k) = op ASC [k] ()
     buildOrder (Desc k) = op DESC [k] ()
 
-groupBy, groupBy' :: (Term -> Term) -> (Term -> Term) -> Term
+groupBy :: (Term -> Term) -> (Term -> Term) -> Term
 groupBy g mr = Term $ do
   (m, r, f) <- termToMapReduce mr
   baseTerm $ op MAP (op GROUPED_MAP_REDUCE (g, m, r) (), f) ()
-groupBy' = groupBy
 
-sum, sum' :: (Expr s) => s -> Term
+sum :: (Expr s) => s -> Term
 sum = reduce ((+) :: Term -> Term -> Term) (0 :: Term)
-sum' = sum
 
 avg :: (Expr s) => s -> Term
 avg s = sum s / count s
@@ -155,7 +128,7 @@ avg s = sum s / count s
 -- * Accessors
 
 (!) :: (Expr s) => s -> Key -> Term
-(!) s k = op GETATTR (s, k) ()
+s ! k = op GETATTR (s, k) ()
 
 pluck :: (Expr o) => [Key] -> o -> Term
 pluck ks e = op PLUCK (cons e $ arr (P.map expr ks)) ()
@@ -184,9 +157,8 @@ instance Javascript (Term -> Term -> Term) where
 if' :: (Expr a, Expr b, Expr c) => a -> b -> c -> Term
 if' a b c = op BRANCH (a, b, c) ()
 
-error, error' :: (Expr s) => s -> Term
+error :: (Expr s) => s -> Term
 error m = op ERROR [m] ()
-error' = error
 
 -- | Create a Database reference
 db :: Text -> O.Database
@@ -212,26 +184,24 @@ table n = O.Table Nothing n Nothing
 -- | Create a table on the server
 tableCreate :: Table -> TableCreateOptions -> Term
 tableCreate (O.Table mdb table_name pkey) opts =
-  op TABLE_CREATE (MaybeDatabase mdb, table_name) $ catMaybes [
-    ("datacenter" :=) <$> tableDataCenter opts,
-    ("cache_size" :=) <$> tableCacheSize opts,
-    ("primary_key" :=) <$> pkey ]
+  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
+    op TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
+      ("datacenter" :=) <$> tableDataCenter opts,
+      ("cache_size" :=) <$> tableCacheSize opts,
+      ("primary_key" :=) <$> pkey ]
 
 -- | Drop a table
 tableDrop :: Table -> Term
 tableDrop (O.Table mdb table_name _) =
-  op TABLE_DROP (MaybeDatabase mdb, table_name) ()
+  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
+    op TABLE_DROP (fromMaybe ddb mdb, table_name) ()
 
 -- | List the tables in a database
 tableList :: Database -> Term
 tableList (O.Database name) = op DB_LIST [name] ()
 
 get :: (Expr s, Expr k) => k -> s -> Term
-get k e = op FUNCALL (\(x :: Term) ->
-                       if' (x == ())
-                           (error $ str "The document does not exist")
-                            x,
-                      op GET (e, k) ()) ()
+get k e = op GET (e, k) ()
 
 insert :: (Expr table, Expr object) => object -> table -> Term
 insert a tb = op INSERT (tb, a) ()
@@ -247,3 +217,6 @@ replace f s = op REPLACE (s, f) ()
 
 delete :: (Expr selection) => selection -> Term
 delete s = op DELETE [s] ()
+
+coerceTo :: (Expr type') => type' -> Term -> Term
+coerceTo t a = op COERCE_TO (a, t) ()
