@@ -1,4 +1,4 @@
 module Database.RethinkDB.Functions where
-import Database.RethinkDB.Term
-map :: (Expr a) => (Term -> Term) -> a -> Term
-sum :: (Expr s) => s -> Term
+import Database.RethinkDB.ReQL
+map :: (Expr a) => (ReQL -> ReQL) -> a -> ReQL
+sum :: (Expr s) => s -> ReQL

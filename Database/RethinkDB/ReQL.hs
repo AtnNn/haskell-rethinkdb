@@ -2,7 +2,26 @@
              FlexibleInstances, OverloadedStrings #-}
 
 -- | Building RQL queries in Haskell
-module Database.RethinkDB.Term where
+module Database.RethinkDB.ReQL (
+  ReQL(..),
+  op,
+  BaseReQL(..),
+  BaseAttribute(..),
+  buildQuery,
+  BaseArray(..),
+  Backtrace, convertBacktrace,
+  Expr(..),
+  QuerySettings(..),
+  newVar,
+  str,
+  Attribute(..),
+  cons,
+  arr,
+  baseArray,
+  withQuerySettings,
+  Object(..),
+  obj
+  ) where
 
 import qualified Data.Vector as V
 import qualified Data.HashMap.Lazy as M
@@ -20,16 +39,16 @@ import Data.Foldable (toList)
 import Text.ProtocolBuffers hiding (Key, cons, Default)
 import Text.ProtocolBuffers.Basic hiding (Default)
 
-import Database.RethinkDB.Protobuf.Ql2.Term2 (Term2(datum, args, optargs))
-import qualified Database.RethinkDB.Protobuf.Ql2.Term2 as Term2 (Term2(type'))
-import Database.RethinkDB.Protobuf.Ql2.Term2.TermType as TermType
+import Database.RethinkDB.Protobuf.Ql2.Term (Term(datum, args, optargs))
+import qualified Database.RethinkDB.Protobuf.Ql2.Term as Term (Term(type'))
+import Database.RethinkDB.Protobuf.Ql2.Term.TermType as TermType
   (TermType(
       MAKE_ARRAY, MAKE_OBJ, DATUM, GET, ADD, MUL, BRANCH,
       LT, EQ, FUNC, VAR, TABLE, DB, FUNCALL, ERROR))
-import Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair (AssocPair(AssocPair))
-import qualified Database.RethinkDB.Protobuf.Ql2.Query2 as Query2 (Query2(type'))
-import Database.RethinkDB.Protobuf.Ql2.Query2 (Query2(query))
-import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType (QueryType(START))
+import Database.RethinkDB.Protobuf.Ql2.Term.AssocPair (AssocPair(AssocPair))
+import qualified Database.RethinkDB.Protobuf.Ql2.Query as Query (Query(type',query))
+import Database.RethinkDB.Protobuf.Ql2.Query (Query(query))
+import Database.RethinkDB.Protobuf.Ql2.Query.QueryType (QueryType(START))
 import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum (Datum(type'))
 import Database.RethinkDB.Protobuf.Ql2.Datum (r_str, r_num, r_bool, r_array, r_object)
 import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL (Backtrace, frames)
@@ -41,9 +60,9 @@ import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL (FrameType(POS, OPT
 import Database.RethinkDB.Objects as O
 
 -- | An RQL term
-data Term = Term { baseTerm :: State QuerySettings BaseTerm }
+data ReQL = ReQL { baseReQL :: State QuerySettings BaseReQL }
 
-data BaseTerm = BaseTerm {
+data BaseReQL = BaseReQL {
     termType :: TermType,
     termDatum :: Maybe Datum.Datum,
     termArgs :: BaseArray,
@@ -59,19 +78,19 @@ data QuerySettings = QuerySettings {
 instance Default QuerySettings where
   def = QuerySettings 0 (Database "") 0 Nothing
 
-withQuerySettings :: (QuerySettings -> Term) -> Term
-withQuerySettings f = Term $ (baseTerm . f) =<< get
+withQuerySettings :: (QuerySettings -> ReQL) -> ReQL
+withQuerySettings f = ReQL $ (baseReQL . f) =<< get
 
-newVar :: State QuerySettings Term
+newVar :: State QuerySettings ReQL
 newVar = do
   QuerySettings {..} <- get
   let n = queryVarIndex + 1
   put QuerySettings {queryVarIndex = n, ..}
   return $ expr n
 
-instance Show BaseTerm where
-  show (BaseTerm DATUM (Just dat) _ _) = showD dat
-  show (BaseTerm fun _ args optargs) =
+instance Show BaseReQL where
+  show (BaseReQL DATUM (Just dat) _ _) = showD dat
+  show (BaseReQL fun _ args optargs) =
     show fun ++ " (" ++ concat (intersperse ", " (map show args ++ map show optargs)) ++ ")"
 
 showD :: Datum.Datum -> String
@@ -88,15 +107,15 @@ showD d = case Datum.type' d of
 
 -- | Convert other types to terms
 class Expr e where
-  expr :: e -> Term
+  expr :: e -> ReQL
 
-instance Expr Term where
+instance Expr ReQL where
   expr t = t
 
 -- | A list of terms
 data Array = Array { baseArray :: State QuerySettings BaseArray }
 
-type BaseArray = [BaseTerm]
+type BaseArray = [BaseReQL]
 
 -- | Build arrays of exprs
 class Arr a where
@@ -104,7 +123,7 @@ class Arr a where
 
 cons :: Expr e => e -> Array -> Array
 cons x xs = Array $ do
-  bt <- baseTerm (expr x)
+  bt <- baseReQL (expr x)
   xs' <- baseArray xs
   return $ bt : xs'
 
@@ -132,7 +151,7 @@ data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
 data Attribute = forall e . (Expr e) => T.Text := e
 
-data BaseAttribute = BaseAttribute T.Text BaseTerm
+data BaseAttribute = BaseAttribute T.Text BaseReQL
 
 instance Show BaseAttribute where
   show (BaseAttribute a b) = T.unpack a ++ ": " ++ show b
@@ -142,7 +161,7 @@ class Obj o where
 
 instance Obj [Attribute] where
   obj = Object . mapM base
-    where base (k := e) = BaseAttribute k <$> baseTerm (expr e)
+    where base (k := e) = BaseAttribute k <$> baseReQL (expr e)
 
 instance Obj Object where
   obj = id
@@ -151,16 +170,16 @@ instance Obj () where
   obj _ = Object $ return []
 
 -- | Build a term
-op :: (Arr a, Obj o) => TermType -> a -> o -> Term
-op t a b = Term $ do
+op :: (Arr a, Obj o) => TermType -> a -> o -> ReQL
+op t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseObject (obj b)
-  return $ BaseTerm t Nothing a' b'
+  return $ BaseReQL t Nothing a' b'
 
-datumTerm :: DatumType -> Datum.Datum -> Term
-datumTerm t d = Term $ return $ BaseTerm DATUM (Just d { Datum.type' = Just t }) [] []
+datumTerm :: DatumType -> Datum.Datum -> ReQL
+datumTerm t d = ReQL $ return $ BaseReQL DATUM (Just d { Datum.type' = Just t }) [] []
 
-str :: String -> Term
+str :: String -> ReQL
 str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
 
 
@@ -170,7 +189,7 @@ instance Expr Int64 where
 instance Expr Int where
   expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
 
-instance Num Term where
+instance Num ReQL where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
   a + b = op ADD (a, b) ()
   a * b = op MUL (a, b) ()
@@ -188,19 +207,19 @@ instance Expr Bool where
 instance Expr () where
   expr _ = datumTerm R_NULL defaultValue
 
-instance IsString Term where
+instance IsString ReQL where
   fromString s = datumTerm R_STR defaultValue { r_str = Just (uFromString $ s) }
 
-instance Expr (Term -> Term) where
-  expr f = Term $ do
+instance Expr (ReQL -> ReQL) where
+  expr f = ReQL $ do
     v <- newVar
-    baseTerm $ op FUNC ([v], f (op VAR [v] ())) ()
+    baseReQL $ op FUNC ([v], f (op VAR [v] ())) ()
 
-instance Expr (Term -> Term -> Term) where
-  expr f = Term $ do
+instance Expr (ReQL -> ReQL -> ReQL) where
+  expr f = ReQL $ do
     a <- newVar
     b <- newVar
-    baseTerm $ op FUNC ([a, b], f (op VAR [a] ()) (op VAR [b] ())) ()
+    baseReQL $ op FUNC ([a, b], f (op VAR [a] ()) (op VAR [b] ())) ()
 
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
@@ -236,40 +255,40 @@ instance Expr e => Expr (M.HashMap T.Text e) where
 instance Expr Object where
   expr o = op MAKE_OBJ () o
 
-buildTerm :: Term -> State QuerySettings Term2
-buildTerm = fmap buildBaseTerm . baseTerm
+buildTerm :: ReQL -> State QuerySettings Term
+buildTerm = fmap buildBaseReQL . baseReQL
 
-buildBaseTerm :: BaseTerm -> Term2
-buildBaseTerm BaseTerm {..} = defaultValue {
-    Term2.type' = termType,
+buildBaseReQL :: BaseReQL -> Term
+buildBaseReQL BaseReQL {..} = defaultValue {
+    Term.type' = Just termType,
     datum = termDatum,
     args = buildBaseArray termArgs,
     optargs = buildTermAssoc termOptArgs }
 
-buildBaseArray :: BaseArray -> Seq Term2
+buildBaseArray :: BaseArray -> Seq Term
 buildBaseArray [] = S.empty
-buildBaseArray (x:xs) = buildBaseTerm x S.<| buildBaseArray xs
+buildBaseArray (x:xs) = buildBaseReQL x S.<| buildBaseArray xs
 
 buildTermAssoc :: [BaseAttribute] -> Seq AssocPair
 buildTermAssoc = S.fromList . map buildTermAttribute
 
 buildTermAttribute :: BaseAttribute -> AssocPair
-buildTermAttribute (BaseAttribute k v) = AssocPair (uFromString $ T.unpack k) (buildBaseTerm v)
+buildTermAttribute (BaseAttribute k v) = AssocPair (Just $ uFromString $ T.unpack k) (Just $ buildBaseReQL v)
 
-buildQuery :: Term -> Int64 -> Database -> (Query2, BaseTerm)
+buildQuery :: ReQL -> Int64 -> Database -> (Query.Query, BaseReQL)
 buildQuery term token db = (defaultValue {
-                              Query2.type' = START,
-                              query = Just pterm },
+                              Query.type' = Just START,
+                              Query.query = Just pterm },
                             bterm)
   where bterm =
-         fst $ runState (baseTerm term) (def {queryToken = token,
+         fst $ runState (baseReQL term) (def {queryToken = token,
                                               queryDefaultDatabase = db })
-        pterm = buildBaseTerm bterm
+        pterm = buildBaseReQL bterm
 
-instance Show Term where
+instance Show ReQL where
   show t = show . snd $ buildQuery t 0 (Database "")
 
-termToProtobuf :: Term -> Query2
+termToProtobuf :: ReQL -> Query.Query
 termToProtobuf t = fst $ buildQuery t 0 (Database "")
 
 type Backtrace = [Frame]

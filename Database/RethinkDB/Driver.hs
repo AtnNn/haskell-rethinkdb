@@ -1,4 +1,10 @@
-module Database.RethinkDB.Driver (run, run', Result) where
+module Database.RethinkDB.Driver (
+  run,
+  run',
+  Result(..),
+  runOpts,
+  RunOptions(..),
+  ) where
 
 import Data.Aeson (Value, FromJSON, fromJSON)
 import qualified Data.Aeson (Result(Error, Success))
@@ -8,17 +14,36 @@ import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Int (Int64)
 import Control.Monad.Fix (fix)
 import System.IO.Unsafe (unsafeInterleaveIO)
+import Data.Sequence ((|>))
+
+import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
+import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
 
 import Database.RethinkDB.Network
-import Database.RethinkDB.Term
+import Database.RethinkDB.ReQL
 
-run :: Result r => RethinkDBHandle -> Term -> IO r
-run h t = do
+data RunOptions =
+  UseOutdated |
+  NoReply |
+  SoftDurability Bool
+
+applyOption :: RunOptions -> Query -> Query
+applyOption UseOutdated q = q --{
+--  global_optargs = global_optargs q |> AssocPair "use_outdated" True }
+applyOption NoReply q = q
+applyOption (SoftDurability b) q =q
+
+runOpts :: Result r => RethinkDBHandle -> [RunOptions] -> ReQL -> IO r
+runOpts h opts t = do
   let (q, bt) = buildQuery t 0 (rdbDatabase h)
-  r <- runQLQuery h q bt
+  let q' = foldr (fmap . applyOption) id opts q
+  r <- runQLQuery h q' bt
   convertResult r
 
-run' :: RethinkDBHandle -> Term -> IO [Value]
+run :: Result r => RethinkDBHandle -> ReQL -> IO r
+run h t = runOpts h [] t
+
+run' :: RethinkDBHandle -> ReQL -> IO [Value]
 run' h t = do
   c <- run h t
   fix $ \loop -> do

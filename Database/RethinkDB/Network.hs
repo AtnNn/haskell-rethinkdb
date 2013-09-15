@@ -47,8 +47,8 @@ import Data.Int (Int64)
 import Text.ProtocolBuffers.Basic (uToString)
 import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
 
-import Database.RethinkDB.Protobuf.Ql2.Query2 as Query
-import Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
+import Database.RethinkDB.Protobuf.Ql2.Query as Query
+import Database.RethinkDB.Protobuf.Ql2.Query.QueryType
 import Database.RethinkDB.Protobuf.Ql2.Response2 as Response
 import Database.RethinkDB.Protobuf.Ql2.Response2.ResponseType
 import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
@@ -57,8 +57,8 @@ import Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
 import Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
 
 import Database.RethinkDB.Objects as O
-import Database.RethinkDB.Term (
-  BaseTerm, Backtrace, convertBacktrace)
+import Database.RethinkDB.ReQL (
+  BaseReQL, Backtrace, convertBacktrace)
 
 type Token = Int64
 
@@ -68,7 +68,7 @@ data RethinkDBHandle = RethinkDBHandle {
   rdbWriteLock :: MVar (),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
-  rdbWait :: IORef (Map Token (Chan Response, BaseTerm)),
+  rdbWait :: IORef (Map Token (Chan Response, BaseReQL)),
   rdbThread :: ThreadId
   }
 
@@ -148,7 +148,7 @@ withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
 
 data RethinkDBError = RethinkDBError {
   errorCode :: ErrorCode,
-  errorTerm :: BaseTerm,
+  errorTerm :: BaseReQL,
   errorMessage :: String,
   errorBacktrace :: Backtrace
   } deriving (Typeable, Show)
@@ -185,7 +185,7 @@ instance Show Response where
     show errorBacktrace ++ ")"
   show SuccessResponse {..} = show successCode ++ ": " ++ show successDatums
 
-convertResponse :: RethinkDBHandle -> BaseTerm -> Int64 -> Response2 -> Response
+convertResponse :: RethinkDBHandle -> BaseReQL -> Int64 -> Response2 -> Response
 convertResponse h q t Response2{ .. } = case type' of
   SUCCESS_ATOM -> SuccessResponse Success (map convertDatum r)
   SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) (map convertDatum r)
@@ -198,14 +198,14 @@ convertResponse h q t Response2{ .. } = case type' of
     r = toList response
     e = show response -- TODO: nice error with backtrace
 
-runQLQuery :: RethinkDBHandle -> Query2 -> BaseTerm -> IO (MVar Response)
+runQLQuery :: RethinkDBHandle -> Query -> BaseReQL -> IO (MVar Response)
 runQLQuery h query term = do
   tok <- newToken h
   mbox <- addMBox h tok term
-  sendQLQuery h query{ Query.token = tok }
+  sendQLQuery h query{ Query.token = Just tok }
   return mbox
 
-addMBox :: RethinkDBHandle -> Token -> BaseTerm -> IO (MVar Response)
+addMBox :: RethinkDBHandle -> Token -> BaseReQL -> IO (MVar Response)
 addMBox h tok term = do
   chan <- newChan
   atomicModifyIORef' (rdbWait h) $ \mboxes -> 
@@ -222,7 +222,7 @@ addMBox h tok term = do
       loop
   return mbox
 
-sendQLQuery :: RethinkDBHandle -> Query2 -> IO ()
+sendQLQuery :: RethinkDBHandle -> Query -> IO ()
 sendQLQuery h query = do
   let queryS = messagePut query
   withHandle h $ \s ->
@@ -298,13 +298,13 @@ convertDatum d = error ("Invalid Datum: " ++ show d)
 
 stopResponse :: Response -> IO ()
 stopResponse SuccessResponse { successCode = SuccessPartial h tok } = do
-  let query = defaultValue { Query.type' = STOP, Query.token = tok}
+  let query = defaultValue { Query.type' = Just STOP, Query.token = Just tok}
   sendQLQuery h query
 stopResponse _ = return ()
 
 nextResponse :: Response -> IO ()
 nextResponse SuccessResponse { successCode = SuccessPartial h tok } = do
-  let query = defaultValue { Query.type' = CONTINUE, Query.token = tok}
+  let query = defaultValue { Query.type' = Just CONTINUE, Query.token = Just tok}
   sendQLQuery h query
 nextResponse _ = return ()
 

@@ -4,39 +4,39 @@ import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Text as T
 
-import Database.RethinkDB.Protobuf.Ql2.Term2.TermType
+import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 
-import Database.RethinkDB.Term
+import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 import {-# SOURCE #-} qualified Database.RethinkDB.Functions as R
 
-termToMapReduce :: (Term -> Term) -> State QuerySettings (Term, Term, Term)
+termToMapReduce :: (ReQL -> ReQL) -> State QuerySettings (ReQL, ReQL, ReQL)
 termToMapReduce = undefined
 
 toReduce :: MapReduce -> MapReduce
 toReduce (Map x) = MapReduce x idt []
 toReduce mr = mr
 
-idt :: Term
-idt = Term $ do
+idt :: ReQL
+idt = ReQL $ do
         v <- newVar
-        baseTerm $ op FUNC ([v], v) ()
+        baseReQL $ op FUNC ([v], v) ()
 
-sameVar :: BaseTerm -> BaseArray -> Bool
-sameVar (BaseTerm DATUM (Just x) _ _) [BaseTerm DATUM (Just y) _ _] = x == y
+sameVar :: BaseReQL -> BaseArray -> Bool
+sameVar (BaseReQL DATUM (Just x) _ _) [BaseReQL DATUM (Just y) _ _] = x == y
 sameVar _ _ = False
 
 notNone :: MapReduce -> Bool
 notNone None{} = False
 notNone _ = True
 
-wrap :: BaseTerm -> Term
-wrap = Term . return
+wrap :: BaseReQL -> ReQL
+wrap = ReQL . return
 
-toMapReduce :: BaseTerm -> BaseTerm -> MapReduce
-toMapReduce _ t@(BaseTerm DATUM _ _ _) = None $ wrap t
-toMapReduce v   (BaseTerm VAR _ w _) | sameVar v w = Map []
-toMapReduce v t@(BaseTerm type' _ args optargs) = let
+toMapReduce :: BaseReQL -> BaseReQL -> MapReduce
+toMapReduce _ t@(BaseReQL DATUM _ _ _) = None $ wrap t
+toMapReduce v   (BaseReQL VAR _ w _) | sameVar v w = Map []
+toMapReduce v t@(BaseReQL type' _ args optargs) = let
     args' = map (toMapReduce v) args
     optargs' = map (\(BaseAttribute k vv) -> (k, toMapReduce v vv)) optargs
     count = length $ filter notNone $ args' ++ map snd optargs'
@@ -47,14 +47,14 @@ toMapReduce v t@(BaseTerm type' _ args optargs) = let
               case (type', args') of
                 (MAP, [Map m, None f]) -> Map (f : m)
                 (REDUCE, [Map m, None f]) -> MapReduce m f []
-                (COUNT, [Map _]) -> MapReduce [expr (const $ 1 :: Term -> Term)]
-                                    (expr (R.sum :: Term -> Term)) []
+                (COUNT, [Map _]) -> MapReduce [expr (const $ 1 :: ReQL -> ReQL)]
+                                    (expr (R.sum :: ReQL -> ReQL)) []
                 _ -> rebuild
 
 data MapReduce =
-    None Term |
-    Map [Term] |
-    MapReduce [Term] Term [Term]
+    None ReQL |
+    Map [ReQL] |
+    MapReduce [ReQL] ReQL [ReQL]
 
 -- (TERMTYPE a (mapreduce maps reduce finals)) -> mapreduce maps reduce ((\x -> TERMTYPE a x) : finals)
 
@@ -70,8 +70,8 @@ rebuildx ttype args optargs = MapReduce maps reduce finals where
   reduce = undefined mrs
   finals = undefined mrs
 
-extract :: Bool -> TermType -> [MapReduce] -> [(Key, MapReduce)] -> ([MapReduce], Term)
+extract :: Bool -> TermType -> [MapReduce] -> [(Key, MapReduce)] -> ([MapReduce], ReQL)
 extract = undefined
 
--- extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([Term] -> Term)
+-- extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([ReQL] -> ReQL)
 extractList = undefined

@@ -1,11 +1,10 @@
--- | RethinkDB client library for Haskell
+-- | Haskell client driver for RethinkDB 
 --
--- Modelled upon the official Javascript, Python and Ruby API: <http://www.rethinkdb.com/api/>
+-- Based upon the official Javascript, Python and Ruby API: <http://www.rethinkdb.com/api/>
 --
 -- /How to use/
 --
--- >>> import Database.RethinkDB
--- >>> import qualified Database.RethinkDB.Functions as R
+-- >>> import Database.RethinkDB as R
 
 module Database.RethinkDB (
   -- * Accessing RethinkDB
@@ -14,7 +13,7 @@ module Database.RethinkDB (
   connect,
   close,
   use,
-  run, run',
+  run, run', runOpts,
   next, collect,
   Response,
   Result(..),
@@ -47,8 +46,9 @@ module Database.RethinkDB (
 
   -- * Transformations
 
-  map, concatMap, orderBy, drop, take,
+  map, concatMap, drop, take,
   slice, (!!), pluck, without, (++),
+  orderBy,  Order(..),
 
   -- * Aggregation
 
@@ -62,7 +62,7 @@ module Database.RethinkDB (
 
   merge, append, (!),
 
-  -- * Operators
+  -- * Math and logic
 
   (+), (-), (*), (/), mod, (&&), (||),
   (==), (!=), (>), (<), (<=), (>=), not,
@@ -77,12 +77,8 @@ module Database.RethinkDB (
 
   -- * Short constructors
 
-  obj, Object(..), Attribute(..), str,
+  obj, Object, Attribute(..), str,
 
-  -- * Types and type classes
-
-  Order(..),
-  
   -- * Other
   
   member,
@@ -91,7 +87,7 @@ module Database.RethinkDB (
 
 import Prelude ()
 
-import Database.RethinkDB.Term
+import Database.RethinkDB.ReQL
 import Database.RethinkDB.Network
 import Database.RethinkDB.Objects
 import Database.RethinkDB.Driver
