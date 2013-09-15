@@ -110,9 +110,11 @@ slice n m s = op SLICE (s, n, m) ()
 (!!) :: (Expr a) => a -> ReQL -> ReQL
 s !! n = op NTH (s, n) ()
 
+-- | Reduce a sequence to a single value
 reduce :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
 reduce f b s = op REDUCE (s, fmap expr P.. f) ["base" := b]
 
+-- | Reduce a non-empty sequence to a single value
 reduce1 :: (Expr a, Expr s) => (ReQL -> ReQL -> a) -> s -> ReQL
 reduce1 f s = op REDUCE (s, fmap expr P.. f) ()
 
@@ -129,7 +131,7 @@ forEach s f = op FOREACH (s, expr P.. f) ()
 mergeRightLeft :: (Expr a) => a -> ReQL
 mergeRightLeft a = op ZIP [a] ()
 
--- | Oredering specificatio nfor orderBy
+-- | Oredering specification for orderBy
 data Order =
   Asc { orderAttr :: Key } |
   Desc { orderAttr :: Key }
@@ -144,9 +146,7 @@ orderBy o s = ReQL $ do
     buildOrder (Asc k) = op ASC [k] ()
     buildOrder (Desc k) = op DESC [k] ()
 
--- | Turn a grouping function and a reduction function into a grouped map reduce operation.
--- For example:
--- >>> groupBy (! "age") (avg . (! "height"))
+-- | Turn a grouping function and a reduction function into a grouped map reduce operation
 groupBy :: (Expr group, Expr reduction) => (ReQL -> group) -> (ReQL -> reduction) -> ReQL
 groupBy g mr = ReQL $ do
   (m, r, f) <- termToMapReduce (expr P.. mr)

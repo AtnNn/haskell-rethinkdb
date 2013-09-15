@@ -43,6 +43,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad.Fix (fix)
 import Data.Int (Int64)
+import System.IO.Unsafe (unsafeInterleaveIO)
 
 import Text.ProtocolBuffers.Basic (uToString)
 import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
@@ -94,9 +95,9 @@ instance Exception RethinkDBConnectionError
 
 -- | Create a new connection to the database server
 --
--- /Example:/ connect using the default port
+-- /Example:/ connect using the default port with no passphrase
 --
--- >>> h <- openConnection "localhost" 28015
+-- >>> h <- connect "localhost" 28015 Nothing
 
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
@@ -277,16 +278,10 @@ isLastResponse SuccessResponse{ successCode = SuccessPartial{} } = False
 --
 -- The new handle is an alias for the old one. Calling close on either one
 -- will close both.
---
--- >>> let h' = use h (db "players")
-
 use :: RethinkDBHandle -> Database -> RethinkDBHandle
 use h db' = h { rdbDatabase = db' }
 
 -- | Close an open connection
---
--- >>> closeConnection h
-
 close :: RethinkDBHandle -> IO ()
 close RethinkDBHandle{ rdbHandle } = hClose rdbHandle
 
@@ -318,6 +313,7 @@ makeCursor cursorMBox = do
   return Cursor{..}
   where cursorMap = id
 
+-- | Get the next value from a cursor
 next :: Cursor a -> IO (Maybe a)
 next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
   case mbuffer of
@@ -334,8 +330,12 @@ cursorFetchBatch c = do
     SuccessResponse Success datums -> return $ Right (datums, True)
     SuccessResponse SuccessPartial{} datums -> return $ Right (datums, False)
 
--- | TODO: optimise this
+-- | A lazy stream of all the elements in the cursor
 collect :: Cursor a -> IO [a]
-collect c = fmap reverse $ ($ []) $ fix $ \loop acc -> do
-  ma <- next c
-  return $ case ma of Nothing -> acc; Just a -> a : acc
+collect c = fix $ \loop -> do
+    n <- next c
+    case n of
+      Nothing -> return []
+      Just x -> do
+        xs <- unsafeInterleaveIO $ loop
+        return $ x : xs

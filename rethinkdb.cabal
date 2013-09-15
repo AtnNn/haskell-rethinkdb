@@ -1,7 +1,7 @@
 name:                rethinkdb
-version:             0.2.0.0
+version:             0.1.9.0
 synopsis:            RethinkDB client library for haskell
-homepage:            http://code.atnnn.com/projects/haskell-rethinkdb
+homepage:            http://github.com/atnnn/haskell-rethinkdb
 license:             Apache
 license-file:        LICENSE
 author:              Etienne Laurin
@@ -11,28 +11,29 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  exposed-modules:     Database.RethinkDB,
-                       Database.RethinkDB.Driver,
-                       Database.RethinkDB.Functions,
-                       Database.RethinkDB.Objects,
-                       Database.RethinkDB.Term,
-                       Database.RethinkDB.Network,
+  exposed-modules:     Database.RethinkDB
+                       Database.RethinkDB.Driver
+                       Database.RethinkDB.Functions
+                       Database.RethinkDB.Time
+                       Database.RethinkDB.Objects
+                       Database.RethinkDB.ReQL
+                       Database.RethinkDB.Network
                        Database.RethinkDB.MapReduce
-  other-modules:       Database.RethinkDB.Protobuf.Ql2
+                       Database.RethinkDB.Protobuf.Ql2
                        Database.RethinkDB.Protobuf.Ql2.Backtrace
                        Database.RethinkDB.Protobuf.Ql2.Datum
                        Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
                        Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
                        Database.RethinkDB.Protobuf.Ql2.Frame
                        Database.RethinkDB.Protobuf.Ql2.Frame.FrameType
-                       Database.RethinkDB.Protobuf.Ql2.Query2
-                       Database.RethinkDB.Protobuf.Ql2.Query2.AssocPair
-                       Database.RethinkDB.Protobuf.Ql2.Query2.QueryType
-                       Database.RethinkDB.Protobuf.Ql2.Response2
-                       Database.RethinkDB.Protobuf.Ql2.Response2.ResponseType
-                       Database.RethinkDB.Protobuf.Ql2.Term2
-                       Database.RethinkDB.Protobuf.Ql2.Term2.AssocPair
-                       Database.RethinkDB.Protobuf.Ql2.Term2.TermType
+                       Database.RethinkDB.Protobuf.Ql2.Query
+                       Database.RethinkDB.Protobuf.Ql2.Query.AssocPair
+                       Database.RethinkDB.Protobuf.Ql2.Query.QueryType
+                       Database.RethinkDB.Protobuf.Ql2.Response
+                       Database.RethinkDB.Protobuf.Ql2.Response.ResponseType
+                       Database.RethinkDB.Protobuf.Ql2.Term
+                       Database.RethinkDB.Protobuf.Ql2.Term.AssocPair
+                       Database.RethinkDB.Protobuf.Ql2.Term.TermType
                        Database.RethinkDB.Protobuf.Ql2.VersionDummy
                        Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
   build-depends:       base,
@@ -48,4 +49,6 @@ library
                        ghc-prim,
                        mtl,
                        vector,
-                       protocol-buffers-descriptor
+                       protocol-buffers-descriptor,
+                       time,
+                       utf8-string

@@ -13,7 +13,6 @@ import Data.Default (Default(def))
 import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Int (Int64)
 import Control.Monad.Fix (fix)
-import System.IO.Unsafe (unsafeInterleaveIO)
 import Data.Sequence ((|>))
 
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
@@ -22,6 +21,7 @@ import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
 import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL
 
+-- | Per-query settings
 data RunOptions =
   UseOutdated |
   NoReply |
@@ -33,27 +33,25 @@ applyOption UseOutdated q = q --{
 applyOption NoReply q = q
 applyOption (SoftDurability b) q =q
 
-runOpts :: Result r => RethinkDBHandle -> [RunOptions] -> ReQL -> IO r
+-- | Run a query with the given options
+runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunOptions] -> query -> IO r
 runOpts h opts t = do
-  let (q, bt) = buildQuery t 0 (rdbDatabase h)
+  let (q, bt) = buildQuery (expr t) 0 (rdbDatabase h)
   let q' = foldr (fmap . applyOption) id opts q
   r <- runQLQuery h q' bt
   convertResult r
 
-run :: Result r => RethinkDBHandle -> ReQL -> IO r
+-- | Run a given query and return a Result
+run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h t = runOpts h [] t
 
-run' :: RethinkDBHandle -> ReQL -> IO [Value]
+-- | Run a given query and return a Value
+run' :: Expr query => RethinkDBHandle -> query -> IO [Value]
 run' h t = do
   c <- run h t
-  fix $ \loop -> do
-    n <- next c
-    case n of
-      Nothing -> return []
-      Just x -> do
-        xs <- unsafeInterleaveIO $ loop
-        return $ x : xs
+  collect c
 
+-- | Convert the raw query response into useful values
 class Result r where
   convertResult :: MVar Response -> IO r
 

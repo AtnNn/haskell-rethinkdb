@@ -21,7 +21,7 @@ module Database.RethinkDB.ReQL (
   baseArray,
   withQuerySettings,
   Object(..),
-  obj,
+  Obj(..),
   returnVals,
   canReturnVals,
   ) where
@@ -131,7 +131,7 @@ showD d = case Datum.type' d of
   where show' Nothing = "Nothing"
         show' (Just a) = show a
 
--- | Convert other types to terms
+-- | Convert other types into ReqL expressions
 class Expr e where
   expr :: e -> ReQL
 
@@ -172,9 +172,10 @@ instance (Expr a, Expr b, Expr c, Expr d) => Arr (a, b, c, d) where
 instance Arr Array where
   arr = id
 
--- | A list of String/Expr pairs
+-- | A list of key/value pairs
 data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
+-- | A key/value pair used for building objects
 data Attribute = forall e . (Expr e) => T.Text := e
 
 data BaseAttribute = BaseAttribute T.Text BaseReQL
@@ -182,6 +183,7 @@ data BaseAttribute = BaseAttribute T.Text BaseReQL
 instance Show BaseAttribute where
   show (BaseAttribute a b) = T.unpack a ++ ": " ++ show b
 
+-- | Convert into a ReQL object
 class Obj o where
   obj :: o -> Object
 
@@ -205,9 +207,12 @@ op t a b = ReQL $ do
 datumTerm :: DatumType -> Datum.Datum -> ReQL
 datumTerm t d = ReQL $ return $ BaseReQL DATUM (Just d { Datum.type' = Just t }) [] []
 
+-- | A shortcut for inserting strings into ReQL expressions
+-- Useful when OverloadedStrings makes the type ambiguous
 str :: String -> ReQL
 str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
 
+-- | A shortcut for inserting numbers into ReQL expressions
 num :: Double -> ReQL
 num = expr
 

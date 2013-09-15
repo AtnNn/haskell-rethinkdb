@@ -16,6 +16,7 @@ module Database.RethinkDB (
   use,
   run, run', runOpts,
   next, collect,
+  Cursor,
   Response,
   Result(..),
   RethinkDBError(..),
@@ -89,13 +90,14 @@ module Database.RethinkDB (
   -- * Control structures
 
   apply, Javascript(js), if', forEach, error,
-  handle, expr, coerceTo,
+  handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
   typeOf, info, json,
   
   -- * Helpers
 
-  obj, Object, Attribute(..), str, num, (#), (.)
+  Obj(..), Object, Attribute(..), str, num, (#), (.),
+  def
 
   ) where
 
@@ -107,3 +109,4 @@ import Database.RethinkDB.Objects
 import Database.RethinkDB.Driver
 import Database.RethinkDB.Functions
 import Database.RethinkDB.Time
+import Data.Default
