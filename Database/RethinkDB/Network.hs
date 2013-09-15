@@ -40,7 +40,7 @@ import Data.Aeson (toJSON, object, (.=), Value(Null, Bool))
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad.Fix (fix)
 import Data.Int (Int64)
 
@@ -198,7 +198,8 @@ convertResponse h q t Ql2.Response{ .. } = case type' of
   where
     bt = maybe [] convertBacktrace backtrace
     r = toList response
-    e = show response -- TODO: nice error with backtrace
+    e = maybe "" uToString $ r_str =<< listToMaybe (toList response) 
+        -- TODO: nicer backtrace
 
 runQLQuery :: RethinkDBHandle -> Query -> BaseReQL -> IO (MVar Response)
 runQLQuery h query term = do

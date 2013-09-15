@@ -4,6 +4,7 @@
 --
 -- /How to use/
 --
+-- >>> {-# LANGUAGE OverloadedStrings #-}
 -- >>> import Database.RethinkDB as R
 
 module Database.RethinkDB (
@@ -30,15 +31,17 @@ module Database.RethinkDB (
 
   Table(..), TableCreateOptions(..),
   table, tableCreate, tableDrop, tableList,
+  indexCreate, indexDrop, indexList,
 
   -- * Writing data
 
   insert, upsert,
   update, replace, delete,
+  returnVals,
 
   -- * Selecting data
 
-  get, filter, between,
+  get, filter, between, getAll,
 
   -- * Joins
 
@@ -46,42 +49,53 @@ module Database.RethinkDB (
 
   -- * Transformations
 
-  map, concatMap, drop, take,
-  slice, (!!), pluck, without, (++),
+  map, withFields, concatMap, drop, take,
+  (!!), slice,
   orderBy,  Order(..),
-
+  indexesOf, isEmpty, (++), sample,
+  
   -- * Aggregation
 
-  reduce, distinct, groupBy,
+  reduce, reduce1, distinct, groupBy, member,
 
-  -- * Reductions
+  -- * Aggregators
 
-  count, sum, avg,
+  length, sum, avg,
 
   -- * Document manipulation
 
-  merge, append, (!),
+  pluck, without,
+  merge, append,
+  prepend, (\\),
+  setInsert, setUnion, setIntersection, setDifference,
+  (!), hasFields,
+  insertAt, spliceAt, deleteAt, changeAt, keys,
 
   -- * Math and logic
 
   (+), (-), (*), (/), mod, (&&), (||),
   (==), (!=), (>), (<), (<=), (>=), not,
 
+  -- * String manipulation
+  
+  (=~),
+  
+  -- * Dates and times
+  
+  now, time, epochTime, iso8601, inTimezone, during,
+  timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds,
+  toIso8601, toEpochTime,
+  
   -- * Control structures
 
-  Javascript(js), if', forEach, error,
-
-  -- * Sequence conversion
-
-  coerceTo,
-
-  -- * Short constructors
-
-  obj, Object, Attribute(..), str,
-
-  -- * Other
+  apply, Javascript(js), if', forEach, error,
+  handle, expr, coerceTo,
+  asArray, asString, asNumber, asObject, asBool,
+  typeOf, info, json,
   
-  member,
+  -- * Helpers
+
+  obj, Object, Attribute(..), str, num, (#), (.)
 
   ) where
 
@@ -92,3 +106,4 @@ import Database.RethinkDB.Network
 import Database.RethinkDB.Objects
 import Database.RethinkDB.Driver
 import Database.RethinkDB.Functions
+import Database.RethinkDB.Time

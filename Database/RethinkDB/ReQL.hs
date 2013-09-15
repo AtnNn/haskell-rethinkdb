@@ -14,13 +14,16 @@ module Database.RethinkDB.ReQL (
   QuerySettings(..),
   newVar,
   str,
+  num,
   Attribute(..),
   cons,
   arr,
   baseArray,
   withQuerySettings,
   Object(..),
-  obj
+  obj,
+  returnVals,
+  canReturnVals,
   ) where
 
 import qualified Data.Vector as V
@@ -72,14 +75,37 @@ data QuerySettings = QuerySettings {
   queryToken :: Int64,
   queryDefaultDatabase :: Database,
   queryVarIndex :: Int,
-  queryUseOutdated :: Maybe Bool
+  queryUseOutdated :: Maybe Bool,
+  queryReturnVals :: Maybe Bool
   }
 
 instance Default QuerySettings where
-  def = QuerySettings 0 (Database "") 0 Nothing
+  def = QuerySettings 0 (Database "") 0 Nothing Nothing
 
 withQuerySettings :: (QuerySettings -> ReQL) -> ReQL
 withQuerySettings f = ReQL $ (baseReQL . f) =<< get
+
+-- | Include the value of single write operations in the returned object
+returnVals :: ReQL -> ReQL
+returnVals (ReQL t) = ReQL $ do
+  state <- get
+  put state{ queryReturnVals = Just True }
+  ret <- t
+  state' <- get
+  put state'{ queryReturnVals = queryReturnVals state }
+  return ret
+
+canReturnVals :: ReQL -> ReQL
+canReturnVals (ReQL t) = ReQL $ t >>= \ret -> do
+  qs <- get
+  case queryReturnVals qs of
+    Nothing -> return ret
+    Just rv -> return ret{
+      termOptArgs = BaseAttribute "return_vals" (baseBool rv) : termOptArgs ret }
+
+baseBool :: Bool -> BaseReQL
+baseBool b = BaseReQL DATUM (Just defaultValue{
+                                Datum.type' = Just R_BOOL, r_bool = Just b }) [] []
 
 newVar :: State QuerySettings ReQL
 newVar = do
@@ -182,6 +208,8 @@ datumTerm t d = ReQL $ return $ BaseReQL DATUM (Just d { Datum.type' = Just t })
 str :: String -> ReQL
 str s = datumTerm R_STR defaultValue { r_str = Just (uFromString s) }
 
+num :: Double -> ReQL
+num = expr
 
 instance Expr Int64 where
   expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
