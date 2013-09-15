@@ -49,8 +49,8 @@ import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
 
 import Database.RethinkDB.Protobuf.Ql2.Query as Query
 import Database.RethinkDB.Protobuf.Ql2.Query.QueryType
-import Database.RethinkDB.Protobuf.Ql2.Response2 as Response
-import Database.RethinkDB.Protobuf.Ql2.Response2.ResponseType
+import qualified Database.RethinkDB.Protobuf.Ql2.Response as Ql2
+import Database.RethinkDB.Protobuf.Ql2.Response.ResponseType
 import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
 import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
 import Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
@@ -166,7 +166,8 @@ data Response = ErrorResponse {
 data ErrorCode =
   ErrorBrokenClient |
   ErrorBadQuery |
-  ErrorRuntime
+  ErrorRuntime |
+  ErrorUnexpectedResponse
 
 instance Show ErrorCode where
   show ErrorBrokenClient = "broken client error"
@@ -185,14 +186,15 @@ instance Show Response where
     show errorBacktrace ++ ")"
   show SuccessResponse {..} = show successCode ++ ": " ++ show successDatums
 
-convertResponse :: RethinkDBHandle -> BaseReQL -> Int64 -> Response2 -> Response
-convertResponse h q t Response2{ .. } = case type' of
-  SUCCESS_ATOM -> SuccessResponse Success (map convertDatum r)
-  SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) (map convertDatum r)
-  SUCCESS_SEQUENCE -> SuccessResponse Success (map convertDatum r)
-  CLIENT_ERROR -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
-  COMPILE_ERROR -> ErrorResponse $ RethinkDBError ErrorBadQuery q e bt
-  RUNTIME_ERROR -> ErrorResponse $ RethinkDBError ErrorRuntime q e bt
+convertResponse :: RethinkDBHandle -> BaseReQL -> Int64 -> Ql2.Response -> Response
+convertResponse h q t Ql2.Response{ .. } = case type' of
+  Just SUCCESS_ATOM -> SuccessResponse Success (map convertDatum r)
+  Just SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) (map convertDatum r)
+  Just SUCCESS_SEQUENCE -> SuccessResponse Success (map convertDatum r)
+  Just CLIENT_ERROR -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
+  Just COMPILE_ERROR -> ErrorResponse $ RethinkDBError ErrorBadQuery q e bt
+  Just RUNTIME_ERROR -> ErrorResponse $ RethinkDBError ErrorRuntime q e bt
+  Nothing -> ErrorResponse $ RethinkDBError ErrorUnexpectedResponse q e bt
   where
     bt = maybe [] convertBacktrace backtrace
     r = toList response
@@ -250,11 +252,12 @@ readSingleResponse h = do
   case parsedResponse of
     Left errMsg -> throwIO $ RethinkDBReadError errMsg
     Right (response, rest)
-      | B.null rest -> dispatch (Response.token response) response
+      | B.null rest -> dispatch (Ql2.token response) response
       | otherwise -> throwIO $ RethinkDBReadError "RethinkDB: readResponses: invalid reply length"
 
   where
-  dispatch tok response = do
+  dispatch Nothing _ = return ()
+  dispatch (Just tok) response = do
     mboxes <- readIORef $ rdbWait h
     case M.lookup tok mboxes of
       Nothing -> return ()
