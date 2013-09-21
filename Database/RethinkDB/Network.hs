@@ -25,7 +25,6 @@ import Network (HostName, connectTo, PortID(PortNumber))
 import System.IO (Handle, hClose, hIsEOF)
 import Data.ByteString.Lazy (pack, unpack, hPut, hGet, ByteString)
 import qualified Data.ByteString.Lazy as B
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as BS (fromString)
 import qualified Data.Text as T
 import Control.Concurrent (
@@ -174,6 +173,7 @@ instance Show ErrorCode where
   show ErrorBrokenClient = "broken client error"
   show ErrorBadQuery = "malformed query error"
   show ErrorRuntime = "runtime error"
+  show ErrorUnexpectedResponse = "unexpected response"
 
 data SuccessCode =
   SuccessPartial RethinkDBHandle Int64 |
@@ -218,7 +218,7 @@ addMBox h tok term = do
   _ <- mkWeakMVar mbox $ do
     atomicModifyIORef' (rdbWait h) $ \mboxes -> 
       (M.delete tok mboxes, ())
-  forkIO $ fix $ \loop -> do
+  _ <- forkIO $ fix $ \loop -> do
     response <- readChan chan
     putMVar mbox response
     when (not $ isLastResponse response) $ do
@@ -289,8 +289,11 @@ convertDatum :: Datum.Datum -> O.Datum
 convertDatum Datum { type' = Just R_NULL } = Null
 convertDatum Datum { type' = Just R_BOOL, r_bool = Just b } = Bool b
 convertDatum Datum { type' = Just R_ARRAY, r_array = a } = toJSON (map convertDatum $ toList a)
-convertDatum Datum { type' = Just R_OBJECT, r_object = o } = object $ map pair $ toList o
-    where pair (AssocPair (Just k) (Just v))  = (T.pack $ uToString $ k) .= convertDatum v
+convertDatum Datum { type' = Just R_OBJECT, r_object = o } =
+  object $ Prelude.concatMap pair $ toList o
+    where
+      pair (AssocPair (Just k) (Just v))  = [(T.pack $ uToString $ k) .= convertDatum v]
+      pair _ = []
 convertDatum Datum { type' = Just R_STR, r_str = Just s } = toJSON (uToString s)
 convertDatum Datum { type' = Just R_NUM, r_num = Just n } = toJSON n
 convertDatum d = error ("Invalid Datum: " ++ show d)

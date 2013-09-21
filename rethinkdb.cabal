@@ -1,6 +1,7 @@
 name:                rethinkdb
-version:             0.1.9.0
-synopsis:            RethinkDB client library for haskell
+version:             1.8.0.0
+description:         RethinkDB is a distributed document store with a powerful query language.
+synopsis:            RethinkDB driver for Haskell
 homepage:            http://github.com/atnnn/haskell-rethinkdb
 license:             Apache
 license-file:        LICENSE
@@ -36,7 +37,7 @@ library
                        Database.RethinkDB.Protobuf.Ql2.Term.TermType
                        Database.RethinkDB.Protobuf.Ql2.VersionDummy
                        Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
-  build-depends:       base,
+  build-depends:       base >= 4 && < 5,
                        protocol-buffers,
                        unordered-containers,
                        text,

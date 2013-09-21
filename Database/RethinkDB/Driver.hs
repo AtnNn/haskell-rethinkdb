@@ -9,14 +9,16 @@ module Database.RethinkDB.Driver (
 import Data.Aeson (Value, FromJSON, fromJSON)
 import qualified Data.Aeson (Result(Error, Success))
 import Control.Monad
-import Data.Default (Default(def))
 import Control.Concurrent.MVar (MVar, takeMVar)
-import Data.Int (Int64)
-import Control.Monad.Fix (fix)
 import Data.Sequence ((|>))
 
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
 import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
+import Database.RethinkDB.Protobuf.Ql2.Term as Term (Term(..))
+import Database.RethinkDB.Protobuf.Ql2.Term.TermType
+import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
+import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
+import Text.ProtocolBuffers.Basic (uFromString, defaultValue)
 
 import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL
@@ -28,10 +30,17 @@ data RunOptions =
   SoftDurability Bool
 
 applyOption :: RunOptions -> Query -> Query
-applyOption UseOutdated q = q --{
---  global_optargs = global_optargs q |> AssocPair "use_outdated" True }
-applyOption NoReply q = q
-applyOption (SoftDurability b) q =q
+applyOption UseOutdated q = addQueryOption q "user_outdated" True
+applyOption NoReply q = addQueryOption q "noreply" True
+applyOption (SoftDurability b) q = addQueryOption q "soft_durability" b
+
+addQueryOption :: Query -> String -> Bool -> Query
+addQueryOption q k v = q {
+  global_optargs = global_optargs q |> AssocPair (Just $ uFromString k) (Just boolTrue) }
+  where
+    boolTrue = defaultValue{
+      Term.type' = Just DATUM, datum = Just defaultValue{
+         Datum.type' = Just R_BOOL, r_bool = Just v } }
 
 -- | Run a query with the given options
 runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunOptions] -> query -> IO r
@@ -43,7 +52,7 @@ runOpts h opts t = do
 
 -- | Run a given query and return a Result
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
-run h t = runOpts h [] t
+run h = runOpts h []
 
 -- | Run a given query and return a Value
 run' :: Expr query => RethinkDBHandle -> query -> IO [Value]

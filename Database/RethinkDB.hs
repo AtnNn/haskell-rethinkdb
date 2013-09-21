@@ -83,6 +83,7 @@ module Database.RethinkDB (
   
   -- * Dates and times
   
+  UTCTime, ZonedTime,
   now, time, epochTime, iso8601, inTimezone, during,
   timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds,
   toIso8601, toEpochTime,
@@ -96,7 +97,7 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  Obj(..), Object, Attribute(..), str, num, (#), (.),
+  Obj(..), Object, Attribute(..), str, num, (.), (#),
   def
 
   ) where

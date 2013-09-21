@@ -147,10 +147,13 @@ orderBy o s = ReQL $ do
     buildOrder (Desc k) = op DESC [k] ()
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
-groupBy :: (Expr group, Expr reduction) => (ReQL -> group) -> (ReQL -> reduction) -> ReQL
-groupBy g mr = ReQL $ do
-  (m, r, f) <- termToMapReduce (expr P.. mr)
-  baseReQL $ op MAP (op GROUPED_MAP_REDUCE (expr P.. g, m, r) (), f) ()
+groupBy ::
+  (Expr group, Expr reduction, Expr seq)
+  => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
+groupBy g mr s = ReQL $ do
+  (m, r, f) <- termToMapReduce (expr . mr)
+  baseReQL $ map (f . (!"reduction")) $
+    op GROUPED_MAP_REDUCE [expr s, expr $ expr P.. g, expr m, expr r] ()
 
 -- | The sum of a sequence
 sum :: (Expr s) => s -> ReQL

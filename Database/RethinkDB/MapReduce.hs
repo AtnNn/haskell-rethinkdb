@@ -5,25 +5,30 @@ import Control.Monad.Writer
 import qualified Data.Text as T
 
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType
+import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum
 
 import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
-import {-# SOURCE #-} qualified Database.RethinkDB.Functions as R
 
-termToMapReduce :: (ReQL -> ReQL) -> State QuerySettings (ReQL, ReQL, ReQL)
-termToMapReduce = undefined
+termToMapReduce ::
+  (ReQL -> ReQL) -> State QuerySettings (ReQL -> ReQL, ReQL -> ReQL -> ReQL, ReQL -> ReQL)
+termToMapReduce f = do
+  v <- newVarId
+  body <- baseReQL $ f (op VAR [v] ())
+  let MapReduce map reduce finally = toMapReduce v body
+  return (map, reduce, finally)
 
-toReduce :: MapReduce -> MapReduce
-toReduce (Map x) = MapReduce x idt []
-toReduce mr = mr
+toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, ReQL -> ReQL)
+toReduce (None t) = (\_ -> expr (), \_ _ -> expr (), const t)
+toReduce (Map m) = ((\x -> expr [x]) . m, unionReduce, id)
+toReduce (MapReduce m r f) = (m, r, f)
 
-idt :: ReQL
-idt = ReQL $ do
-        v <- newVar
-        baseReQL $ op FUNC ([v], v) ()
+unionReduce :: ReQL -> ReQL -> ReQL
+unionReduce a b = op UNION (a, b) ()
 
-sameVar :: BaseReQL -> BaseArray -> Bool
-sameVar (BaseReQL DATUM (Just x) _ _) [BaseReQL DATUM (Just y) _ _] = x == y
+sameVar :: Int -> BaseArray -> Bool
+sameVar x [BaseReQL DATUM (Just (Datum.Datum{ Datum.r_num = Just y })) _ _] =
+  fromIntegral x == y
 sameVar _ _ = False
 
 notNone :: MapReduce -> Bool
@@ -33,9 +38,15 @@ notNone _ = True
 wrap :: BaseReQL -> ReQL
 wrap = ReQL . return
 
-toMapReduce :: BaseReQL -> BaseReQL -> MapReduce
+toFun1 :: ReQL -> (ReQL -> ReQL)
+toFun1 f a = op FUNCALL (f, a) ()
+
+toFun2 :: ReQL -> (ReQL -> ReQL -> ReQL)
+toFun2 f a b = op FUNCALL (f, a, b) ()
+
+toMapReduce :: Int -> BaseReQL -> MapReduce
 toMapReduce _ t@(BaseReQL DATUM _ _ _) = None $ wrap t
-toMapReduce v   (BaseReQL VAR _ w _) | sameVar v w = Map []
+toMapReduce v (BaseReQL VAR _ w _) | sameVar v w = Map id
 toMapReduce v t@(BaseReQL type' _ args optargs) = let
     args' = map (toMapReduce v) args
     optargs' = map (\(BaseAttribute k vv) -> (k, toMapReduce v vv)) optargs
@@ -45,33 +56,59 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
      else if not $ count == 1
           then rebuild else
               case (type', args') of
-                (MAP, [Map m, None f]) -> Map (f : m)
-                (REDUCE, [Map m, None f]) -> MapReduce m f []
-                (COUNT, [Map _]) -> MapReduce [expr (const $ 1 :: ReQL -> ReQL)]
-                                    (expr (R.sum :: ReQL -> ReQL)) []
+                (MAP, [Map m, None f]) -> Map (toFun1 f . m)
+                (REDUCE, [Map m, None f]) -> MapReduce m (toFun2 f) id
+                (COUNT, [Map _]) -> MapReduce (const 1)
+                                    (\a b -> op ADD (a, b) ()) id
                 _ -> rebuild
 
 data MapReduce =
     None ReQL |
-    Map [ReQL] |
-    MapReduce [ReQL] ReQL [ReQL]
-
--- (TERMTYPE a (mapreduce maps reduce finals)) -> mapreduce maps reduce ((\x -> TERMTYPE a x) : finals)
+    Map (ReQL -> ReQL) |
+    MapReduce (ReQL -> ReQL) (ReQL -> ReQL -> ReQL) (ReQL -> ReQL)
 
 rebuild0 :: TermType -> [MapReduce] -> [(T.Text, MapReduce)] -> MapReduce
 rebuild0 ttype args optargs = MapReduce maps reduce finals where
-  ([(MapReduce maps reduce tailFinals)], headFinals) = extract False ttype args optargs
-  finals = headFinals : tailFinals
+  (finally2, [mr]) = extract Nothing ttype args optargs
+  (maps, reduce, finally1) = toReduce mr
+  finals = finally2 . finally1
 
 rebuildx :: TermType -> [MapReduce] -> [(Key, MapReduce)] -> MapReduce
-rebuildx ttype args optargs = MapReduce maps reduce finals where
-  (mrs, headFinals) = extract True ttype args optargs
-  maps = undefined mrs
-  reduce = undefined mrs
-  finals = undefined mrs
+rebuildx ttype args optargs = MapReduce maps reduces finallys where
+  (finally, mrs) = extract (Just 0) ttype args optargs
+  index = zip ([0..] :: [Int])
+  triplets = map toReduce mrs
+  maps x = expr $ map (($ x) . fst3) triplets
+  reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map snd3 triplets
+  finallys x = finally $ expr $ map (uncurry $ mkFinally x) . index $ map thrd3 triplets
+  mkReduce a b i f = f (op NTH (a, i) ()) (op NTH (b, i) ())
+  mkFinally x i f = f (op NTH (x, i) ())
 
-extract :: Bool -> TermType -> [MapReduce] -> [(Key, MapReduce)] -> ([MapReduce], ReQL)
-extract = undefined
+fst3 :: (a,b,c) -> a
+fst3 (a,_,_) = a
 
--- extractList :: [MapReduce] -> WriterT (State ) [MapReduce] ([ReQL] -> ReQL)
-extractList = undefined
+snd3 :: (a,b,c) -> b
+snd3 (_,b,_) = b
+
+thrd3 :: (a,b,c) -> c
+thrd3 (_,_,c) = c
+
+extract ::
+  Maybe Int -> TermType -> [MapReduce] -> [(Key, MapReduce)]
+  -> (ReQL -> ReQL, [MapReduce])
+extract state tt args optargs = fst $ flip runState state $ runWriterT $ do
+  args' <- sequence $ map extractOne args
+  optargvs' <- sequence $ map extractOne (map snd optargs)
+  let optargks = map fst optargs
+  return $ \v -> op tt (map ($ v) args') (zipWith (:=) optargks $ map ($ v) optargvs')
+
+extractOne :: MapReduce -> WriterT [MapReduce] (State (Maybe Int)) (ReQL -> ReQL)
+extractOne (None term) = return $ const term
+extractOne mr = do
+  tell [mr]
+  st <- get
+  case st of
+    Nothing -> return id
+    Just n -> do
+      put $ Just $ n + 1
+      return $ \v -> op NTH (v, n) ()

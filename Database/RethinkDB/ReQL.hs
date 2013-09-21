@@ -1,5 +1,5 @@
 {-# LANGUAGE ExistentialQuantification, RecordWildCards, ScopedTypeVariables,
-             FlexibleInstances, OverloadedStrings #-}
+             FlexibleInstances, OverloadedStrings, PatternGuards #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
@@ -8,11 +8,11 @@ module Database.RethinkDB.ReQL (
   BaseReQL(..),
   BaseAttribute(..),
   buildQuery,
-  BaseArray(..),
+  BaseArray,
   Backtrace, convertBacktrace,
   Expr(..),
   QuerySettings(..),
-  newVar,
+  newVarId,
   str,
   num,
   Attribute(..),
@@ -24,12 +24,13 @@ module Database.RethinkDB.ReQL (
   Obj(..),
   returnVals,
   canReturnVals,
+  reqlToProtobuf
   ) where
 
 import qualified Data.Vector as V
 import qualified Data.HashMap.Lazy as M
 import Data.Maybe (fromMaybe, catMaybes)
-import Data.String (IsString, fromString)
+import Data.String (IsString(..))
 import Data.List (intersperse)
 import qualified Data.Sequence as S
 import Control.Monad.State (State, get, put, runState)
@@ -38,27 +39,26 @@ import Data.Default (Default, def)
 import qualified Data.Text as T
 import qualified Data.Aeson as J
 import Data.Foldable (toList)
+import Data.Time
+import Data.Time.Clock.POSIX
+import Control.Monad.Fix
 
 import Text.ProtocolBuffers hiding (Key, cons, Default)
 import Text.ProtocolBuffers.Basic hiding (Default)
 
-import Database.RethinkDB.Protobuf.Ql2.Term (Term(datum, args, optargs))
-import qualified Database.RethinkDB.Protobuf.Ql2.Term as Term (Term(type'))
+import Database.RethinkDB.Protobuf.Ql2.Term
+import qualified Database.RethinkDB.Protobuf.Ql2.Term as Term
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType as TermType
-  (TermType(
-      MAKE_ARRAY, MAKE_OBJ, DATUM, GET, ADD, MUL, BRANCH,
-      LT, EQ, FUNC, VAR, TABLE, DB, FUNCALL, ERROR))
-import Database.RethinkDB.Protobuf.Ql2.Term.AssocPair (AssocPair(AssocPair))
-import qualified Database.RethinkDB.Protobuf.Ql2.Query as Query (Query(type',query))
-import Database.RethinkDB.Protobuf.Ql2.Query (Query(query))
-import Database.RethinkDB.Protobuf.Ql2.Query.QueryType (QueryType(START))
-import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum (Datum(type'))
-import Database.RethinkDB.Protobuf.Ql2.Datum (r_str, r_num, r_bool, r_array, r_object)
-import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL (Backtrace, frames)
-import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL (Frame(type', pos, Frame, opt))
+import Database.RethinkDB.Protobuf.Ql2.Term.AssocPair
+import qualified Database.RethinkDB.Protobuf.Ql2.Query as Query
+import Database.RethinkDB.Protobuf.Ql2.Query.QueryType
+import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum
+import qualified Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair as Datum
+import Database.RethinkDB.Protobuf.Ql2.Datum
+import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL
+import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL
 import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-  (DatumType(R_NUM, R_BOOL, R_STR, R_ARRAY, R_OBJECT, R_NULL))
-import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL (FrameType(POS, OPT))
+import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL
 
 import Database.RethinkDB.Objects as O
 
@@ -107,29 +107,43 @@ baseBool :: Bool -> BaseReQL
 baseBool b = BaseReQL DATUM (Just defaultValue{
                                 Datum.type' = Just R_BOOL, r_bool = Just b }) [] []
 
-newVar :: State QuerySettings ReQL
-newVar = do
+newVarId :: State QuerySettings Int
+newVarId = do
   QuerySettings {..} <- get
   let n = queryVarIndex + 1
   put QuerySettings {queryVarIndex = n, ..}
-  return $ expr n
+  return $ n
 
 instance Show BaseReQL where
   show (BaseReQL DATUM (Just dat) _ _) = showD dat
+  show (BaseReQL MAKE_ARRAY _ x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
+  show (BaseReQL MAKE_OBJ _ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
+  show (BaseReQL VAR _ [BaseReQL DATUM (Just d) [] []] []) | Just x <- toDouble d =
+    "x" ++ show (round x)
+  show (BaseReQL FUNC _ [BaseReQL DATUM (Just d) [] [], body] []) | Just vars <- toDoubles d =
+    "(\\" ++ (concat $ intersperse " " $ map (("x"++) . show . round) $ vars)
+    ++ " -> " ++ show body ++ ")"
+  show (BaseReQL GET_FIELD _ [o, k] []) = show o ++ "!" ++ show k
   show (BaseReQL fun _ args optargs) =
-    show fun ++ " (" ++ concat (intersperse ", " (map show args ++ map show optargs)) ++ ")"
+    show fun ++ "(" ++
+    concat (intersperse ", " (map show args ++ map show optargs)) ++ ")"
 
 showD :: Datum.Datum -> String
 showD d = case Datum.type' d of
   Just R_NUM -> show' $ r_num d
   Just R_BOOL -> show' $ r_bool d
   Just R_STR -> show' $ r_str d
-  Just R_ARRAY -> show $ r_array d
-  Just R_OBJECT -> show $ r_object d
+  Just R_ARRAY -> "[" ++ (concat $ intersperse ", " $ map showD $ toList $ r_array d) ++ "]"
+  Just R_OBJECT ->
+    "{" ++ (concat $ intersperse ", " $ map showDatumAttr $ toList $ r_object d) ++ "}"
   Just R_NULL -> "null"
   Nothing -> "Nothing"
   where show' Nothing = "Nothing"
         show' (Just a) = show a
+
+showDatumAttr:: Datum.AssocPair -> String
+showDatumAttr (Datum.AssocPair (Just k) (Just v)) = uToString k ++ ": " ++ showD v
+showDatumAttr x = show x
 
 -- | Convert other types into ReqL expressions
 class Expr e where
@@ -180,6 +194,9 @@ data Attribute = forall e . (Expr e) => T.Text := e
 
 data BaseAttribute = BaseAttribute T.Text BaseReQL
 
+mapBaseAttribute :: (BaseReQL -> BaseReQL) -> BaseAttribute -> BaseAttribute
+mapBaseAttribute f (BaseAttribute k v) = BaseAttribute k (f v)
+
 instance Show BaseAttribute where
   show (BaseAttribute a b) = T.unpack a ++ ": " ++ show b
 
@@ -202,7 +219,58 @@ op :: (Arr a, Obj o) => TermType -> a -> o -> ReQL
 op t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseObject (obj b)
-  return $ BaseReQL t Nothing a' b'
+  case (t, a') of
+    (FUNCALL, (BaseReQL FUNC Nothing [argsFunDatum, fun] [] : argsCall)) |
+      BaseReQL DATUM (Just argsFunArray) [] [] <- argsFunDatum,
+      Just varsFun <- toDoubles argsFunArray,
+      length varsFun == length argsCall,
+      Just varsCall <- varsOf argsCall ->
+        return $ alphaRename (zip varsFun varsCall) fun
+    _ -> return $ BaseReQL t Nothing a' b'
+
+toDoubles :: Datum.Datum -> Maybe [Double]
+toDoubles Datum.Datum{
+  Datum.type' = Just R_ARRAY,
+  r_array = seq } =
+  sequence . map toDouble . toList $ seq
+toDoubles _ = Nothing
+
+toDouble :: Datum.Datum -> Maybe Double
+toDouble Datum.Datum{ type' = Just R_NUM, r_num = Just n } = Just n
+toDouble _ = Nothing
+
+varsOf :: [BaseReQL] -> Maybe [Double]
+varsOf = sequence . map varOf
+    
+varOf :: BaseReQL -> Maybe Double
+varOf (BaseReQL VAR Nothing [BaseReQL DATUM (Just d) [] []] []) = toDouble d
+varOf _ = Nothing
+
+datumNumberArray :: [Int] -> Datum.Datum
+datumNumberArray a =
+  defaultValue{
+    Datum.type' = Just R_ARRAY,
+    r_array = S.fromList $ map datumInt a }
+
+datumInt :: Int -> Datum.Datum
+datumInt n =
+  defaultValue{
+    Datum.type' = Just R_NUM,
+    r_num = Just $ fromIntegral n }
+
+alphaRename :: [(Double, Double)] -> BaseReQL -> BaseReQL
+alphaRename assoc = fix $ \f x ->
+  case varOf x of
+    Just n
+      | Just n' <- lookup n assoc ->
+      BaseReQL VAR Nothing
+      [BaseReQL DATUM
+       (Just $ defaultValue{ Datum.type' = Just R_NUM, r_num = Just n' }) [] []] []
+      | otherwise -> x
+    _ -> updateChildren x f
+
+updateChildren :: BaseReQL -> (BaseReQL -> BaseReQL) -> BaseReQL
+updateChildren (BaseReQL t d a o) f = BaseReQL t d (map f a) (map (mapBaseAttribute f) o)
 
 datumTerm :: DatumType -> Datum.Datum -> ReQL
 datumTerm t d = ReQL $ return $ BaseReQL DATUM (Just d { Datum.type' = Just t }) [] []
@@ -220,6 +288,9 @@ instance Expr Int64 where
   expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
 
 instance Expr Int where
+  expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
+
+instance Expr Integer where
   expr i = datumTerm R_NUM defaultValue { r_num = Just (fromIntegral i) }
 
 instance Num ReQL where
@@ -245,14 +316,17 @@ instance IsString ReQL where
 
 instance Expr (ReQL -> ReQL) where
   expr f = ReQL $ do
-    v <- newVar
-    baseReQL $ op FUNC ([v], f (op VAR [v] ())) ()
+    v <- newVarId
+    baseReQL $ op FUNC (datumNumberArray [v], f (op VAR [v] ())) ()
 
 instance Expr (ReQL -> ReQL -> ReQL) where
   expr f = ReQL $ do
-    a <- newVar
-    b <- newVar
-    baseReQL $ op FUNC ([a, b], f (op VAR [a] ()) (op VAR [b] ())) ()
+    a <- newVarId
+    b <- newVarId
+    baseReQL $ op FUNC (datumNumberArray [a, b], f (op VAR [a] ()) (op VAR [b] ())) ()
+
+instance Expr Datum.Datum where
+  expr d = ReQL $ return $ BaseReQL DATUM (Just d) [] []
 
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
@@ -273,6 +347,9 @@ instance Expr J.Value where
 instance Expr Double where
   expr d = datumTerm R_NUM defaultValue { r_num = Just d }
 
+instance Expr Rational where
+  expr x = expr (fromRational x :: Double)
+
 instance Expr x => Expr (V.Vector x) where
   expr v = expr (V.toList v)
 
@@ -287,9 +364,6 @@ instance Expr e => Expr (M.HashMap T.Text e) where
 
 instance Expr Object where
   expr o = op MAKE_OBJ () o
-
-buildTerm :: ReQL -> State QuerySettings Term
-buildTerm = fmap buildBaseReQL . baseReQL
 
 buildBaseReQL :: BaseReQL -> Term
 buildBaseReQL BaseReQL {..} = defaultValue {
@@ -321,8 +395,8 @@ buildQuery term token db = (defaultValue {
 instance Show ReQL where
   show t = show . snd $ buildQuery t 0 (Database "")
 
-termToProtobuf :: ReQL -> Query.Query
-termToProtobuf t = fst $ buildQuery t 0 (Database "")
+reqlToProtobuf :: ReQL -> Query.Query
+reqlToProtobuf t = fst $ buildQuery t 0 (Database "")
 
 type Backtrace = [Frame]
 
@@ -337,3 +411,17 @@ convertBacktrace = concatMap convertFrame . toList . QL.frames
     where convertFrame QL.Frame { type' = Just QL.POS, pos = Just n } = [FramePos n]
           convertFrame QL.Frame { type' = Just QL.OPT, opt = Just k } = [FrameOpt (T.pack $ uToString k)]
           convertFrame _ = []
+
+instance Expr UTCTime where
+  expr t = op EPOCH_TIME [expr . toRational $ utcTimeToPOSIXSeconds t] ()
+
+instance Expr ZonedTime where
+  expr (ZonedTime
+        (LocalTime
+         date
+         (TimeOfDay hour minute seconds))
+        timezone) = let
+    (year, month, day) = toGregorian date
+    in  op TIME [
+      expr year, expr month, expr day, expr hour, expr minute, expr (toRational seconds),
+      str $ timeZoneOffsetString timezone] ()

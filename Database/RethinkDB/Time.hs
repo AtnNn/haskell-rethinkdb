@@ -3,12 +3,16 @@
 module Database.RethinkDB.Time where
 
 import Data.Text (Text)
+import qualified  Data.Time as Time
+import qualified  Data.Time.Clock.POSIX as Time
+import Data.Aeson as JSON
+import Data.Aeson.Types (Parser)
+import Control.Monad
+import Control.Applicative
 
 import Database.RethinkDB.ReQL
 
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType
-
-import Data.Time as Time
 
 -- | The time and date when the query is executed
 now :: ReQL
@@ -62,3 +66,41 @@ seconds t = op SECONDS [t] ()
 toIso8601, toEpochTime :: Expr t => t -> ReQL
 toIso8601 t = op TO_ISO8601 [t] ()
 toEpochTime t = op TO_EPOCH_TIME [t] ()
+
+-- | Time with no time zone
+-- The default FromJSON instance for Data.Time.UTCTime is incompatible with ReQL's time type
+newtype UTCTime = UTCTime Time.UTCTime
+
+-- | Time with a time zone
+-- The default FromJSON instance for Data.Time.ZonedTime is incompatible with ReQL's time type
+newtype ZonedTime = ZonedTime Time.ZonedTime
+
+instance FromJSON UTCTime where
+  parseJSON (JSON.Object v) = UTCTime . Time.posixSecondsToUTCTime . fromRational <$> v .: "epoch_time"
+  parseJSON _ = mzero
+
+instance FromJSON ZonedTime where
+  parseJSON (JSON.Object v) = do
+                         tz <- v .: "timezone"
+                         t <- v.: "epoch_time"
+                         tz' <- parseTimeZone tz
+                         return . ZonedTime $ Time.utcToZonedTime tz'
+                           (Time.posixSecondsToUTCTime (fromRational t))
+  parseJSON _ = mzero
+
+parseTimeZone :: String -> Parser Time.TimeZone
+parseTimeZone "Z" = return Time.utc
+parseTimeZone tz = Time.minutesToTimeZone <$> case tz of 
+  ('-':tz') -> negate <$> go tz'
+  _ -> go tz
+  where
+    go tz' = do
+        (h, _:m) <- return $ break (==':') tz'
+        ([(hh, "")], [(mm, "")]) <- return $ (reads h, reads m)
+        return $ hh * 60 + mm
+
+instance Expr UTCTime where
+  expr (UTCTime t) = expr t
+
+instance Expr ZonedTime where
+  expr (ZonedTime t) = expr t
