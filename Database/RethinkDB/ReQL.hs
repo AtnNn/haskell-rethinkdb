@@ -119,9 +119,9 @@ instance Show BaseReQL where
   show (BaseReQL MAKE_ARRAY _ x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
   show (BaseReQL MAKE_OBJ _ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
   show (BaseReQL VAR _ [BaseReQL DATUM (Just d) [] []] []) | Just x <- toDouble d =
-    "x" ++ show (round x)
+    "x" ++ show (round x :: Int)
   show (BaseReQL FUNC _ [BaseReQL DATUM (Just d) [] [], body] []) | Just vars <- toDoubles d =
-    "(\\" ++ (concat $ intersperse " " $ map (("x"++) . show . round) $ vars)
+    "(\\" ++ (concat $ intersperse " " $ map (("x"++) . show . (round :: Double -> Int)) $ vars)
     ++ " -> " ++ show body ++ ")"
   show (BaseReQL GET_FIELD _ [o, k] []) = show o ++ "!" ++ show k
   show (BaseReQL fun _ args optargs) =
@@ -208,6 +208,9 @@ instance Obj [Attribute] where
   obj = Object . mapM base
     where base (k := e) = BaseAttribute k <$> baseReQL (expr e)
 
+instance Obj [BaseAttribute] where
+  obj = Object . return
+
 instance Obj Object where
   obj = id
 
@@ -231,8 +234,8 @@ op t a b = ReQL $ do
 toDoubles :: Datum.Datum -> Maybe [Double]
 toDoubles Datum.Datum{
   Datum.type' = Just R_ARRAY,
-  r_array = seq } =
-  sequence . map toDouble . toList $ seq
+  r_array = s } =
+  sequence . map toDouble . toList $ s
 toDoubles _ = Nothing
 
 toDouble :: Datum.Datum -> Maybe Double
@@ -425,3 +428,6 @@ instance Expr ZonedTime where
     in  op TIME [
       expr year, expr month, expr day, expr hour, expr minute, expr (toRational seconds),
       str $ timeZoneOffsetString timezone] ()
+
+instance Expr BaseReQL where
+  expr = ReQL . return

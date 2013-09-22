@@ -15,8 +15,8 @@ termToMapReduce ::
 termToMapReduce f = do
   v <- newVarId
   body <- baseReQL $ f (op VAR [v] ())
-  let MapReduce map reduce finally = toMapReduce v body
-  return (map, reduce, finally)
+  let MapReduce map_ reduce finally = toMapReduce v body
+  return (map_, reduce, finally)
 
 toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, ReQL -> ReQL)
 toReduce (None t) = (\_ -> expr (), \_ _ -> expr (), const t)
@@ -55,12 +55,29 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
   in if count == 0 then None $ wrap t
      else if not $ count == 1
           then rebuild else
-              case (type', args') of
-                (MAP, [Map m, None f]) -> Map (toFun1 f . m)
-                (REDUCE, [Map m, None f]) -> MapReduce m (toFun2 f) id
-                (COUNT, [Map _]) -> MapReduce (const 1)
-                                    (\a b -> op ADD (a, b) ()) id
+              case (type', args', optargs') of
+                (MAP, [Map m, None f], []) -> Map (toFun1 f . m)
+                (REDUCE, [Map m, None f], _) | Just mbase <- optargsToBase optargs ->
+                  MapReduce m (toFun2 f) (maybe id (toFun2 f) mbase)
+                (COUNT, [Map _], []) ->
+                  MapReduce (const 1) (\a b -> op ADD (a, b) ()) id
+                (tt, (Map m : _), _) | tt `elem` mappableTypes ->
+                  (Map ((\x -> op tt (expr x : map expr (tail args)) (noRecurse : map baseAttrToAttr optargs)) . m))
                 _ -> rebuild
+
+optargsToBase :: [BaseAttribute] -> Maybe (Maybe ReQL)
+optargsToBase [] = Just Nothing
+optargsToBase [BaseAttribute "base" b] = Just (Just $ ReQL $ return b)
+optargsToBase _ = Nothing
+
+baseAttrToAttr :: BaseAttribute -> Attribute
+baseAttrToAttr (BaseAttribute k v) = k := v
+
+noRecurse :: Attribute
+noRecurse = "_NO_RECURSE_" := True
+
+mappableTypes :: [TermType]
+mappableTypes = [GET_FIELD, PLUCK, WITHOUT, MERGE, HAS_FIELDS]
 
 data MapReduce =
     None ReQL |
@@ -96,7 +113,7 @@ thrd3 (_,_,c) = c
 extract ::
   Maybe Int -> TermType -> [MapReduce] -> [(Key, MapReduce)]
   -> (ReQL -> ReQL, [MapReduce])
-extract state tt args optargs = fst $ flip runState state $ runWriterT $ do
+extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   args' <- sequence $ map extractOne args
   optargvs' <- sequence $ map extractOne (map snd optargs)
   let optargks = map fst optargs

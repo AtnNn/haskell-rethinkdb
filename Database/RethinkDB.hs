@@ -5,7 +5,7 @@
 -- /How to use/
 --
 -- >>> {-# LANGUAGE OverloadedStrings #-}
--- >>> import Database.RethinkDB as R
+-- >>> import qualified Database.RethinkDB as R
 
 module Database.RethinkDB (
   -- * Accessing RethinkDB
@@ -22,6 +22,7 @@ module Database.RethinkDB (
   RethinkDBError(..),
   SuccessCode(..),
   ErrorCode(..),
+  ReQL,
 
   -- * Manipulating databases
 

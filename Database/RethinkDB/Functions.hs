@@ -53,7 +53,7 @@ not a = op NOT [a] ()
 
 -- * Lists and Streams
 
--- | The size of a sequence or an array
+-- | The size of a sequence or an array.
 -- Called /count/ in the official drivers
 length :: (Expr a) => a -> ReQL
 length e = op COUNT [e] ()
@@ -92,12 +92,12 @@ outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f) ()
 eqJoin :: (Expr a, Expr b) => Key -> a -> Key -> b -> ReQL
 eqJoin a i k b = op EQ_JOIN (b, k, a) ["index" := i]
 
--- | Drop elements from the head of a sequence
+-- | Drop elements from the head of a sequence.
 -- Called /skip/ in the official drivers
 drop :: (Expr a, Expr b) => a -> b -> ReQL
 drop a b = op SKIP (b, a) ()
 
--- | Limit the size of a sequence
+-- | Limit the size of a sequence.
 -- Called /limit/ in the official drivers
 take :: (Expr a, Expr b) => a -> b -> ReQL
 take a b = op LIMIT (a, b) ()
@@ -126,7 +126,7 @@ distinct s = op DISTINCT [s] ()
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
 forEach s f = op FOREACH (s, expr P.. f) ()
 
--- | Merge the "left" and "right" attributes of the objects in a sequence
+-- | Merge the "left" and "right" attributes of the objects in a sequence.
 -- Called /zip/ in the official drivers
 mergeRightLeft :: (Expr a) => a -> ReQL
 mergeRightLeft a = op ZIP [a] ()
@@ -179,7 +179,7 @@ pluck ks e = op PLUCK (cons e $ arr (P.map expr ks)) ()
 without :: (Expr o) => [ReQL] -> o -> ReQL
 without ks e = op WITHOUT (cons e $ arr (P.map expr ks)) ()
 
--- | Test if an object contains the given attribute
+-- | Test if an object contains the given attribute.
 -- Called /contains/ in the official drivers
 member :: (Expr o) => [ReQL] -> o -> ReQL
 member ks o = op CONTAINS (cons o $ arr (P.map expr ks)) ()
@@ -205,6 +205,7 @@ instance Javascript (ReQL -> ReQL -> ReQL) where
 if' :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
 if' a b c = op BRANCH (a, b, c) ()
 
+-- | Abort the query with an error
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m] ()
 
@@ -363,12 +364,12 @@ changeAt n d a = op CHANGE_AT (a, n, d) ()
 keys :: Expr obj => obj -> ReQL
 keys o = op KEYS [o] ()
 
--- | Match a string to a regulr expression
+-- | Match a string to a regulr expression.
 -- Called /match/ in the official drivers
 (=~) :: (Expr string, Expr regex) => string -> regex -> ReQL
 s =~ r = op MATCH (s, r) ()
 
--- | Apply a function to a list of arguments
+-- | Apply a function to a list of arguments.
 -- Called /do/ in the official drivers
 apply :: (Expr fun, Expr arg) => fun -> [arg] -> ReQL
 f `apply` as = op FUNCALL (expr f : P.map expr as) ()
