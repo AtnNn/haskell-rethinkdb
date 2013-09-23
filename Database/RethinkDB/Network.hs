@@ -29,14 +29,14 @@ import qualified Data.ByteString.UTF8 as BS (fromString)
 import qualified Data.Text as T
 import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, readMVar, forkIO, readChan,
-  myThreadId, newMVar, ThreadId, withMVar, newChan,
+  myThreadId, newMVar, ThreadId, newChan, killThread,
   newEmptyMVar, putMVar, mkWeakMVar)
 import Data.Bits (shiftL, (.|.), shiftR)
 import Data.Monoid ((<>))
 import Data.Foldable hiding (forM_)
-import Control.Exception (catches, Exception, throwIO)
+import Control.Exception (catch, Exception, throwIO, SomeException(..))
 import Data.Aeson (toJSON, object, (.=), Value(Null, Bool))
-import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef)
+import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -65,7 +65,7 @@ type Token = Int64
 -- | A connection to the database server
 data RethinkDBHandle = RethinkDBHandle {
   rdbHandle :: Handle,
-  rdbWriteLock :: MVar (),
+  rdbWriteLock :: MVar (Maybe SomeException),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
   rdbWait :: IORef (Map Token (Chan Response, BaseReQL)),
@@ -109,7 +109,7 @@ connect host port mauth = do
   when (res /= "SUCCESS") $ throwIO (RethinkDBConnectionError res)
   r <- newIORef 1
   let db' = Database "test"
-  wlock <- newMVar ()
+  wlock <- newMVar Nothing
   waits <- newIORef M.empty
   let rdb = RethinkDBHandle h wlock r db' waits
   tid <- forkIO $ readResponses rdb
@@ -128,13 +128,14 @@ magicNumber :: ByteString
 magicNumber = packUInt $ fromEnum V0_2
 
 -- | Convert a 4-byte byestring to an int
-unpackUInt :: ByteString -> Int
+unpackUInt :: ByteString -> Maybe Int
 unpackUInt s = case unpack s of
-  [a,b,c,d] -> fromIntegral a .|.
+  [a,b,c,d] -> Just $ 
+               fromIntegral a .|.
                fromIntegral b `shiftL` 8 .|.
                fromIntegral c `shiftL` 16 .|.
                fromIntegral d `shiftL` 24
-  _ -> error "unpackUInt: lengh is not 4"
+  _ -> Nothing
 
 -- | Convert an int to a 4-byte bytestring
 packUInt :: Int -> B.ByteString
@@ -144,7 +145,12 @@ packUInt n = pack $ map fromIntegral $
 
 withHandle :: RethinkDBHandle -> (Handle -> IO a) -> IO a
 withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
-  withMVar rdbWriteLock $ \_ -> f rdbHandle
+  modifyMVar rdbWriteLock $ \mex ->
+  case mex of
+    Nothing -> do
+      a <- f rdbHandle
+      return (Nothing, a)
+    Just ex -> throwIO ex
 
 data RethinkDBError = RethinkDBError {
   errorCode :: ErrorCode,
@@ -233,7 +239,7 @@ sendQLQuery h query = do
     hPut s $ packUInt (fromIntegral $ B.length queryS) <> queryS
 
 data RethinkDBReadError =
-  RethinkDBReadError String
+  RethinkDBReadError SomeException
   deriving (Show, Typeable)
 instance Exception RethinkDBReadError
 
@@ -241,21 +247,24 @@ readResponses :: (ThreadId -> RethinkDBHandle) -> IO ()
 readResponses h' = do
   tid <- myThreadId
   let h = h' tid
-  forever $ flip catches handlers $
-    readSingleResponse h
-  where
-    handlers = []
+  let handler e@SomeException{} = do
+        modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
+        writeIORef (rdbWait h) M.empty
+  forever $ flip catch handler $ readSingleResponse h
 
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
   header <- hGet (rdbHandle h) 4
-  rawResponse <- hGet (rdbHandle h) (unpackUInt header)
+  replyLength <-
+    maybe (fail "Connection closed by remote server")
+    return (unpackUInt header)
+  rawResponse <- hGet (rdbHandle h) replyLength
   let parsedResponse = messageGet rawResponse
   case parsedResponse of
-    Left errMsg -> throwIO $ RethinkDBReadError errMsg
+    Left errMsg -> fail errMsg
     Right (response, rest)
       | B.null rest -> dispatch (Ql2.token response) response
-      | otherwise -> throwIO $ RethinkDBReadError "RethinkDB: readResponses: invalid reply length"
+      | otherwise -> fail "readsingleResponse: invalid reply length"
 
   where
   dispatch Nothing _ = return ()
@@ -283,7 +292,9 @@ use h db' = h { rdbDatabase = db' }
 
 -- | Close an open connection
 close :: RethinkDBHandle -> IO ()
-close RethinkDBHandle{ rdbHandle } = hClose rdbHandle
+close RethinkDBHandle{ rdbHandle, rdbThread } = do
+  killThread rdbThread
+  hClose rdbHandle
 
 convertDatum :: Datum.Datum -> O.Datum
 convertDatum Datum { type' = Just R_NULL } = Null

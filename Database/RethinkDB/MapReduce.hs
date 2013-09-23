@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Database.RethinkDB.MapReduce where
 
 import Control.Monad.State

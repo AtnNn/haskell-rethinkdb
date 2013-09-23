@@ -152,7 +152,7 @@ groupBy ::
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
 groupBy g mr s = ReQL $ do
   (m, r, f) <- termToMapReduce (expr . mr)
-  baseReQL $ map (f . (!"reduction")) $
+  baseReQL $
     op GROUPED_MAP_REDUCE [expr s, expr $ expr P.. g, expr m, expr r] ()
 
 -- | The sum of a sequence
