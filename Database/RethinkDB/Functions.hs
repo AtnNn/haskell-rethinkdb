@@ -21,6 +21,8 @@ import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 
 -- | Arithmetic Operator
+infixl 6 +, -
+infixl 7 *, /
 (+), (-), (*), (/), mod
   :: (Expr a, Expr b) => a -> b -> ReQL
 (+) a b = op ADD (a, b) ()
@@ -30,15 +32,19 @@ import qualified Prelude as P
 mod a b = op MOD (a, b) ()
 
 -- | Boolean operator
+infixr 2 ||
+infixr 3 &&
 (||), (&&) :: (Expr a, Expr b) => a -> b -> ReQL
 a || b = op ANY (a, b) ()
 a && b = op ALL (a, b) ()
 
 -- | Comparison operator
-(==), (!=) :: (Expr a, Expr b) => a -> b -> ReQL
+infix 4 ==, /=
+(==), (/=) :: (Expr a, Expr b) => a -> b -> ReQL
 a == b = op EQ (a, b) ()
-a != b = op NE (a, b) ()
+a /= b = op NE (a, b) ()
 
+infix 4 >, <, <=, >=
 -- | Comparison operator
 (>), (>=), (<), (<=)
   :: (Expr a, Expr b) => a -> b -> ReQL
@@ -58,6 +64,7 @@ not a = op NOT [a] ()
 length :: (Expr a) => a -> ReQL
 length e = op COUNT [e] ()
 
+infixr 5 ++
 -- | Join two sequences.
 -- Called /union/ in the official drivers
 (++) :: (Expr a, Expr b) => a -> b -> ReQL
@@ -107,6 +114,7 @@ slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
 slice n m s = op SLICE (s, n, m) ()
 
 -- | Get the nth value of a sequence or array
+infixl 9 !!
 (!!) :: (Expr a) => a -> ReQL -> ReQL
 s !! n = op NTH (s, n) ()
 
@@ -168,6 +176,7 @@ avg = (\x -> (x!!0) / (x!!1)) .
 -- * Accessors
 
 -- | Get a single field form an object
+infixl 9 !
 (!) :: (Expr s) => s -> ReQL -> ReQL
 s ! k = op GET_FIELD (s, k) ()
 
@@ -321,6 +330,7 @@ prepend :: (Expr datum, Expr array) => datum -> array -> ReQL
 prepend d a = op PREPEND (a, d) ()
 
 -- | Called /difference/ in the official drivers
+infixl 9 \\ --
 (\\) :: (Expr a, Expr b) => a -> b -> ReQL
 a \\ b = op DIFFERENCE (a, b) ()
 
@@ -392,9 +402,11 @@ json :: Expr string => string -> ReQL
 json s = op JSON [s] ()
 
 -- | Flipped function composition
-(#) :: (Expr a, Expr b, Expr c) =>  (ReQL -> a) -> (ReQL -> b) -> c -> ReQL
-(f # g) x = expr (g (expr (f (expr x))))
+infixl 8 #
+(#) :: (Expr a, Expr b) =>  a -> (ReQL -> b) -> ReQL
+x # f = expr (f (expr x))
 
+infixr 9 .
 -- | Specialised function composition
 (.) :: (Expr a, Expr b, Expr c) =>  (ReQL -> b) -> (ReQL -> a) -> c -> ReQL
 (f . g) x = expr (f (expr (g (expr x))))

@@ -76,7 +76,7 @@ module Database.RethinkDB (
   -- * Math and logic
 
   (+), (-), (*), (/), mod, (&&), (||),
-  (==), (!=), (>), (<), (<=), (>=), not,
+  (==), (/=), (>), (<), (<=), (>=), not,
 
   -- * String manipulation
   
