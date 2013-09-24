@@ -250,7 +250,7 @@ readResponses h' = do
   let handler e@SomeException{} = do
         modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
         writeIORef (rdbWait h) M.empty
-  forever $ flip catch handler $ readSingleResponse h
+  flip catch handler $ forever $ readSingleResponse h
 
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
