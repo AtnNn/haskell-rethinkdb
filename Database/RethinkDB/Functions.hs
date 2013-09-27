@@ -271,7 +271,7 @@ tableDrop (O.Table mdb table_name _) =
 
 -- | List the tables in a database
 tableList :: Database -> ReQL
-tableList (O.Database name) = op DB_LIST [name] ()
+tableList (O.Database name) = op TABLE_LIST [name] ()
 
 -- | Get a document by primary key 
 get :: (Expr s, Expr k) => k -> s -> ReQL
