@@ -85,7 +85,7 @@ module Database.RethinkDB (
   
   -- * Dates and times
   
-  UTCTime, ZonedTime,
+  UTCTime(..), ZonedTime(..),
   now, time, epochTime, iso8601, inTimezone, during,
   timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds,
   toIso8601, toEpochTime,
