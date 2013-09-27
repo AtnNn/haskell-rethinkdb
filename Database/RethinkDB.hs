@@ -16,6 +16,7 @@ module Database.RethinkDB (
   use,
   run, run', runOpts,
   next, collect,
+  RunOptions(..),
   Cursor,
   Response,
   Result(..),
