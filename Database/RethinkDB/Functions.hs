@@ -106,8 +106,8 @@ drop a b = op SKIP (b, a) ()
 
 -- | Limit the size of a sequence.
 -- Called /limit/ in the official drivers
-take :: (Expr a, Expr b) => a -> b -> ReQL
-take a b = op LIMIT (a, b) ()
+take :: (Expr n, Expr seq) => n -> seq -> ReQL
+take n s = op LIMIT (s, n) ()
 
 -- | Cut out part of a sequence
 slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
