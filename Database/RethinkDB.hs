@@ -4,8 +4,9 @@
 --
 -- /How to use/
 --
--- >>> {-# LANGUAGE OverloadedStrings #-}
--- >>> import qualified Database.RethinkDB as R
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- > import qualified Database.RethinkDB as R
+-- > import qualified Database.RethinkDB.NoClash
 
 module Database.RethinkDB (
   -- * Accessing RethinkDB

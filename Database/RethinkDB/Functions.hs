@@ -165,7 +165,7 @@ groupBy g mr s = ReQL $ do
 
 -- | The sum of a sequence
 sum :: (Expr s) => s -> ReQL
-sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (0 :: ReQL)
+sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (num 0)
 
 -- | The average of a sequence
 avg :: (Expr s) => s -> ReQL

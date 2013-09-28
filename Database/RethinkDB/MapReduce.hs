@@ -62,7 +62,7 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
                 (REDUCE, [Map m, None f], _) | Just mbase <- optargsToBase optargs ->
                   MapReduce m (toFun2 f) (maybe id (toFun2 f) mbase)
                 (COUNT, [Map _], []) ->
-                  MapReduce (const 1) (\a b -> op ADD (a, b) ()) id
+                  MapReduce (const (num 1)) (\a b -> op ADD (a, b) ()) id
                 (tt, (Map m : _), _) | tt `elem` mappableTypes ->
                   (Map ((\x -> op tt (expr x : map expr (tail args)) (noRecurse : map baseAttrToAttr optargs)) . m))
                 _ -> rebuild

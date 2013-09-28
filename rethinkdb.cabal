@@ -13,6 +13,7 @@ cabal-version:       >=1.8
 
 library
   exposed-modules:     Database.RethinkDB
+                       Database.RethinkDB.NoClash
                        Database.RethinkDB.Driver
                        Database.RethinkDB.Functions
                        Database.RethinkDB.Time
