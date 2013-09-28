@@ -374,9 +374,9 @@ changeAt n d a = op CHANGE_AT (a, n, d) ()
 keys :: Expr obj => obj -> ReQL
 keys o = op KEYS [o] ()
 
--- | Match a string to a regulr expression.
+-- | Match a string to a regular expression.
 -- Called /match/ in the official drivers
-(=~) :: (Expr string, Expr regex) => string -> regex -> ReQL
+(=~) :: (Expr string) => string -> ReQL -> ReQL
 s =~ r = op MATCH (s, r) ()
 
 -- | Apply a function to a list of arguments.
