@@ -92,6 +92,7 @@ parseTimeZone :: String -> Parser Time.TimeZone
 parseTimeZone "Z" = return Time.utc
 parseTimeZone tz = Time.minutesToTimeZone <$> case tz of 
   ('-':tz') -> negate <$> go tz'
+  ('+':tz') -> go tz'
   _ -> go tz
   where
     go tz' = do
