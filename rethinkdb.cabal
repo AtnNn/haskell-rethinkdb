@@ -1,5 +1,5 @@
 name:                rethinkdb
-version:             1.8.0.2
+version:             1.8.0.3
 description:         RethinkDB is a distributed document store with a powerful query language.
 synopsis:            RethinkDB driver for Haskell
 homepage:            http://github.com/atnnn/haskell-rethinkdb
