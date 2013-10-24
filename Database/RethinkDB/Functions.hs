@@ -273,29 +273,29 @@ tableDrop (O.Table mdb table_name _) =
 tableList :: Database -> ReQL
 tableList (O.Database name) = op TABLE_LIST [name] ()
 
--- | Get a document by primary key 
+-- | Get a document by primary key
 get :: (Expr s, Expr k) => k -> s -> ReQL
 get k e = op GET (e, k) ()
 
 -- | Insert a document or a list of documents into a table
 insert :: (Expr table, Expr object) => object -> table -> ReQL
-insert a tb = op INSERT (tb, a) ()
+insert a tb = canReturnVals $ op INSERT (tb, a) ()
 
 -- | Like insert, but update existing documents with the same primary key
 upsert :: (Expr table, Expr object) => object -> table -> ReQL
-upsert a tb = op INSERT (tb, a) ["upsert" := P.True]
+upsert a tb = canReturnVals $ op INSERT (tb, a) ["upsert" := P.True]
 
 -- | Add to or modify the contents of a document
 update :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-update f s = op UPDATE (s, f) ()
+update f s = canReturnVals $ op UPDATE (s, f) ()
 
 -- | Replace a document with another
 replace :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-replace f s = op REPLACE (s, f) ()
+replace f s = canReturnVals $ op REPLACE (s, f) ()
 
 -- | Delete the documents
 delete :: (Expr selection) => selection -> ReQL
-delete s = op DELETE [s] ()
+delete s = canReturnVals $ op DELETE [s] ()
 
 -- | Convert a value to a different type
 coerceTo :: (Expr x) => ReQL -> x -> ReQL

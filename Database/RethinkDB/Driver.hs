@@ -1,16 +1,21 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Database.RethinkDB.Driver (
   run,
   run',
   Result(..),
   runOpts,
   RunOptions(..),
+  WriteResponse(..)
   ) where
 
-import Data.Aeson (Value, FromJSON, fromJSON)
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?))
 import qualified Data.Aeson (Result(Error, Success))
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Sequence ((|>))
+import Data.Text (Text)
+import Control.Applicative ((<$>), (<*>))
 
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
 import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
@@ -75,7 +80,7 @@ instance FromJSON a => Result (Cursor a) where
 
 instance FromJSON a => Result [a] where
   convertResult = collect <=< convertResult
-  
+
 instance FromJSON a => Result (Maybe a) where
   convertResult r = do
     c <- convertResult r
@@ -87,3 +92,31 @@ instance FromJSON a => Result (Maybe a) where
         case cadr of
           Nothing -> return $ Just a
           Just _ -> return Nothing
+
+data WriteResponse = WriteResponse {
+  writeResponseInserted :: Int,
+  writeResponseDeleted :: Int,
+  writeResponseReplaced :: Int,
+  writeResponseUnchanged :: Int,
+  writeResponseSkipped :: Int,
+  writeResponseErrors :: Int,
+  writeResponseFirstError :: Maybe Text,
+  writeResponseGeneratedKeys :: Maybe [Text],
+  writeResponseOldVal :: Maybe Value,
+  writeResponseNewVal :: Maybe Value
+  } deriving Show
+
+instance FromJSON WriteResponse where
+  parseJSON (Data.Aeson.Object o) =
+    WriteResponse
+    <$> o .: "inserted"
+    <*> o .: "deleted"
+    <*> o .: "replaced"
+    <*> o .: "unchanged"
+    <*> o .: "skipped"
+    <*> o .: "errors"
+    <*> o .:? "first_error"
+    <*> o .:? "generated_keys"
+    <*> o .:? "old_val"
+    <*> o .:? "new_val"
+  parseJSON _ = mzero
