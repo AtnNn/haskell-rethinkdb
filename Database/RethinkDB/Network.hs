@@ -28,7 +28,7 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
 import qualified Data.Text as T
 import Control.Concurrent (
-  writeChan, MVar, Chan, modifyMVar, readMVar, forkIO, readChan,
+  writeChan, MVar, Chan, modifyMVar, takeMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, newChan, killThread,
   newEmptyMVar, putMVar, mkWeakMVar)
 import Data.Bits (shiftL, (.|.), shiftR)
@@ -43,6 +43,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad.Fix (fix)
 import Data.Int (Int64)
 import System.IO.Unsafe (unsafeInterleaveIO)
+import System.Mem.Weak (finalize)
 
 import Text.ProtocolBuffers.Basic (uToString)
 import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
@@ -68,7 +69,7 @@ data RethinkDBHandle = RethinkDBHandle {
   rdbWriteLock :: MVar (Maybe SomeException),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
-  rdbWait :: IORef (Map Token (Chan Response, BaseReQL)),
+  rdbWait :: IORef (Map Token (Chan Response, BaseReQL, IO ())),
   rdbThread :: ThreadId
   }
 
@@ -130,7 +131,7 @@ magicNumber = packUInt $ fromEnum V0_2
 -- | Convert a 4-byte byestring to an int
 unpackUInt :: ByteString -> Maybe Int
 unpackUInt s = case unpack s of
-  [a,b,c,d] -> Just $ 
+  [a,b,c,d] -> Just $
                fromIntegral a .|.
                fromIntegral b `shiftL` 8 .|.
                fromIntegral c `shiftL` 16 .|.
@@ -205,7 +206,7 @@ convertResponse h q t Ql2.Response{ .. } = case type' of
   where
     bt = maybe [] convertBacktrace backtrace
     r = toList response
-    e = maybe "" uToString $ r_str =<< listToMaybe (toList response) 
+    e = maybe "" uToString $ r_str =<< listToMaybe (toList response)
         -- TODO: nicer backtrace
 
 runQLQuery :: RethinkDBHandle -> Query -> BaseReQL -> IO (MVar Response)
@@ -218,12 +219,13 @@ runQLQuery h query term = do
 addMBox :: RethinkDBHandle -> Token -> BaseReQL -> IO (MVar Response)
 addMBox h tok term = do
   chan <- newChan
-  atomicModifyIORef' (rdbWait h) $ \mboxes -> 
-    (M.insert tok (chan, term) mboxes, ())
   mbox <- newEmptyMVar
-  _ <- mkWeakMVar mbox $ do
-    atomicModifyIORef' (rdbWait h) $ \mboxes -> 
+  weak <- mkWeakMVar mbox $ do
+    peek <- readIORef (rdbWait h)
+    atomicModifyIORef' (rdbWait h) $ \mboxes ->
       (M.delete tok mboxes, ())
+  atomicModifyIORef' (rdbWait h) $ \mboxes ->
+    (M.insert tok (chan, term, finalize weak) mboxes, ())
   _ <- forkIO $ fix $ \loop -> do
     response <- readChan chan
     putMVar mbox response
@@ -248,6 +250,7 @@ readResponses h' = do
   tid <- myThreadId
   let h = h' tid
   let handler e@SomeException{} = do
+        hClose $ rdbHandle h
         modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
         writeIORef (rdbWait h) M.empty
   flip catch handler $ forever $ readSingleResponse h
@@ -264,7 +267,7 @@ readSingleResponse h = do
     Left errMsg -> fail errMsg
     Right (response, rest)
       | B.null rest -> dispatch (Ql2.token response) response
-      | otherwise -> fail "readsingleResponse: invalid reply length"
+      | otherwise -> fail "readSingleResponse: invalid reply length"
 
   where
   dispatch Nothing _ = return ()
@@ -272,11 +275,10 @@ readSingleResponse h = do
     mboxes <- readIORef $ rdbWait h
     case M.lookup tok mboxes of
       Nothing -> return ()
-      Just (mbox, term) -> do
+      Just (mbox, term, close) -> do
         let convertedResponse = convertResponse h term tok response
         writeChan mbox convertedResponse
-        when (isLastResponse convertedResponse) $
-          atomicModifyIORef' (rdbWait h) $ \m -> (M.delete tok m, ())
+        when (isLastResponse convertedResponse) $ close
 
 isLastResponse :: Response -> Bool
 isLastResponse ErrorResponse{} = True
@@ -338,7 +340,7 @@ next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
 
 cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([O.Datum], Bool))
 cursorFetchBatch c = do
-  response <- readMVar (cursorMBox c)
+  response <- takeMVar (cursorMBox c)
   case response of
     ErrorResponse e -> return $ Left e
     SuccessResponse Success datums -> return $ Right (datums, True)

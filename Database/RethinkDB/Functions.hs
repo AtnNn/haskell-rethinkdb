@@ -20,15 +20,38 @@ import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 
--- | Arithmetic Operator
 infixl 6 +, -
 infixl 7 *, /
-(+), (-), (*), (/), mod
-  :: (Expr a, Expr b) => a -> b -> ReQL
+
+-- | Addition or concatenation
+--
+-- Use the Num instance, or a qualified operator.
+--
+-- > run h $ 2 + 5 :: IO (Maybe Int)
+-- > run h $ 2 R.+ 5 :: IO (Maybe Int)
+--
+-- > run h $ (str "foo") + (str "bar") :: IO (Just String)
+(+) :: (Expr a, Expr b) => a -> b -> ReQL
 (+) a b = op ADD (a, b) ()
+
+-- | Subtraction
+--
+-- > run h $ 2 - 5 :: IO (Maybe Int)
+(-) :: (Expr a, Expr b) => a -> b -> ReQL
 (-) a b = op SUB (a, b) ()
+
+-- | Multiplication
+--
+-- > run h $ 2 * 5 :: IO (Maybe Int)
+(*) :: (Expr a, Expr b) => a -> b -> ReQL
 (*) a b = op MUL (a, b) ()
+
+-- | Division
+(/) :: (Expr a, Expr b) => a -> b -> ReQL
 (/) a b = op DIV (a, b) ()
+
+-- | Mod
+mod :: (Expr a, Expr b) => a -> b -> ReQL
 mod a b = op MOD (a, b) ()
 
 -- | Boolean operator
@@ -255,6 +278,9 @@ table :: Text -> Table
 table n = O.Table Nothing n Nothing
 
 -- | Create a table on the server
+--
+-- > run' h $ tableCreate (table "foo") def
+-- > run' h $ tableCreate (Table (db "prod") "bar" (Just "name")) def{ tableDataCenter = Just "cloud", tableCacheSize = Just 10 }
 tableCreate :: Table -> TableCreateOptions -> ReQL
 tableCreate (O.Table mdb table_name pkey) opts =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
@@ -270,15 +296,17 @@ tableDrop (O.Table mdb table_name _) =
     op TABLE_DROP (fromMaybe ddb mdb, table_name) ()
 
 -- | List the tables in a database
+--
+-- > run h $ tableList (db "test") :: IO [[String]]
 tableList :: Database -> ReQL
-tableList (O.Database name) = op TABLE_LIST [name] ()
+tableList name = op TABLE_LIST [name] ()
 
 -- | Get a document by primary key
 get :: (Expr s, Expr k) => k -> s -> ReQL
 get k e = op GET (e, k) ()
 
 -- | Insert a document or a list of documents into a table
-insert :: (Expr table, Expr object) => object -> table -> ReQL
+insert :: (Expr object) => object -> Table -> ReQL
 insert a tb = canReturnVals $ op INSERT (tb, a) ()
 
 -- | Like insert, but update existing documents with the same primary key
@@ -401,10 +429,10 @@ info a = op INFO [a] ()
 json :: Expr string => string -> ReQL
 json s = op JSON [s] ()
 
--- | Flipped function composition
+-- | Flipped function application
 infixl 8 #
-(#) :: (Expr a, Expr b) =>  a -> (ReQL -> b) -> ReQL
-x # f = expr (f (expr x))
+(#) :: (Expr a, Expr b) =>  a -> (a -> b) -> ReQL
+x # f = expr (f x)
 
 infixr 9 .
 -- | Specialised function composition
