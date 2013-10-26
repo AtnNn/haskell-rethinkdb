@@ -5,6 +5,7 @@ module Database.RethinkDB.MapReduce where
 import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.Text as T
+import Data.Maybe
 
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum
@@ -13,16 +14,16 @@ import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 
 termToMapReduce ::
-  (ReQL -> ReQL) -> State QuerySettings (ReQL -> ReQL, ReQL -> ReQL -> ReQL, ReQL -> ReQL)
+  (ReQL -> ReQL) -> State QuerySettings (ReQL -> ReQL, ReQL -> ReQL -> ReQL, Maybe (ReQL -> ReQL))
 termToMapReduce f = do
   v <- newVarId
   body <- baseReQL $ f (op VAR [v] ())
   let MapReduce map_ reduce finally = toMapReduce v body
   return (map_, reduce, finally)
 
-toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, ReQL -> ReQL)
-toReduce (None t) = (\_ -> expr (), \_ _ -> expr (), const t)
-toReduce (Map m) = ((\x -> expr [x]) . m, unionReduce, id)
+toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, Maybe (ReQL -> ReQL))
+toReduce (None t) = (\_ -> expr (), \_ _ -> expr (), Just $ const t)
+toReduce (Map m) = ((\x -> expr [x]) . m, unionReduce, Nothing)
 toReduce (MapReduce m r f) = (m, r, f)
 
 unionReduce :: ReQL -> ReQL -> ReQL
@@ -60,9 +61,9 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
               case (type', args', optargs') of
                 (MAP, [Map m, None f], []) -> Map (toFun1 f . m)
                 (REDUCE, [Map m, None f], _) | Just mbase <- optargsToBase optargs ->
-                  MapReduce m (toFun2 f) (maybe id (toFun2 f) mbase)
+                  MapReduce m (toFun2 f) (fmap (toFun2 f) mbase)
                 (COUNT, [Map _], []) ->
-                  MapReduce (const (num 1)) (\a b -> op ADD (a, b) ()) id
+                  MapReduce (const (num 1)) (\a b -> op ADD (a, b) ()) Nothing
                 (tt, (Map m : _), _) | tt `elem` mappableTypes ->
                   (Map ((\x -> op tt (expr x : map expr (tail args)) (noRecurse : map baseAttrToAttr optargs)) . m))
                 _ -> rebuild
@@ -84,13 +85,13 @@ mappableTypes = [GET_FIELD, PLUCK, WITHOUT, MERGE, HAS_FIELDS]
 data MapReduce =
     None ReQL |
     Map (ReQL -> ReQL) |
-    MapReduce (ReQL -> ReQL) (ReQL -> ReQL -> ReQL) (ReQL -> ReQL)
+    MapReduce (ReQL -> ReQL) (ReQL -> ReQL -> ReQL) (Maybe (ReQL -> ReQL))
 
 rebuild0 :: TermType -> [MapReduce] -> [(T.Text, MapReduce)] -> MapReduce
 rebuild0 ttype args optargs = MapReduce maps reduce finals where
   (finally2, [mr]) = extract Nothing ttype args optargs
   (maps, reduce, finally1) = toReduce mr
-  finals = finally2 . finally1
+  finals = Just $ maybe finally2 (finally2 .) finally1
 
 rebuildx :: TermType -> [MapReduce] -> [(Key, MapReduce)] -> MapReduce
 rebuildx ttype args optargs = MapReduce maps reduces finallys where
@@ -99,7 +100,11 @@ rebuildx ttype args optargs = MapReduce maps reduces finallys where
   triplets = map toReduce mrs
   maps x = expr $ map (($ x) . fst3) triplets
   reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map snd3 triplets
-  finallys x = finally $ expr $ map (uncurry $ mkFinally x) . index $ map thrd3 triplets
+  finallys = let fs = map thrd3 triplets in
+    if all isNothing fs
+       then Just finally
+       else Just $ \x -> finally $ expr $ map (uncurry $ mkFinally x) . index $
+                         map (fromMaybe id) fs
   mkReduce a b i f = f (op NTH (a, i) ()) (op NTH (b, i) ())
   mkFinally x i f = f (op NTH (x, i) ())
 

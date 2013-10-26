@@ -1,5 +1,5 @@
 {-# LANGUAGE ExistentialQuantification, RecordWildCards, ScopedTypeVariables,
-             FlexibleInstances, OverloadedStrings, PatternGuards #-}
+             FlexibleInstances, OverloadedStrings, PatternGuards, GADTs #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
@@ -23,7 +23,9 @@ module Database.RethinkDB.ReQL (
   Object(..),
   Obj(..),
   returnVals,
+  nonAtomic,
   canReturnVals,
+  canNonAtomic,
   reqlToProtobuf
   ) where
 
@@ -76,11 +78,12 @@ data QuerySettings = QuerySettings {
   queryDefaultDatabase :: Database,
   queryVarIndex :: Int,
   queryUseOutdated :: Maybe Bool,
-  queryReturnVals :: Maybe Bool
+  queryReturnVals :: Maybe Bool,
+  queryAtomic :: Maybe Bool
   }
 
 instance Default QuerySettings where
-  def = QuerySettings 0 (Database "") 0 Nothing Nothing
+  def = QuerySettings 0 (Database "") 0 Nothing Nothing Nothing
 
 withQuerySettings :: (QuerySettings -> ReQL) -> ReQL
 withQuerySettings f = ReQL $ (baseReQL . f) =<< get
@@ -95,6 +98,16 @@ returnVals (ReQL t) = ReQL $ do
   put state'{ queryReturnVals = queryReturnVals state }
   return ret
 
+-- | Allow non-atomic replace
+nonAtomic :: ReQL -> ReQL
+nonAtomic (ReQL t) = ReQL $ do
+  state <- get
+  put state{ queryAtomic = Just False }
+  ret <- t
+  state' <- get
+  put state'{ queryAtomic = queryAtomic state }
+  return ret
+
 canReturnVals :: ReQL -> ReQL
 canReturnVals (ReQL t) = ReQL $ t >>= \ret -> do
   qs <- get
@@ -102,6 +115,14 @@ canReturnVals (ReQL t) = ReQL $ t >>= \ret -> do
     Nothing -> return ret
     Just rv -> return ret{
       termOptArgs = BaseAttribute "return_vals" (baseBool rv) : termOptArgs ret }
+
+canNonAtomic :: ReQL -> ReQL
+canNonAtomic (ReQL t) = ReQL $ t >>= \ret -> do
+  qs <- get
+  case queryAtomic qs of
+    Nothing -> return ret
+    Just atomic -> return ret{
+      termOptArgs = BaseAttribute "non_atomic" (baseBool $ not atomic) : termOptArgs ret }
 
 baseBool :: Bool -> BaseReQL
 baseBool b = BaseReQL DATUM (Just defaultValue{
@@ -317,16 +338,16 @@ instance Expr () where
 instance IsString ReQL where
   fromString s = datumTerm R_STR defaultValue { r_str = Just (uFromString $ s) }
 
-instance Expr (ReQL -> ReQL) where
+instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
     v <- newVarId
-    baseReQL $ op FUNC (datumNumberArray [v], f (op VAR [v] ())) ()
+    baseReQL $ op FUNC (datumNumberArray [v], expr $ f (op VAR [v] ())) ()
 
-instance Expr (ReQL -> ReQL -> ReQL) where
+instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
   expr f = ReQL $ do
     a <- newVarId
     b <- newVarId
-    baseReQL $ op FUNC (datumNumberArray [a, b], f (op VAR [a] ()) (op VAR [b] ())) ()
+    baseReQL $ op FUNC (datumNumberArray [a, b], expr $ f (op VAR [a] ()) (op VAR [b] ())) ()
 
 instance Expr Datum.Datum where
   expr d = ReQL $ return $ BaseReQL DATUM (Just d) [] []

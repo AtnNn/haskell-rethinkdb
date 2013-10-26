@@ -10,7 +10,6 @@ module Database.RethinkDB.Network (
   makeCursor,
   next,
   collect,
-  stopResponse,
   nextResponse,
   Response(..),
   SuccessCode(..),
@@ -221,7 +220,7 @@ addMBox h tok term = do
   chan <- newChan
   mbox <- newEmptyMVar
   weak <- mkWeakMVar mbox $ do
-    peek <- readIORef (rdbWait h)
+    closeToken h tok
     atomicModifyIORef' (rdbWait h) $ \mboxes ->
       (M.delete tok mboxes, ())
   atomicModifyIORef' (rdbWait h) $ \mboxes ->
@@ -275,10 +274,10 @@ readSingleResponse h = do
     mboxes <- readIORef $ rdbWait h
     case M.lookup tok mboxes of
       Nothing -> return ()
-      Just (mbox, term, close) -> do
+      Just (mbox, term, closetok) -> do
         let convertedResponse = convertResponse h term tok response
         writeChan mbox convertedResponse
-        when (isLastResponse convertedResponse) $ close
+        when (isLastResponse convertedResponse) $ closetok
 
 isLastResponse :: Response -> Bool
 isLastResponse ErrorResponse{} = True
@@ -311,11 +310,10 @@ convertDatum Datum { type' = Just R_STR, r_str = Just s } = toJSON (uToString s)
 convertDatum Datum { type' = Just R_NUM, r_num = Just n } = toJSON n
 convertDatum d = error ("Invalid Datum: " ++ show d)
 
-stopResponse :: Response -> IO ()
-stopResponse SuccessResponse { successCode = SuccessPartial h tok } = do
+closeToken :: RethinkDBHandle -> Token -> IO ()
+closeToken h tok = do
   let query = defaultValue { Query.type' = Just STOP, Query.token = Just tok}
   sendQLQuery h query
-stopResponse _ = return ()
 
 nextResponse :: Response -> IO ()
 nextResponse SuccessResponse { successCode = SuccessPartial h tok } = do

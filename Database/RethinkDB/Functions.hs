@@ -182,9 +182,12 @@ groupBy ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
 groupBy g mr s = ReQL $ do
-  (m, r, f) <- termToMapReduce (expr . mr)
-  baseReQL $
-    op GROUPED_MAP_REDUCE [expr s, expr $ expr P.. g, expr m, expr r] ()
+  (m, r, mf) <- termToMapReduce (expr . mr)
+  let gmr = op GROUPED_MAP_REDUCE [expr s, expr $ expr P.. g, expr m, expr r] ()
+  baseReQL $ case mf of
+    Nothing -> gmr
+    Just f -> op MAP [gmr, expr $ \x -> expr $
+                      obj ["group" := (x!"group"), "reduction" := f (x!"reduction")]] ()
 
 -- | The sum of a sequence
 sum :: (Expr s) => s -> ReQL
@@ -315,11 +318,11 @@ upsert a tb = canReturnVals $ op INSERT (tb, a) ["upsert" := P.True]
 
 -- | Add to or modify the contents of a document
 update :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-update f s = canReturnVals $ op UPDATE (s, f) ()
+update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, f) ()
 
 -- | Replace a document with another
 replace :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-replace f s = canReturnVals $ op REPLACE (s, f) ()
+replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, f) ()
 
 -- | Delete the documents
 delete :: (Expr selection) => selection -> ReQL

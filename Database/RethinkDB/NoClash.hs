@@ -6,7 +6,8 @@ module Database.RethinkDB.NoClash (
   -- module Prelude, module Data.Time -- Uncomment to let GHC detect clashes
   ) where
 
-import Data.Time
+-- Uncomment imports to let GHC detect clashes
+--import Data.Time
 
 import Database.RethinkDB hiding (
   UTCTime, ZonedTime,

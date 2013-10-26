@@ -42,7 +42,7 @@ module Database.RethinkDB (
   WriteResponse(..),
   insert, upsert,
   update, replace, delete,
-  returnVals,
+  returnVals, nonAtomic,
 
   -- * Selecting data
 
@@ -58,7 +58,7 @@ module Database.RethinkDB (
   (!!), slice,
   orderBy,  Order(..),
   indexesOf, isEmpty, (++), sample,
-  
+
   -- * Aggregation
 
   reduce, reduce1, distinct, groupBy, member,
