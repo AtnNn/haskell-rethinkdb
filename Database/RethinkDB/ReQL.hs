@@ -26,7 +26,9 @@ module Database.RethinkDB.ReQL (
   nonAtomic,
   canReturnVals,
   canNonAtomic,
-  reqlToProtobuf
+  reqlToProtobuf,
+  Bound(..),
+  closedOrOpen
   ) where
 
 import qualified Data.Vector as V
@@ -452,3 +454,12 @@ instance Expr ZonedTime where
 
 instance Expr BaseReQL where
   expr = ReQL . return
+
+-- | An upper or lower bound for between and during
+data Bound a =
+  Open { getBound :: a } -- ^ An inclusive bound
+  | Closed { getBound :: a } -- ^ An exclusive bound
+
+closedOrOpen :: Bound a -> T.Text
+closedOrOpen Open{} = "open"
+closedOrOpen Closed{} = "closed"
