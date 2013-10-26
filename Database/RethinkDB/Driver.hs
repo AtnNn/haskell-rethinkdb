@@ -9,7 +9,10 @@ module Database.RethinkDB.Driver (
   WriteResponse(..)
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?))
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), encode)
+import Data.Aeson.Encode (fromValue)
+import Data.Text.Lazy (unpack)
+import Data.Text.Lazy.Builder (toLazyText)
 import qualified Data.Aeson (Result(Error, Success))
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
@@ -20,7 +23,7 @@ import Control.Applicative ((<$>), (<*>))
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
 import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
 import Database.RethinkDB.Protobuf.Ql2.Term as Term (Term(..))
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType
+import Database.RethinkDB.Protobuf.Ql2.Term.TermType (TermType(DATUM))
 import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
 import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
 import Text.ProtocolBuffers.Basic (uFromString, defaultValue)
@@ -59,8 +62,8 @@ runOpts h opts t = do
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
--- | Run a given query and return a Value
-run' :: Expr query => RethinkDBHandle -> query -> IO [Value]
+-- | Run a given query and return a JSON
+run' :: Expr query => RethinkDBHandle -> query -> IO [JSON]
 run' h t = do
   c <- run h t
   collect c
@@ -120,3 +123,11 @@ instance FromJSON WriteResponse where
     <*> o .:? "old_val"
     <*> o .:? "new_val"
   parseJSON _ = mzero
+
+data JSON = JSON Value
+
+instance Show JSON where
+  show (JSON a) = unpack . toLazyText . fromValue $ a
+
+instance FromJSON JSON where
+  parseJSON = fmap JSON . parseJSON

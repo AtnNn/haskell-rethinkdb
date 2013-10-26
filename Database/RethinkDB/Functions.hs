@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances, OverloadedStrings, GADTs #-}
 
 -- TODO: operator fixity
 
@@ -185,7 +185,7 @@ concatMap f e = op CONCATMAP (e, expr P.. f) ()
 -- > run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hi"])
 -- > run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hello"])
 -- > run' h $ table "posts" # insert (obj ["author" := bob, "message" := str "lorem ipsum"])
--- > run' h $ innerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts") # mergeRightLeft # without ["id", "author"]
+-- > run' h $ innerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # without ["id", "author"]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f) ()
 
@@ -212,45 +212,68 @@ drop a b = op SKIP (b, a) ()
 -- | Limit the size of a sequence.
 --
 -- Called /limit/ in the official drivers
+--
+-- > run h $ R.take 2 [1, 2, 3, 4] :: IO (Maybe [Int])
 take :: (Expr n, Expr seq) => n -> seq -> ReQL
 take n s = op LIMIT (s, n) ()
 
 -- | Cut out part of a sequence
+--
+-- > run h $ slice 2 4 [1, 2, 3, 4, 5] :: IO (Maybe [Int])
 slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
 slice n m s = op SLICE (s, n, m) ()
 
--- | Get the nth value of a sequence or array
 infixl 9 !!
+
+-- | Get the nth value of a sequence or array
+--
+-- > run h $ [1, 2, 3] !! 0 :: IO (Maybe Int)
 (!!) :: (Expr a) => a -> ReQL -> ReQL
 s !! n = op NTH (s, n) ()
 
 -- | Reduce a sequence to a single value
+--
+-- > run h $ reduce (+) 0 [1, 2, 3] :: IO (Maybe Int)
 reduce :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
 reduce f b s = op REDUCE (s, fmap expr P.. f) ["base" := b]
 
 -- | Reduce a non-empty sequence to a single value
+--
+-- > run h $ reduce1 (+) [1, 2, 3] :: IO (Maybe Int)
 reduce1 :: (Expr a, Expr s) => (ReQL -> ReQL -> a) -> s -> ReQL
 reduce1 f s = op REDUCE (s, fmap expr P.. f) ()
 
 -- | Filter out identical elements of the sequence
-distinct :: (Expr s) => s -> ReQL
-distinct s = op DISTINCT [s] ()
+--
+-- Called /distint/ in the official drivers
+--
+-- > run h $ nub (table "foo") :: IO (Just [Value])
+nub :: (Expr s) => s -> ReQL
+nub s = op DISTINCT [s] ()
 
 -- | Like map but for write queries
+--
+-- > run' h $ table "users" # replace (without ["post_count"])
+-- > run' h $ forEach (table "posts") $ \post -> table "users" # get (post!"author") # update (\user -> obj ["post_count" := (handle 0 (user!"post_count") + 1)])
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
 forEach s f = op FOREACH (s, expr P.. f) ()
 
 -- | Merge the "left" and "right" attributes of the objects in a sequence.
+--
 -- Called /zip/ in the official drivers
-mergeRightLeft :: (Expr a) => a -> ReQL
-mergeRightLeft a = op ZIP [a] ()
+--
+-- > run' h $ table "posts" # eqJoin "author" (table "users") "id" # mergeLeftRight
+mergeLeftRight :: (Expr a) => a -> ReQL
+mergeLeftRight a = op ZIP [a] ()
 
--- | Oredering specification for orderBy
+-- | Ordering specification for orderBy
 data Order =
-  Asc { orderAttr :: Key } |
-  Desc { orderAttr :: Key }
+  Asc { orderAttr :: Key } -- ^ Ascending order
+  | Desc { orderAttr :: Key } -- ^ Descending order
 
 -- | Order a sequence by the given keys
+--
+-- run' h $ table "users" # orderBy [Desc "post_count", Asc "name"]
 orderBy :: (Expr s) => [Order] -> s -> ReQL
 orderBy o s = ReQL $ do
   s' <- baseReQL (expr s)
@@ -261,6 +284,9 @@ orderBy o s = ReQL $ do
     buildOrder (Desc k) = op DESC [k] ()
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
+--
+-- > run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
+-- > run' h $ table "users" # groupBy (!"level") (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 groupBy ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
@@ -273,10 +299,14 @@ groupBy g mr s = ReQL $ do
                       obj ["group" := (x!"group"), "reduction" := f (x!"reduction")]] ()
 
 -- | The sum of a sequence
+--
+-- > run h $ sum [1, 2, 3] :: IO (Maybe Int)
 sum :: (Expr s) => s -> ReQL
 sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (num 0)
 
 -- | The average of a sequence
+--
+-- > run h $ avg [1, 2, 3, 4] :: IO (Maybe Double)
 avg :: (Expr s) => s -> ReQL
 avg = (\x -> (x!!0) / (x!!1)) .
   reduce (\a b -> [(a!!0) + (b!!0), (a!!1) + (b!!1)]) [num 0, num 0] .
@@ -284,8 +314,15 @@ avg = (\x -> (x!!0) / (x!!1)) .
 
 -- * Accessors
 
--- | Get a single field form an object
 infixl 9 !
+
+-- | Get a single field from an object
+--
+-- > run h $ (obj ["foo" := True]) ! "foo" :: IO (Maybe Bool)
+--
+-- Or a single field from each object in a sequence
+--
+-- > run h $ [obj ["foo" := True], obj ["foo" := False]] ! "foo" :: IO (Maybe [Bool])
 (!) :: (Expr s) => s -> ReQL -> ReQL
 s ! k = op GET_FIELD (s, k) ()
 
@@ -313,10 +350,10 @@ class Javascript r where
 instance Javascript ReQL where
   js s = op JAVASCRIPT [str s] ()
 
-instance Javascript (ReQL -> ReQL) where
+instance a ~ ReQL => Javascript (a -> ReQL) where
   js s x = op FUNCALL (op JAVASCRIPT [str s] (), x) ()
 
-instance Javascript (ReQL -> ReQL -> ReQL) where
+instance (a ~ ReQL, b ~ ReQL) => Javascript (a -> b -> ReQL) where
   js s x y = op FUNCALL (op JAVASCRIPT [str s] (), x, y) ()
 
 -- | Called /branch/ in the official drivers
@@ -400,12 +437,12 @@ upsert :: (Expr table, Expr object) => object -> table -> ReQL
 upsert a tb = canReturnVals $ op INSERT (tb, a) ["upsert" := P.True]
 
 -- | Add to or modify the contents of a document
-update :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, f) ()
+update :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
+update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, expr . f) ()
 
 -- | Replace a document with another
-replace :: (Expr selection) => (ReQL -> ReQL) -> selection -> ReQL
-replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, f) ()
+replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
+replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, expr . f) ()
 
 -- | Delete the documents
 delete :: (Expr selection) => selection -> ReQL

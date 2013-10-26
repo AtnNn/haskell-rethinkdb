@@ -18,8 +18,7 @@ termToMapReduce ::
 termToMapReduce f = do
   v <- newVarId
   body <- baseReQL $ f (op VAR [v] ())
-  let MapReduce map_ reduce finally = toMapReduce v body
-  return (map_, reduce, finally)
+  return . toReduce $ toMapReduce v body
 
 toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, Maybe (ReQL -> ReQL))
 toReduce (None t) = (\_ -> expr (), \_ _ -> expr (), Just $ const t)

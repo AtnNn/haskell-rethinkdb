@@ -51,7 +51,7 @@ module Database.RethinkDB (
 
   -- * Joins
 
-  innerJoin, outerJoin, eqJoin, mergeRightLeft,
+  innerJoin, outerJoin, eqJoin, mergeLeftRight,
 
   -- * Transformations
 
@@ -62,7 +62,7 @@ module Database.RethinkDB (
 
   -- * Aggregation
 
-  reduce, reduce1, distinct, groupBy, member,
+  reduce, reduce1, nub, groupBy, member,
 
   -- * Aggregators
 
