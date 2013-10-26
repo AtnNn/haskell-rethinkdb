@@ -46,6 +46,7 @@ module Database.RethinkDB (
 
   -- * Selecting data
 
+  Bound(..),
   get, filter, between, getAll,
 
   -- * Joins

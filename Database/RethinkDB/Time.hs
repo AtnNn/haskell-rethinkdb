@@ -2,7 +2,6 @@
 
 module Database.RethinkDB.Time where
 
-import Data.Text (Text)
 import qualified  Data.Time as Time
 import qualified  Data.Time.Clock.POSIX as Time
 import Data.Aeson as JSON
@@ -34,18 +33,10 @@ iso8601 t = op ISO8601 [t] ()
 inTimezone :: Expr time => ReQL -> time -> ReQL
 inTimezone tz t = op IN_TIMEZONE (t, tz) ()
 
-data Bound a =
-  Open { boundValue ::  a } |
-  Closed { boundValue :: a }
-
-boundString :: Bound a -> Text
-boundString Open{} = "open"
-boundString Closed{} = "closed"
-
 -- | Test if a time is between two other times
 during :: (Expr left, Expr right, Expr time) => Bound left -> Bound right -> time -> ReQL
-during l r t = op DURING (t, boundValue l, boundValue r) [
-  "left_bound" := boundString l, "right_bound" := boundString r]
+during l r t = op DURING (t, getBound l, getBound r) [
+  "left_bound" := closedOrOpen l, "right_bound" := closedOrOpen r]
 
 -- | Extract part of a time value
 timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds ::

@@ -47,87 +47,170 @@ infixl 7 *, /
 (*) a b = op MUL (a, b) ()
 
 -- | Division
+--
+-- If you ask for an Int instead of a Double, Aeson will round the result
+--
+-- > run h $ 2 / 5 :: IO (Maybe Double)
 (/) :: (Expr a, Expr b) => a -> b -> ReQL
 (/) a b = op DIV (a, b) ()
 
 -- | Mod
+--
+-- > run h $ 5 `mod` 2 :: IO (Maybe Int)
 mod :: (Expr a, Expr b) => a -> b -> ReQL
 mod a b = op MOD (a, b) ()
 
--- | Boolean operator
 infixr 2 ||
 infixr 3 &&
-(||), (&&) :: (Expr a, Expr b) => a -> b -> ReQL
+
+-- | Boolean or
+--
+-- > run h $ True R.|| False :: IO (Maybe Bool)
+(||) :: (Expr a, Expr b) => a -> b -> ReQL
 a || b = op ANY (a, b) ()
+
+-- | Boolean and
+--
+-- > run h $ True R.&& False :: IO (Maybe Bool)
+(&&) :: (Expr a, Expr b) => a -> b -> ReQL
 a && b = op ALL (a, b) ()
 
--- | Comparison operator
 infix 4 ==, /=
-(==), (/=) :: (Expr a, Expr b) => a -> b -> ReQL
+
+-- | Test for equality
+--
+-- > run h $ obj ["a" := 1] R.== obj ["a" := 1] :: IO (Maybe Bool)
+(==) :: (Expr a, Expr b) => a -> b -> ReQL
 a == b = op EQ (a, b) ()
+
+-- | Test for inequality
+--
+-- > run h $ 1 R./= False :: IO (Maybe Bool)
+(/=) :: (Expr a, Expr b) => a -> b -> ReQL
 a /= b = op NE (a, b) ()
 
 infix 4 >, <, <=, >=
--- | Comparison operator
-(>), (>=), (<), (<=)
-  :: (Expr a, Expr b) => a -> b -> ReQL
+
+-- | Greater than
+--
+-- > run h $ 3 R.> 2 :: IO (Maybe Bool)
+(>) :: (Expr a, Expr b) => a -> b -> ReQL
 a > b = op GT (a, b) ()
+
+-- | Lesser than
+--
+-- > run h $ (str "a") R.< (str "b") :: IO (Maybe Bool)
+(<) :: (Expr a, Expr b) => a -> b -> ReQL
 a < b = op LT (a, b) ()
-a >=b = op GE (a, b) ()
-a <=b = op LE (a, b) ()
+
+-- | Greater than or equal to
+--
+-- > run h $ [1] R.>= () :: IO (Maybe Bool)
+(>=) :: (Expr a, Expr b) => a -> b -> ReQL
+a >= b = op GE (a, b) ()
+
+-- | Lesser than or equal to
+--
+-- > run h $ 2 R.<= 2 :: IO (Maybe Bool)
+(<=) :: (Expr a, Expr b) => a -> b -> ReQL
+a <= b = op LE (a, b) ()
 
 -- | Negation
+--
+-- > run h $ R.not False :: IO (Maybe Bool)
+-- > run h $ R.not () :: IO (Maybe Bool)
 not :: (Expr a) => a -> ReQL
 not a = op NOT [a] ()
 
 -- * Lists and Streams
 
 -- | The size of a sequence or an array.
+--
 -- Called /count/ in the official drivers
+--
+-- > run h $ R.length (table "foo") :: IO (Maybe Int)
 length :: (Expr a) => a -> ReQL
 length e = op COUNT [e] ()
 
 infixr 5 ++
+
 -- | Join two sequences.
+--
 -- Called /union/ in the official drivers
+--
+-- Use (R.+) for concatenating strings
+--
+-- > run h $ [1,2,3] R.++ ["a", "b", "c" :: Text] :: IO (Maybe [Value])
 (++) :: (Expr a, Expr b) => a -> b -> ReQL
 a ++ b = op UNION (a, b) ()
 
 -- | Map a function over a sequence
+--
+-- > run h $ R.map (!"a") [obj ["a" := 1], obj ["a" := 2]] :: IO (Maybe [String])
 map :: (Expr a, Expr b) => (ReQL -> b) -> a -> ReQL
 map f a = op MAP (a, expr P.. f) ()
 
 -- | Filter a sequence given a predicate
+--
+-- > run h $ R.filter (R.< 4) [3, 1, 4, 1, 5, 9, 2, 6] :: IO (Maybe [Int])
 filter :: (Expr predicate, Expr seq) => predicate -> seq -> ReQL
 filter f a = op FILTER (a, f) ()
 
 -- | Query all the documents whose value for the given index is in a given range
-between :: (Expr left, Expr right, Expr seq) => Key -> left -> right -> seq -> ReQL
-between i a b e = op BETWEEN [e] ["left_bound" := a, "right_bound" := b, "index" := i]
+--
+-- > run h $ table "foo" # between "id" (Closed $ str "m") (Open $ str "n") :: IO [Value])
+between :: (Expr left, Expr right, Expr seq) => Key -> Bound left -> Bound right -> seq -> ReQL
+between i a b e =
+  op BETWEEN [expr e, expr $ getBound a, expr $ getBound b]
+         ["left_bound" := closedOrOpen a, "right_bound" := closedOrOpen b, "index" := i]
 
 -- | Append a datum to a sequence
+--
+-- > run h $ append 3 [1, 2] :: IO (Maybe [Int])
 append :: (Expr a, Expr b) => a -> b -> ReQL
 append a b = op APPEND (b, a) ()
 
 -- | Map a function of a sequence and concat the results
+--
+-- > run h $ concatMap id [[1, 2], [3], [4, 5]] :: IO (Maybe [Int])
 concatMap :: (Expr a, Expr b) => (ReQL -> b) -> a -> ReQL
 concatMap f e = op CONCATMAP (e, expr P.. f) ()
 
--- | SQL-like join of two sequences. Returns each pair of rows that satisfy the 2-ary predicate.
-innerJoin, outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
+-- | SQL-like inner join of two sequences
+--
+-- > run' h $ tableCreate (table "posts") def
+-- > run' h $ tableCreate (table "users") def
+-- > Just wr@WriteResponse{} <- run h $ table "users" # insert (map (\x -> obj ["name":=x]) ["bill", "bob", "nancy" :: Text])
+-- > let Just [bill, bob, nancy] = writeResponseGeneratedKeys wr
+-- > run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hi"])
+-- > run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hello"])
+-- > run' h $ table "posts" # insert (obj ["author" := bob, "message" := str "lorem ipsum"])
+-- > run' h $ innerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts") # mergeRightLeft # without ["id", "author"]
+innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f) ()
+
+-- | SQL-like outer join of two sequences
+--
+-- > run' h $ outerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts")
+outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f) ()
 
--- | An efficient iner_join that uses a key for the first table and an index for the left table.
-eqJoin :: (Expr a, Expr b) => Key -> a -> Key -> b -> ReQL
-eqJoin a i k b = op EQ_JOIN (b, k, a) ["index" := i]
+-- | An efficient inner_join that uses a key for the left table and an index for the right table.
+--
+-- > run' h $ table "posts" # eqJoin "author" (table "users") "id"
+eqJoin :: (Expr right, Expr left) => Key -> right -> Key -> left -> ReQL
+eqJoin key right index left = op EQ_JOIN (left, key, right) ["index" := index]
 
 -- | Drop elements from the head of a sequence.
+--
 -- Called /skip/ in the official drivers
+--
+-- > run h $ R.drop 2 [1, 2, 3, 4] :: IO (Maybe [Int])
 drop :: (Expr a, Expr b) => a -> b -> ReQL
 drop a b = op SKIP (b, a) ()
 
 -- | Limit the size of a sequence.
+--
 -- Called /limit/ in the official drivers
 take :: (Expr n, Expr seq) => n -> seq -> ReQL
 take n s = op LIMIT (s, n) ()
