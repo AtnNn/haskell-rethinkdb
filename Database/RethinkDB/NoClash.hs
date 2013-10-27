@@ -13,4 +13,5 @@ import Database.RethinkDB hiding (
   UTCTime, ZonedTime,
   (*), (+), (-), (/),
   sum, (++), (.), map, mod, (!!), concatMap, drop, length, take, (&&),
-  not, (||), (/=), (<), (<=), (>), (>=), error, (==), filter)
+  not, (||), (/=), (<), (<=), (>), (>=), error, (==), filter,
+  elem)

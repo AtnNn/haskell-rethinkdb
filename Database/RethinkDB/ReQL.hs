@@ -212,6 +212,8 @@ instance Arr Array where
 -- | A list of key/value pairs
 data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
 
+infix 0 :=
+
 -- | A key/value pair used for building objects
 data Attribute = forall e . (Expr e) => T.Text := e
 
@@ -463,3 +465,15 @@ data Bound a =
 closedOrOpen :: Bound a -> T.Text
 closedOrOpen Open{} = "open"
 closedOrOpen Closed{} = "closed"
+
+instance (Expr a, Expr b) => Expr (a, b) where
+  expr (a, b) = expr [expr a, expr b]
+
+instance (Expr a, Expr b, Expr c) => Expr (a, b, c) where
+  expr (a, b, c) = expr [expr a, expr b, expr c]
+
+instance (Expr a, Expr b, Expr c, Expr d) => Expr (a, b, c, d) where
+  expr (a, b, c, d) = expr [expr a, expr b, expr c, expr d]
+
+instance (Expr a, Expr b, Expr c, Expr d, Expr e) => Expr (a, b, c, d, e) where
+  expr (a, b, c, d, e) = expr [expr a, expr b, expr c, expr d, expr e]

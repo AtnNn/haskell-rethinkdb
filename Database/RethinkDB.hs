@@ -25,6 +25,7 @@ module Database.RethinkDB (
   SuccessCode(..),
   ErrorCode(..),
   ReQL,
+  JSON(..),
 
   -- * Manipulating databases
 
@@ -33,7 +34,7 @@ module Database.RethinkDB (
 
   -- * Manipulating Tables
 
-  Table(..), TableCreateOptions(..),
+  Table(..), TableCreateOptions(..), IndexCreateOptions(..),
   table, tableCreate, tableDrop, tableList,
   indexCreate, indexDrop, indexList,
 
@@ -62,7 +63,7 @@ module Database.RethinkDB (
 
   -- * Aggregation
 
-  reduce, reduce1, nub, groupBy, member,
+  reduce, reduce1, nub, groupBy, elem,
 
   -- * Aggregators
 
@@ -95,7 +96,7 @@ module Database.RethinkDB (
   
   -- * Control structures
 
-  apply, Javascript(js), if', forEach, error,
+  apply, js, if', forEach, error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
   typeOf, info, json,

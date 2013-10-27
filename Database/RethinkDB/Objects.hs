@@ -1,6 +1,7 @@
 module Database.RethinkDB.Objects (
   Database(..),
   TableCreateOptions(..),
+  IndexCreateOptions(..),
   Table(..),
   Datum,
   Key
@@ -29,6 +30,14 @@ data TableCreateOptions = TableCreateOptions {
 
 instance Default TableCreateOptions where
   def = TableCreateOptions Nothing Nothing
+
+-- | Options used to create an index
+data IndexCreateOptions = IndexCreateOptions {
+  indexMulti :: Maybe Bool
+  }
+
+instance Default IndexCreateOptions where
+  def = IndexCreateOptions Nothing
 
 -- | A table description
 data Table = Table {

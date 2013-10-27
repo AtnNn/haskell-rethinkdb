@@ -6,7 +6,8 @@ module Database.RethinkDB.Driver (
   Result(..),
   runOpts,
   RunOptions(..),
-  WriteResponse(..)
+  WriteResponse(..),
+  JSON(..)
   ) where
 
 import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), encode)
