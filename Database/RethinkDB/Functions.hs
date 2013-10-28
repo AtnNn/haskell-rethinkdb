@@ -577,7 +577,7 @@ asNumber = coerceTo "NUMBER"
 
 -- | Convert a value to an object
 --
--- > >>> run' h $ asObject $ [(str "a",1),(str "b",2)]
+-- > >>> run' h $ asObject $ [(str "a",1),("b",2)]
 -- > [{"a":1.0,"b":2.0}]
 asObject :: Expr x => x -> ReQL
 asObject = coerceTo "OBJECT"
@@ -587,95 +587,167 @@ asBool :: Expr x => x -> ReQL
 asBool = coerceTo "BOOL"
 
 -- | Like hasFields followed by pluck
-withFields :: (Expr paths, Expr seq) => [paths] -> seq -> ReQL
+--
+-- > >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # withFields ["a"]
+-- > [[{"a":1.0},{"a":2.0}]]
+withFields :: Expr seq => [ReQL] -> seq -> ReQL
 withFields p s = op WITH_FIELDS (s, p) ()
 
 -- | The position in the sequence of the elements that match the predicate
+--
+-- > >>> run h $ indexesOf (=~ "ba.") [str "foo", "bar", "baz"] :: IO (Maybe [Int])
+-- > Just [1,2]
 indexesOf :: (Expr fun, Expr seq) => fun -> seq -> ReQL
 indexesOf f s = op INDEXES_OF (s, f) ()
 
 -- | Test if a sequence is empty
+--
+-- > >>> run h $ isEmpty [1] :: IO (Maybe Bool)
+-- > Just False
 isEmpty :: Expr seq => seq -> ReQL
 isEmpty s = op IS_EMPTY [s] ()
 
 -- | Select a given number of elements from a sequence with uniform random distribution
+--
+-- > >>> run h $ sample 3 [0,1,2,3,4,5,6,7,8,9] :: IO (Maybe [Int])
+-- > Just [4,3,8]
 sample :: (Expr n, Expr seq) => n -> seq -> ReQL
 sample n s = op SAMPLE (s, n) ()
 
 -- | Prepend an element to an array
+--
+-- > >>> run h $ prepend 1 [2,3] :: IO (Maybe [Int])
+-- > Just [1,2,3]
 prepend :: (Expr datum, Expr array) => datum -> array -> ReQL
 prepend d a = op PREPEND (a, d) ()
 
--- | Called /difference/ in the official drivers
 infixl 9 \\ --
+
+-- | Called /difference/ in the official drivers
+--
+-- > >>> run h $ [1,2,3,4,5] \\ [2,5] :: IO (Maybe [Int])
+-- > Just [1,3,4]
 (\\) :: (Expr a, Expr b) => a -> b -> ReQL
 a \\ b = op DIFFERENCE (a, b) ()
 
 -- | Insert a datum into an array if it is not yet present
+--
+-- > >>> run h $ setInsert 3 [1,2,4,4,5] :: IO (Maybe [Int])
+-- > Just [1,2,4,5,3]
 setInsert :: (Expr datum, Expr array) => datum -> array -> ReQL
 setInsert d a = op SET_INSERT (a, d) ()
 
 -- | The union of two sets
+--
+-- > >>> run h $ [1,2] `setUnion` [2,3]  :: IO (Maybe [Int])
+-- > Just [2,3,1]
 setUnion :: (Expr a, Expr b) => a -> b -> ReQL
 setUnion a b = op SET_UNION (b, a) ()
 
 -- | The intersection of two sets
+--
+-- > >>> run h $ [1,2] `setIntersection` [2,3]  :: IO (Maybe [Int])
+-- > Just [2]
 setIntersection :: (Expr a, Expr b) => a -> b -> ReQL
 setIntersection a b = op SET_INTERSECTION (b, a) ()
 
 -- | The difference of two sets
+--
+-- > >>> run h $ [2,3] # setDifference [1,2]  :: IO (Maybe [Int])
+-- > Just [3]
 setDifference :: (Expr set, Expr remove) => remove -> set -> ReQL
 setDifference r s = op SET_DIFFERENCE (s, r) ()
 
 -- | Test if an object has the given fields
-hasFields :: (Expr obj, Expr paths) => paths -> obj -> ReQL
-hasFields p o = op HAS_FIELDS (o, p) ()
+--
+-- > >>> run h $ hasFields ["a"] $ obj ["a" := 1] :: IO (Maybe Bool)
+-- > Just True
+hasFields :: (Expr obj) => ReQL -> obj -> ReQL
+hasFields p o = op HAS_FIELDS (o, expr p) ()
 
 -- | Insert a datum at the given position in an array
+--
+-- > >>> run h $ insertAt 1 4 [1,2,3] :: IO (Maybe [Int])
+-- > Just [1,4,2,3]
 insertAt :: (Expr n, Expr datum, Expr array) => n -> datum -> array -> ReQL
 insertAt n d a = op INSERT_AT (a, n, d) ()
 
 -- | Splice an array at a given position inside another array
+--
+-- > >>> run h $ spliceAt 2 [4,5] [1,2,3] :: IO (Maybe [Int])
+-- > Just [1,2,4,5,3]
 spliceAt :: (Expr n, Expr replace, Expr array) => n -> replace -> array -> ReQL
 spliceAt n s a = op SPLICE_AT (a, n, s) ()
 
 -- | Delete an element from an array
+--
+-- > >>> run h $ deleteAt 1 [1,2,3] :: IO (Maybe [Int])
+-- > Just [1,3]
 deleteAt :: (Expr n, Expr array) => n -> array -> ReQL
 deleteAt n a = op DELETE_AT (a, n) ()
 
 -- | Change an element in an array
+--
+-- > >>> run h $ changeAt 1 4 [1,2,3] :: IO (Maybe [Int])
+-- > Just [1,4,3]
 changeAt :: (Expr n, Expr datum, Expr array) => n -> datum -> array -> ReQL
 changeAt n d a = op CHANGE_AT (a, n, d) ()
 
 -- | The list of keys of the given object
+--
+-- > >>> run h $ keys (obj ["a" := 1, "b" := 2]) :: IO (Maybe [String])
+-- > Just ["a","b"]
 keys :: Expr obj => obj -> ReQL
 keys o = op KEYS [o] ()
 
 -- | Match a string to a regular expression.
+--
 -- Called /match/ in the official drivers
+--
+-- > >>> run' h $ str "foobar" =~ "f(.)+[bc](.+)"
+-- > [{"groups":[{"start":2.0,"end":3.0,"str":"o"},{"start":4.0,"end":6.0,"str":"ar"}],"start":0.0,"end":6.0,"str":"foobar"}]
 (=~) :: (Expr string) => string -> ReQL -> ReQL
 s =~ r = op MATCH (s, r) ()
 
 -- | Apply a function to a list of arguments.
+--
 -- Called /do/ in the official drivers
+--
+-- > >>> run h $ (\x -> x R.* 2) `apply` [4] :: IO (Maybe Int)
+-- > Just 8
 apply :: (Expr fun, Expr arg) => fun -> [arg] -> ReQL
 f `apply` as = op FUNCALL (expr f : P.map expr as) ()
 
 -- | Catch some expections inside the query.
+--
 -- Called /default/ in the official drivers
+--
+-- > >>> run h $ handle 0 $ obj ["a" := 1] ! "b" :: IO (Maybe Int)
+-- > Just 0
+-- > >>> run h $ handle (expr . id) $ obj ["a" := 1] ! "b" :: IO (Maybe String)
+-- > Just "No attribute `b` in object:\n{\n\t\"a\":\t1\n}"
 handle :: (Expr handler, Expr reql) => handler -> reql -> ReQL
 handle h r = op DEFAULT (r, h) ()
 
 -- | A string representing the type of an expression
+--
+-- > >>> run h $ typeOf 1 :: IO (Maybe String)
+-- > Just "NUMBER"
 typeOf :: Expr a => a -> ReQL
 typeOf a = op TYPEOF [a] ()
 
 -- | Get information on a given expression. Useful for tables and databases.
+--
+-- > >>> run' h $ info $ table "foo"
+-- > [{"primary_key":"id","name":"foo","indexes":[],"type":"TABLE","db":{"name":"test","type":"DB"}}]
 info :: Expr a => a -> ReQL
 info a = op INFO [a] ()
 
 -- | Parse a json string into an object
-json :: Expr string => string -> ReQL
+--
+-- > >>> run' h $ json "{a:1}"
+-- > [{"a":1.0}]
+json :: ReQL -> ReQL
 json s = op JSON [s] ()
 
 -- | Flipped function application

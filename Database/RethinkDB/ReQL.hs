@@ -325,6 +325,8 @@ instance Num ReQL where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
   a + b = op ADD (a, b) ()
   a * b = op MUL (a, b) ()
+  a - b = op SUB (a, b) ()
+  negate a = op SUB (0, a) ()
   abs n = op BRANCH (op TermType.LT (n, 0 :: Double) (), negate n, n) ()
   signum n = op BRANCH (op TermType.LT (n, 0 :: Double) (),
                         -1 :: Double,
