@@ -64,10 +64,12 @@ run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
 -- | Run a given query and return a JSON
-run' :: Expr query => RethinkDBHandle -> query -> IO [JSON]
+run' :: Expr query => RethinkDBHandle -> query -> IO [Value]
 run' h t = do
   c <- run h t
-  collect c
+  liftM (map unwrapValue) (collect c)
+  where
+    unwrapValue (JSON val) = val
 
 -- | Convert the raw query response into useful values
 class Result r where
