@@ -142,6 +142,9 @@ instance Show BaseReQL where
   show (BaseReQL DATUM (Just dat) _ _) = showD dat
   show (BaseReQL MAKE_ARRAY _ x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
   show (BaseReQL MAKE_OBJ _ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
+  show (BaseReQL MAKE_OBJ _ args []) = "{" ++ (concat $ intersperse ", " $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
+     where pairs (a:b:xs) = (a,b) : pairs xs
+           pairs _ = []
   show (BaseReQL VAR _ [BaseReQL DATUM (Just d) [] []] []) | Just x <- toDouble d =
     "x" ++ show (round x :: Int)
   show (BaseReQL FUNC _ [BaseReQL DATUM (Just d) [] [], body] []) | Just vars <- toDoubles d =
@@ -213,6 +216,9 @@ instance Arr Array where
 -- | A list of key/value pairs
 data Object = Object { objectAttributes :: [Attribute] }
 
+instance Show Object where
+  show = show . expr
+
 infix 0 :=
 
 -- | A key/value pair used for building objects
@@ -254,7 +260,7 @@ op' t a b = ReQL $ do
 
 -- | Build a term with no optargs
 op :: Arr a => TermType -> a -> ReQL
-op t a = op t a
+op t a = op' t a []
 
 toDoubles :: Datum.Datum -> Maybe [Double]
 toDoubles Datum.Datum{

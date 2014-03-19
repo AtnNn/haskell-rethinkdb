@@ -253,7 +253,7 @@ s !! n = op NTH (s, n)
 -- > >>> run h $ reduce (+) 0 [1, 2, 3] :: IO (Maybe Int)
 -- > Just 6
 reduce :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
-reduce f b s = op DEFAULT (op REDUCE (s, fmap expr P.. f), b)
+reduce f b s = op REDUCE ([b] ++ s, fmap expr P.. f)
 
 -- | Reduce a non-empty sequence to a single value
 --
