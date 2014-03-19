@@ -1,6 +1,6 @@
 # RethinkDB Haskell Driver #
 
-This driver works with versions 1.8 and above of [RethinkDB](http://rethinkdb.com).
+This driver targets versions 1.12 of [RethinkDB](http://rethinkdb.com). Most operations also work on older versions.
 
 Documentation:
 
