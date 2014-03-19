@@ -11,7 +11,7 @@ module Database.RethinkDB.Driver (
   ) where
 
 import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), encode)
-import Data.Aeson.Encode (fromValue)
+import Data.Aeson.Encode (encodeToTextBuilder)
 import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Builder (toLazyText)
 import qualified Data.Aeson (Result(Error, Success))
@@ -128,7 +128,7 @@ instance FromJSON WriteResponse where
 data JSON = JSON Value
 
 instance Show JSON where
-  show (JSON a) = unpack . toLazyText . fromValue $ a
+  show (JSON a) = unpack . toLazyText . encodeToTextBuilder $ a
 
 instance FromJSON JSON where
   parseJSON = fmap JSON . parseJSON

@@ -1,7 +1,5 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, GADTs #-}
 
--- TODO: operator fixity
-
 -- | Functions from the ReQL (RethinkDB Query Language)
 
 module Database.RethinkDB.Functions where
@@ -323,6 +321,7 @@ groupBy g mr s = ReQL $ do
     Nothing -> gmr
     Just f -> op MAP [gmr, expr $ \x -> expr $
                       obj ["group" := (x!"group"), "reduction" := f (x!"reduction")]] ()
+
 
 -- | The sum of a sequence
 --
