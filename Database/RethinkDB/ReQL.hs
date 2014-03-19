@@ -4,9 +4,10 @@
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
   ReQL(..),
-  op,
+  op, op',
   BaseReQL(..),
   BaseAttribute(..),
+  OptArg(..),
   buildQuery,
   BaseArray,
   Backtrace, convertBacktrace,
@@ -21,7 +22,7 @@ module Database.RethinkDB.ReQL (
   baseArray,
   withQuerySettings,
   Object(..),
-  Obj(..),
+  obj,
   returnVals,
   nonAtomic,
   canReturnVals,
@@ -210,14 +211,18 @@ instance Arr Array where
   arr = id
 
 -- | A list of key/value pairs
-data Object = Object { baseObject :: State QuerySettings [BaseAttribute] }
+data Object = Object { objectAttributes :: [Attribute] }
 
 infix 0 :=
 
 -- | A key/value pair used for building objects
-data Attribute = forall e . (Expr e) => T.Text := e
+data Attribute where 
+  (:=) :: Expr e => T.Text -> e -> Attribute
+  (::=) :: (Expr k, Expr v) => k -> v -> Attribute
 
 data BaseAttribute = BaseAttribute T.Text BaseReQL
+
+data OptArg = forall e . Expr e => T.Text :== e
 
 mapBaseAttribute :: (BaseReQL -> BaseReQL) -> BaseAttribute -> BaseAttribute
 mapBaseAttribute f (BaseAttribute k v) = BaseAttribute k (f v)
@@ -225,28 +230,19 @@ mapBaseAttribute f (BaseAttribute k v) = BaseAttribute k (f v)
 instance Show BaseAttribute where
   show (BaseAttribute a b) = T.unpack a ++ ": " ++ show b
 
--- | Convert into a ReQL object
-class Obj o where
-  obj :: o -> Object
+-- | Convert a list of attributes into a ReQL object
+obj :: [Attribute] -> Object
+obj = Object
 
-instance Obj [Attribute] where
-  obj = Object . mapM base
-    where base (k := e) = BaseAttribute k <$> baseReQL (expr e)
-
-instance Obj [BaseAttribute] where
-  obj = Object . return
-
-instance Obj Object where
-  obj = id
-
-instance Obj () where
-  obj _ = Object $ return []
+baseOptArgs :: [OptArg] -> State QuerySettings [BaseAttribute]
+baseOptArgs = sequence . map toBase
+  where toBase (k :== v) = BaseAttribute k <$> baseReQL (expr v)
 
 -- | Build a term
-op :: (Arr a, Obj o) => TermType -> a -> o -> ReQL
-op t a b = ReQL $ do
+op' :: Arr a => TermType -> a -> [OptArg] -> ReQL
+op' t a b = ReQL $ do
   a' <- baseArray (arr a)
-  b' <- baseObject (obj b)
+  b' <- baseOptArgs b
   case (t, a') of
     (FUNCALL, (BaseReQL FUNC Nothing [argsFunDatum, fun] [] : argsCall)) |
       BaseReQL DATUM (Just argsFunArray) [] [] <- argsFunDatum,
@@ -255,6 +251,10 @@ op t a b = ReQL $ do
       Just varsCall <- varsOf argsCall ->
         return $ alphaRename (zip varsFun varsCall) fun
     _ -> return $ BaseReQL t Nothing a' b'
+
+-- | Build a term with no optargs
+op :: Arr a => TermType -> a -> ReQL
+op t a = op t a
 
 toDoubles :: Datum.Datum -> Maybe [Double]
 toDoubles Datum.Datum{
@@ -323,15 +323,14 @@ instance Expr Integer where
 
 instance Num ReQL where
   fromInteger x = datumTerm R_NUM defaultValue { r_num = Just (fromInteger x) }
-  a + b = op ADD (a, b) ()
-  a * b = op MUL (a, b) ()
-  a - b = op SUB (a, b) ()
-  negate a = op SUB (0 :: Double, a) ()
-  abs n = op BRANCH (op TermType.LT (n, 0 :: Double) (), negate n, n) ()
-  signum n = op BRANCH (op TermType.LT (n, 0 :: Double) (),
+  a + b = op ADD (a, b)
+  a * b = op MUL (a, b)
+  a - b = op SUB (a, b)
+  negate a = op SUB (0 :: Double, a)
+  abs n = op BRANCH (op TermType.LT (n, 0 :: Double), negate n, n)
+  signum n = op BRANCH (op TermType.LT (n, 0 :: Double),
                         -1 :: Double,
-                        op BRANCH (op TermType.EQ (n, 0 :: Double) (), 0 :: Double, 1 :: Double) ()) ()
-
+                        op BRANCH (op TermType.EQ (n, 0 :: Double), 0 :: Double, 1 :: Double))
 instance Expr T.Text where
   expr t = datumTerm R_STR defaultValue { r_str = Just (uFromString $ T.unpack t) }
 
@@ -347,24 +346,24 @@ instance IsString ReQL where
 instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
     v <- newVarId
-    baseReQL $ op FUNC (datumNumberArray [v], expr $ f (op VAR [v] ())) ()
+    baseReQL $ op FUNC (datumNumberArray [v], expr $ f (op VAR [v]))
 
 instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
   expr f = ReQL $ do
     a <- newVarId
     b <- newVarId
-    baseReQL $ op FUNC (datumNumberArray [a, b], expr $ f (op VAR [a] ()) (op VAR [b] ())) ()
+    baseReQL $ op FUNC (datumNumberArray [a, b], expr $ f (op VAR [a]) (op VAR [b]))
 
 instance Expr Datum.Datum where
   expr d = ReQL $ return $ BaseReQL DATUM (Just d) [] []
 
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
-    op TABLE (fromMaybe queryDefaultDatabase mdb, name) $ catMaybes [
-      fmap ("use_outdated" :=) queryUseOutdated ]
+    op' TABLE (fromMaybe queryDefaultDatabase mdb, name) $ catMaybes [
+      fmap ("use_outdated" :==) queryUseOutdated ]
 
 instance Expr Database where
-  expr (Database name) = op DB [name] ()
+  expr (Database name) = op DB [name]
 
 instance Expr J.Value where
   expr J.Null = expr ()
@@ -387,13 +386,15 @@ instance Expr a => Expr [a] where
   expr a = expr $ arr a
 
 instance Expr Array where
-  expr a = op MAKE_ARRAY a ()
+  expr a = op MAKE_ARRAY a
 
 instance Expr e => Expr (M.HashMap T.Text e) where
   expr m = expr $ obj $ map (uncurry (:=)) $ M.toList m
 
 instance Expr Object where
-  expr o = op MAKE_OBJ () o
+  expr = op OBJECT . concatMap pairs . objectAttributes
+    where pairs (k := v) = [expr k, expr v]
+          pairs (k ::= v) = [expr k, expr v]
 
 buildBaseReQL :: BaseReQL -> Term
 buildBaseReQL BaseReQL {..} = defaultValue {
@@ -443,7 +444,7 @@ convertBacktrace = concatMap convertFrame . toList . QL.frames
           convertFrame _ = []
 
 instance Expr UTCTime where
-  expr t = op EPOCH_TIME [expr . toRational $ utcTimeToPOSIXSeconds t] ()
+  expr t = op EPOCH_TIME [expr . toRational $ utcTimeToPOSIXSeconds t]
 
 instance Expr ZonedTime where
   expr (ZonedTime
@@ -454,7 +455,7 @@ instance Expr ZonedTime where
     (year, month, day) = toGregorian date
     in  op TIME [
       expr year, expr month, expr day, expr hour, expr minute, expr (toRational seconds),
-      str $ timeZoneOffsetString timezone] ()
+      str $ timeZoneOffsetString timezone]
 
 instance Expr BaseReQL where
   expr = ReQL . return

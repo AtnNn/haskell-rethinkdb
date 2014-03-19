@@ -17,7 +17,7 @@ termToMapReduce ::
   (ReQL -> ReQL) -> State QuerySettings (ReQL -> ReQL, ReQL -> ReQL -> ReQL, Maybe (ReQL -> ReQL))
 termToMapReduce f = do
   v <- newVarId
-  body <- baseReQL $ f (op VAR [v] ())
+  body <- baseReQL $ f (op VAR [v])
   return . toReduce $ toMapReduce v body
 
 toReduce :: MapReduce -> (ReQL -> ReQL, ReQL -> ReQL -> ReQL, Maybe (ReQL -> ReQL))
@@ -26,7 +26,7 @@ toReduce (Map m) = ((\x -> expr [x]) . m, unionReduce, Nothing)
 toReduce (MapReduce m r f) = (m, r, f)
 
 unionReduce :: ReQL -> ReQL -> ReQL
-unionReduce a b = op UNION (a, b) ()
+unionReduce a b = op UNION (a, b)
 
 sameVar :: Int -> BaseArray -> Bool
 sameVar x [BaseReQL DATUM (Just (Datum.Datum{ Datum.r_num = Just y })) _ _] =
@@ -41,10 +41,10 @@ wrap :: BaseReQL -> ReQL
 wrap = ReQL . return
 
 toFun1 :: ReQL -> (ReQL -> ReQL)
-toFun1 f a = op FUNCALL (f, a) ()
+toFun1 f a = op FUNCALL (f, a)
 
 toFun2 :: ReQL -> (ReQL -> ReQL -> ReQL)
-toFun2 f a b = op FUNCALL (f, a, b) ()
+toFun2 f a b = op FUNCALL (f, a, b)
 
 toMapReduce :: Int -> BaseReQL -> MapReduce
 toMapReduce _ t@(BaseReQL DATUM _ _ _) = None $ wrap t
@@ -62,9 +62,9 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
                 (REDUCE, [Map m, None f], _) | Just mbase <- optargsToBase optargs ->
                   MapReduce m (toFun2 f) (fmap (toFun2 f) mbase)
                 (COUNT, [Map _], []) ->
-                  MapReduce (const (num 1)) (\a b -> op ADD (a, b) ()) Nothing
+                  MapReduce (const (num 1)) (\a b -> op ADD (a, b)) Nothing
                 (tt, (Map m : _), _) | tt `elem` mappableTypes ->
-                  (Map ((\x -> op tt (expr x : map expr (tail args)) (noRecurse : map baseAttrToAttr optargs)) . m))
+                  (Map ((\x -> op' tt (expr x : map expr (tail args)) (noRecurse : map baseAttrToOptArg optargs)) . m))
                 _ -> rebuild
 
 optargsToBase :: [BaseAttribute] -> Maybe (Maybe ReQL)
@@ -72,11 +72,12 @@ optargsToBase [] = Just Nothing
 optargsToBase [BaseAttribute "base" b] = Just (Just $ ReQL $ return b)
 optargsToBase _ = Nothing
 
-baseAttrToAttr :: BaseAttribute -> Attribute
-baseAttrToAttr (BaseAttribute k v) = k := v
+baseAttrToOptArg :: BaseAttribute -> OptArg
+baseAttrToOptArg (BaseAttribute k v) = k :== v
 
-noRecurse :: Attribute
-noRecurse = "_NO_RECURSE_" := True
+-- This circumvents stream polymorphism on some operations
+noRecurse :: OptArg
+noRecurse = "_NO_RECURSE_" :== True
 
 mappableTypes :: [TermType]
 mappableTypes = [GET_FIELD, PLUCK, WITHOUT, MERGE, HAS_FIELDS]
@@ -104,8 +105,8 @@ rebuildx ttype args optargs = MapReduce maps reduces finallys where
        then Just finally
        else Just $ \x -> finally $ expr $ map (uncurry $ mkFinally x) . index $
                          map (fromMaybe id) fs
-  mkReduce a b i f = f (op NTH (a, i) ()) (op NTH (b, i) ())
-  mkFinally x i f = f (op NTH (x, i) ())
+  mkReduce a b i f = f (op NTH (a, i)) (op NTH (b, i))
+  mkFinally x i f = f (op NTH (x, i))
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
@@ -123,7 +124,7 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   args' <- sequence $ map extractOne args
   optargvs' <- sequence $ map extractOne (map snd optargs)
   let optargks = map fst optargs
-  return $ \v -> op tt (map ($ v) args') (zipWith (:=) optargks $ map ($ v) optargvs')
+  return $ \v -> op' tt (map ($ v) args') (zipWith (:==) optargks $ map ($ v) optargvs')
 
 extractOne :: MapReduce -> WriterT [MapReduce] (State (Maybe Int)) (ReQL -> ReQL)
 extractOne (None term) = return $ const term
@@ -134,4 +135,4 @@ extractOne mr = do
     Nothing -> return id
     Just n -> do
       put $ Just $ n + 1
-      return $ \v -> op NTH (v, n) ()
+      return $ \v -> op NTH (v, n)

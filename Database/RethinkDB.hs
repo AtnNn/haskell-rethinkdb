@@ -103,7 +103,7 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  Obj(..), Object, Attribute(..), str, num, (.), (#),
+  obj, Object, Attribute(..), str, num, (.), (#),
   def
 
   ) where
