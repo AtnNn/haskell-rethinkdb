@@ -9,13 +9,14 @@ import qualified Text.ProtocolBuffers.Header as P'
 data QueryType = START
                | CONTINUE
                | STOP
+               | NOREPLY_WAIT
                deriving (Prelude'.Read, Prelude'.Show, Prelude'.Eq, Prelude'.Ord, Prelude'.Typeable, Prelude'.Data)
  
 instance P'.Mergeable QueryType
  
 instance Prelude'.Bounded QueryType where
   minBound = START
-  maxBound = STOP
+  maxBound = NOREPLY_WAIT
  
 instance P'.Default QueryType where
   defaultValue = START
@@ -24,20 +25,24 @@ toMaybe'Enum :: Prelude'.Int -> P'.Maybe QueryType
 toMaybe'Enum 1 = Prelude'.Just START
 toMaybe'Enum 2 = Prelude'.Just CONTINUE
 toMaybe'Enum 3 = Prelude'.Just STOP
+toMaybe'Enum 4 = Prelude'.Just NOREPLY_WAIT
 toMaybe'Enum _ = Prelude'.Nothing
  
 instance Prelude'.Enum QueryType where
   fromEnum START = 1
   fromEnum CONTINUE = 2
   fromEnum STOP = 3
+  fromEnum NOREPLY_WAIT = 4
   toEnum
    = P'.fromMaybe (Prelude'.error "hprotoc generated code: toEnum failure for type Database.RethinkDB.Protobuf.Ql2.Query.QueryType")
       . toMaybe'Enum
   succ START = CONTINUE
   succ CONTINUE = STOP
+  succ STOP = NOREPLY_WAIT
   succ _ = Prelude'.error "hprotoc generated code: succ failure for type Database.RethinkDB.Protobuf.Ql2.Query.QueryType"
   pred CONTINUE = START
   pred STOP = CONTINUE
+  pred NOREPLY_WAIT = STOP
   pred _ = Prelude'.error "hprotoc generated code: pred failure for type Database.RethinkDB.Protobuf.Ql2.Query.QueryType"
  
 instance P'.Wire QueryType where
@@ -54,8 +59,8 @@ instance P'.MessageAPI msg' (msg' -> QueryType) QueryType where
   getVal m' f' = f' m'
  
 instance P'.ReflectEnum QueryType where
-  reflectEnum = [(1, "START", START), (2, "CONTINUE", CONTINUE), (3, "STOP", STOP)]
+  reflectEnum = [(1, "START", START), (2, "CONTINUE", CONTINUE), (3, "STOP", STOP), (4, "NOREPLY_WAIT", NOREPLY_WAIT)]
   reflectEnumInfo _
    = P'.EnumInfo (P'.makePNF (P'.pack ".Ql2.Query.QueryType") ["Database", "RethinkDB", "Protobuf"] ["Ql2", "Query"] "QueryType")
       ["Database", "RethinkDB", "Protobuf", "Ql2", "Query", "QueryType.hs"]
-      [(1, "START"), (2, "CONTINUE"), (3, "STOP")]
+      [(1, "START"), (2, "CONTINUE"), (3, "STOP"), (4, "NOREPLY_WAIT")]

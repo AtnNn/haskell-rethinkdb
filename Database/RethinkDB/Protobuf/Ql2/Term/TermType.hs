@@ -43,6 +43,7 @@ data TermType = DATUM
               | CONTAINS
               | GET_FIELD
               | KEYS
+              | OBJECT
               | HAS_FIELDS
               | WITH_FIELDS
               | PLUCK
@@ -59,8 +60,6 @@ data TermType = DATUM
               | IS_EMPTY
               | UNION
               | NTH
-              | GROUPED_MAP_REDUCE
-              | GROUPBY
               | INNER_JOIN
               | OUTER_JOIN
               | EQ_JOIN
@@ -81,9 +80,12 @@ data TermType = DATUM
               | TABLE_CREATE
               | TABLE_DROP
               | TABLE_LIST
+              | SYNC
               | INDEX_CREATE
               | INDEX_DROP
               | INDEX_LIST
+              | INDEX_STATUS
+              | INDEX_WAIT
               | FUNCALL
               | BRANCH
               | ANY
@@ -94,6 +96,8 @@ data TermType = DATUM
               | DESC
               | INFO
               | MATCH
+              | UPCASE
+              | DOWNCASE
               | SAMPLE
               | DEFAULT
               | JSON
@@ -136,13 +140,20 @@ data TermType = DATUM
               | NOVEMBER
               | DECEMBER
               | LITERAL
+              | GROUP
+              | SUM
+              | AVG
+              | MIN
+              | MAX
+              | SPLIT
+              | UNGROUP
               deriving (Prelude'.Read, Prelude'.Show, Prelude'.Eq, Prelude'.Ord, Prelude'.Typeable, Prelude'.Data)
  
 instance P'.Mergeable TermType
  
 instance Prelude'.Bounded TermType where
   minBound = DATUM
-  maxBound = LITERAL
+  maxBound = UNGROUP
  
 instance P'.Default TermType where
   defaultValue = DATUM
@@ -185,6 +196,7 @@ toMaybe'Enum 87 = Prelude'.Just INDEXES_OF
 toMaybe'Enum 93 = Prelude'.Just CONTAINS
 toMaybe'Enum 31 = Prelude'.Just GET_FIELD
 toMaybe'Enum 94 = Prelude'.Just KEYS
+toMaybe'Enum 143 = Prelude'.Just OBJECT
 toMaybe'Enum 32 = Prelude'.Just HAS_FIELDS
 toMaybe'Enum 96 = Prelude'.Just WITH_FIELDS
 toMaybe'Enum 33 = Prelude'.Just PLUCK
@@ -201,8 +213,6 @@ toMaybe'Enum 43 = Prelude'.Just COUNT
 toMaybe'Enum 86 = Prelude'.Just IS_EMPTY
 toMaybe'Enum 44 = Prelude'.Just UNION
 toMaybe'Enum 45 = Prelude'.Just NTH
-toMaybe'Enum 46 = Prelude'.Just GROUPED_MAP_REDUCE
-toMaybe'Enum 47 = Prelude'.Just GROUPBY
 toMaybe'Enum 48 = Prelude'.Just INNER_JOIN
 toMaybe'Enum 49 = Prelude'.Just OUTER_JOIN
 toMaybe'Enum 50 = Prelude'.Just EQ_JOIN
@@ -223,9 +233,12 @@ toMaybe'Enum 59 = Prelude'.Just DB_LIST
 toMaybe'Enum 60 = Prelude'.Just TABLE_CREATE
 toMaybe'Enum 61 = Prelude'.Just TABLE_DROP
 toMaybe'Enum 62 = Prelude'.Just TABLE_LIST
+toMaybe'Enum 138 = Prelude'.Just SYNC
 toMaybe'Enum 75 = Prelude'.Just INDEX_CREATE
 toMaybe'Enum 76 = Prelude'.Just INDEX_DROP
 toMaybe'Enum 77 = Prelude'.Just INDEX_LIST
+toMaybe'Enum 139 = Prelude'.Just INDEX_STATUS
+toMaybe'Enum 140 = Prelude'.Just INDEX_WAIT
 toMaybe'Enum 64 = Prelude'.Just FUNCALL
 toMaybe'Enum 65 = Prelude'.Just BRANCH
 toMaybe'Enum 66 = Prelude'.Just ANY
@@ -236,6 +249,8 @@ toMaybe'Enum 73 = Prelude'.Just ASC
 toMaybe'Enum 74 = Prelude'.Just DESC
 toMaybe'Enum 79 = Prelude'.Just INFO
 toMaybe'Enum 97 = Prelude'.Just MATCH
+toMaybe'Enum 141 = Prelude'.Just UPCASE
+toMaybe'Enum 142 = Prelude'.Just DOWNCASE
 toMaybe'Enum 81 = Prelude'.Just SAMPLE
 toMaybe'Enum 92 = Prelude'.Just DEFAULT
 toMaybe'Enum 98 = Prelude'.Just JSON
@@ -278,6 +293,13 @@ toMaybe'Enum 123 = Prelude'.Just OCTOBER
 toMaybe'Enum 124 = Prelude'.Just NOVEMBER
 toMaybe'Enum 125 = Prelude'.Just DECEMBER
 toMaybe'Enum 137 = Prelude'.Just LITERAL
+toMaybe'Enum 144 = Prelude'.Just GROUP
+toMaybe'Enum 145 = Prelude'.Just SUM
+toMaybe'Enum 146 = Prelude'.Just AVG
+toMaybe'Enum 147 = Prelude'.Just MIN
+toMaybe'Enum 148 = Prelude'.Just MAX
+toMaybe'Enum 149 = Prelude'.Just SPLIT
+toMaybe'Enum 150 = Prelude'.Just UNGROUP
 toMaybe'Enum _ = Prelude'.Nothing
  
 instance Prelude'.Enum TermType where
@@ -318,6 +340,7 @@ instance Prelude'.Enum TermType where
   fromEnum CONTAINS = 93
   fromEnum GET_FIELD = 31
   fromEnum KEYS = 94
+  fromEnum OBJECT = 143
   fromEnum HAS_FIELDS = 32
   fromEnum WITH_FIELDS = 96
   fromEnum PLUCK = 33
@@ -334,8 +357,6 @@ instance Prelude'.Enum TermType where
   fromEnum IS_EMPTY = 86
   fromEnum UNION = 44
   fromEnum NTH = 45
-  fromEnum GROUPED_MAP_REDUCE = 46
-  fromEnum GROUPBY = 47
   fromEnum INNER_JOIN = 48
   fromEnum OUTER_JOIN = 49
   fromEnum EQ_JOIN = 50
@@ -356,9 +377,12 @@ instance Prelude'.Enum TermType where
   fromEnum TABLE_CREATE = 60
   fromEnum TABLE_DROP = 61
   fromEnum TABLE_LIST = 62
+  fromEnum SYNC = 138
   fromEnum INDEX_CREATE = 75
   fromEnum INDEX_DROP = 76
   fromEnum INDEX_LIST = 77
+  fromEnum INDEX_STATUS = 139
+  fromEnum INDEX_WAIT = 140
   fromEnum FUNCALL = 64
   fromEnum BRANCH = 65
   fromEnum ANY = 66
@@ -369,6 +393,8 @@ instance Prelude'.Enum TermType where
   fromEnum DESC = 74
   fromEnum INFO = 79
   fromEnum MATCH = 97
+  fromEnum UPCASE = 141
+  fromEnum DOWNCASE = 142
   fromEnum SAMPLE = 81
   fromEnum DEFAULT = 92
   fromEnum JSON = 98
@@ -411,6 +437,13 @@ instance Prelude'.Enum TermType where
   fromEnum NOVEMBER = 124
   fromEnum DECEMBER = 125
   fromEnum LITERAL = 137
+  fromEnum GROUP = 144
+  fromEnum SUM = 145
+  fromEnum AVG = 146
+  fromEnum MIN = 147
+  fromEnum MAX = 148
+  fromEnum SPLIT = 149
+  fromEnum UNGROUP = 150
   toEnum
    = P'.fromMaybe (Prelude'.error "hprotoc generated code: toEnum failure for type Database.RethinkDB.Protobuf.Ql2.Term.TermType") .
       toMaybe'Enum
@@ -450,7 +483,8 @@ instance Prelude'.Enum TermType where
   succ INDEXES_OF = CONTAINS
   succ CONTAINS = GET_FIELD
   succ GET_FIELD = KEYS
-  succ KEYS = HAS_FIELDS
+  succ KEYS = OBJECT
+  succ OBJECT = HAS_FIELDS
   succ HAS_FIELDS = WITH_FIELDS
   succ WITH_FIELDS = PLUCK
   succ PLUCK = WITHOUT
@@ -466,9 +500,7 @@ instance Prelude'.Enum TermType where
   succ COUNT = IS_EMPTY
   succ IS_EMPTY = UNION
   succ UNION = NTH
-  succ NTH = GROUPED_MAP_REDUCE
-  succ GROUPED_MAP_REDUCE = GROUPBY
-  succ GROUPBY = INNER_JOIN
+  succ NTH = INNER_JOIN
   succ INNER_JOIN = OUTER_JOIN
   succ OUTER_JOIN = EQ_JOIN
   succ EQ_JOIN = ZIP
@@ -488,10 +520,13 @@ instance Prelude'.Enum TermType where
   succ DB_LIST = TABLE_CREATE
   succ TABLE_CREATE = TABLE_DROP
   succ TABLE_DROP = TABLE_LIST
-  succ TABLE_LIST = INDEX_CREATE
+  succ TABLE_LIST = SYNC
+  succ SYNC = INDEX_CREATE
   succ INDEX_CREATE = INDEX_DROP
   succ INDEX_DROP = INDEX_LIST
-  succ INDEX_LIST = FUNCALL
+  succ INDEX_LIST = INDEX_STATUS
+  succ INDEX_STATUS = INDEX_WAIT
+  succ INDEX_WAIT = FUNCALL
   succ FUNCALL = BRANCH
   succ BRANCH = ANY
   succ ANY = ALL
@@ -501,7 +536,9 @@ instance Prelude'.Enum TermType where
   succ ASC = DESC
   succ DESC = INFO
   succ INFO = MATCH
-  succ MATCH = SAMPLE
+  succ MATCH = UPCASE
+  succ UPCASE = DOWNCASE
+  succ DOWNCASE = SAMPLE
   succ SAMPLE = DEFAULT
   succ DEFAULT = JSON
   succ JSON = ISO8601
@@ -543,6 +580,13 @@ instance Prelude'.Enum TermType where
   succ OCTOBER = NOVEMBER
   succ NOVEMBER = DECEMBER
   succ DECEMBER = LITERAL
+  succ LITERAL = GROUP
+  succ GROUP = SUM
+  succ SUM = AVG
+  succ AVG = MIN
+  succ MIN = MAX
+  succ MAX = SPLIT
+  succ SPLIT = UNGROUP
   succ _ = Prelude'.error "hprotoc generated code: succ failure for type Database.RethinkDB.Protobuf.Ql2.Term.TermType"
   pred MAKE_ARRAY = DATUM
   pred MAKE_OBJ = MAKE_ARRAY
@@ -580,7 +624,8 @@ instance Prelude'.Enum TermType where
   pred CONTAINS = INDEXES_OF
   pred GET_FIELD = CONTAINS
   pred KEYS = GET_FIELD
-  pred HAS_FIELDS = KEYS
+  pred OBJECT = KEYS
+  pred HAS_FIELDS = OBJECT
   pred WITH_FIELDS = HAS_FIELDS
   pred PLUCK = WITH_FIELDS
   pred WITHOUT = PLUCK
@@ -596,9 +641,7 @@ instance Prelude'.Enum TermType where
   pred IS_EMPTY = COUNT
   pred UNION = IS_EMPTY
   pred NTH = UNION
-  pred GROUPED_MAP_REDUCE = NTH
-  pred GROUPBY = GROUPED_MAP_REDUCE
-  pred INNER_JOIN = GROUPBY
+  pred INNER_JOIN = NTH
   pred OUTER_JOIN = INNER_JOIN
   pred EQ_JOIN = OUTER_JOIN
   pred ZIP = EQ_JOIN
@@ -618,10 +661,13 @@ instance Prelude'.Enum TermType where
   pred TABLE_CREATE = DB_LIST
   pred TABLE_DROP = TABLE_CREATE
   pred TABLE_LIST = TABLE_DROP
-  pred INDEX_CREATE = TABLE_LIST
+  pred SYNC = TABLE_LIST
+  pred INDEX_CREATE = SYNC
   pred INDEX_DROP = INDEX_CREATE
   pred INDEX_LIST = INDEX_DROP
-  pred FUNCALL = INDEX_LIST
+  pred INDEX_STATUS = INDEX_LIST
+  pred INDEX_WAIT = INDEX_STATUS
+  pred FUNCALL = INDEX_WAIT
   pred BRANCH = FUNCALL
   pred ANY = BRANCH
   pred ALL = ANY
@@ -631,7 +677,9 @@ instance Prelude'.Enum TermType where
   pred DESC = ASC
   pred INFO = DESC
   pred MATCH = INFO
-  pred SAMPLE = MATCH
+  pred UPCASE = MATCH
+  pred DOWNCASE = UPCASE
+  pred SAMPLE = DOWNCASE
   pred DEFAULT = SAMPLE
   pred JSON = DEFAULT
   pred ISO8601 = JSON
@@ -673,6 +721,13 @@ instance Prelude'.Enum TermType where
   pred NOVEMBER = OCTOBER
   pred DECEMBER = NOVEMBER
   pred LITERAL = DECEMBER
+  pred GROUP = LITERAL
+  pred SUM = GROUP
+  pred AVG = SUM
+  pred MIN = AVG
+  pred MAX = MIN
+  pred SPLIT = MAX
+  pred UNGROUP = SPLIT
   pred _ = Prelude'.error "hprotoc generated code: pred failure for type Database.RethinkDB.Protobuf.Ql2.Term.TermType"
  
 instance P'.Wire TermType where
@@ -698,28 +753,30 @@ instance P'.ReflectEnum TermType where
       (88, "SET_INSERT", SET_INSERT), (89, "SET_INTERSECTION", SET_INTERSECTION), (90, "SET_UNION", SET_UNION),
       (91, "SET_DIFFERENCE", SET_DIFFERENCE), (30, "SLICE", SLICE), (70, "SKIP", SKIP), (71, "LIMIT", LIMIT),
       (87, "INDEXES_OF", INDEXES_OF), (93, "CONTAINS", CONTAINS), (31, "GET_FIELD", GET_FIELD), (94, "KEYS", KEYS),
-      (32, "HAS_FIELDS", HAS_FIELDS), (96, "WITH_FIELDS", WITH_FIELDS), (33, "PLUCK", PLUCK), (34, "WITHOUT", WITHOUT),
-      (35, "MERGE", MERGE), (36, "BETWEEN", BETWEEN), (37, "REDUCE", REDUCE), (38, "MAP", MAP), (39, "FILTER", FILTER),
-      (40, "CONCATMAP", CONCATMAP), (41, "ORDERBY", ORDERBY), (42, "DISTINCT", DISTINCT), (43, "COUNT", COUNT),
-      (86, "IS_EMPTY", IS_EMPTY), (44, "UNION", UNION), (45, "NTH", NTH), (46, "GROUPED_MAP_REDUCE", GROUPED_MAP_REDUCE),
-      (47, "GROUPBY", GROUPBY), (48, "INNER_JOIN", INNER_JOIN), (49, "OUTER_JOIN", OUTER_JOIN), (50, "EQ_JOIN", EQ_JOIN),
-      (72, "ZIP", ZIP), (82, "INSERT_AT", INSERT_AT), (83, "DELETE_AT", DELETE_AT), (84, "CHANGE_AT", CHANGE_AT),
-      (85, "SPLICE_AT", SPLICE_AT), (51, "COERCE_TO", COERCE_TO), (52, "TYPEOF", TYPEOF), (53, "UPDATE", UPDATE),
-      (54, "DELETE", DELETE), (55, "REPLACE", REPLACE), (56, "INSERT", INSERT), (57, "DB_CREATE", DB_CREATE),
-      (58, "DB_DROP", DB_DROP), (59, "DB_LIST", DB_LIST), (60, "TABLE_CREATE", TABLE_CREATE), (61, "TABLE_DROP", TABLE_DROP),
-      (62, "TABLE_LIST", TABLE_LIST), (75, "INDEX_CREATE", INDEX_CREATE), (76, "INDEX_DROP", INDEX_DROP),
-      (77, "INDEX_LIST", INDEX_LIST), (64, "FUNCALL", FUNCALL), (65, "BRANCH", BRANCH), (66, "ANY", ANY), (67, "ALL", ALL),
+      (143, "OBJECT", OBJECT), (32, "HAS_FIELDS", HAS_FIELDS), (96, "WITH_FIELDS", WITH_FIELDS), (33, "PLUCK", PLUCK),
+      (34, "WITHOUT", WITHOUT), (35, "MERGE", MERGE), (36, "BETWEEN", BETWEEN), (37, "REDUCE", REDUCE), (38, "MAP", MAP),
+      (39, "FILTER", FILTER), (40, "CONCATMAP", CONCATMAP), (41, "ORDERBY", ORDERBY), (42, "DISTINCT", DISTINCT),
+      (43, "COUNT", COUNT), (86, "IS_EMPTY", IS_EMPTY), (44, "UNION", UNION), (45, "NTH", NTH), (48, "INNER_JOIN", INNER_JOIN),
+      (49, "OUTER_JOIN", OUTER_JOIN), (50, "EQ_JOIN", EQ_JOIN), (72, "ZIP", ZIP), (82, "INSERT_AT", INSERT_AT),
+      (83, "DELETE_AT", DELETE_AT), (84, "CHANGE_AT", CHANGE_AT), (85, "SPLICE_AT", SPLICE_AT), (51, "COERCE_TO", COERCE_TO),
+      (52, "TYPEOF", TYPEOF), (53, "UPDATE", UPDATE), (54, "DELETE", DELETE), (55, "REPLACE", REPLACE), (56, "INSERT", INSERT),
+      (57, "DB_CREATE", DB_CREATE), (58, "DB_DROP", DB_DROP), (59, "DB_LIST", DB_LIST), (60, "TABLE_CREATE", TABLE_CREATE),
+      (61, "TABLE_DROP", TABLE_DROP), (62, "TABLE_LIST", TABLE_LIST), (138, "SYNC", SYNC), (75, "INDEX_CREATE", INDEX_CREATE),
+      (76, "INDEX_DROP", INDEX_DROP), (77, "INDEX_LIST", INDEX_LIST), (139, "INDEX_STATUS", INDEX_STATUS),
+      (140, "INDEX_WAIT", INDEX_WAIT), (64, "FUNCALL", FUNCALL), (65, "BRANCH", BRANCH), (66, "ANY", ANY), (67, "ALL", ALL),
       (68, "FOREACH", FOREACH), (69, "FUNC", FUNC), (73, "ASC", ASC), (74, "DESC", DESC), (79, "INFO", INFO), (97, "MATCH", MATCH),
-      (81, "SAMPLE", SAMPLE), (92, "DEFAULT", DEFAULT), (98, "JSON", JSON), (99, "ISO8601", ISO8601),
-      (100, "TO_ISO8601", TO_ISO8601), (101, "EPOCH_TIME", EPOCH_TIME), (102, "TO_EPOCH_TIME", TO_EPOCH_TIME), (103, "NOW", NOW),
-      (104, "IN_TIMEZONE", IN_TIMEZONE), (105, "DURING", DURING), (106, "DATE", DATE), (126, "TIME_OF_DAY", TIME_OF_DAY),
-      (127, "TIMEZONE", TIMEZONE), (128, "YEAR", YEAR), (129, "MONTH", MONTH), (130, "DAY", DAY), (131, "DAY_OF_WEEK", DAY_OF_WEEK),
-      (132, "DAY_OF_YEAR", DAY_OF_YEAR), (133, "HOURS", HOURS), (134, "MINUTES", MINUTES), (135, "SECONDS", SECONDS),
-      (136, "TIME", TIME), (107, "MONDAY", MONDAY), (108, "TUESDAY", TUESDAY), (109, "WEDNESDAY", WEDNESDAY),
-      (110, "THURSDAY", THURSDAY), (111, "FRIDAY", FRIDAY), (112, "SATURDAY", SATURDAY), (113, "SUNDAY", SUNDAY),
-      (114, "JANUARY", JANUARY), (115, "FEBRUARY", FEBRUARY), (116, "MARCH", MARCH), (117, "APRIL", APRIL), (118, "MAY", MAY),
-      (119, "JUNE", JUNE), (120, "JULY", JULY), (121, "AUGUST", AUGUST), (122, "SEPTEMBER", SEPTEMBER), (123, "OCTOBER", OCTOBER),
-      (124, "NOVEMBER", NOVEMBER), (125, "DECEMBER", DECEMBER), (137, "LITERAL", LITERAL)]
+      (141, "UPCASE", UPCASE), (142, "DOWNCASE", DOWNCASE), (81, "SAMPLE", SAMPLE), (92, "DEFAULT", DEFAULT), (98, "JSON", JSON),
+      (99, "ISO8601", ISO8601), (100, "TO_ISO8601", TO_ISO8601), (101, "EPOCH_TIME", EPOCH_TIME),
+      (102, "TO_EPOCH_TIME", TO_EPOCH_TIME), (103, "NOW", NOW), (104, "IN_TIMEZONE", IN_TIMEZONE), (105, "DURING", DURING),
+      (106, "DATE", DATE), (126, "TIME_OF_DAY", TIME_OF_DAY), (127, "TIMEZONE", TIMEZONE), (128, "YEAR", YEAR),
+      (129, "MONTH", MONTH), (130, "DAY", DAY), (131, "DAY_OF_WEEK", DAY_OF_WEEK), (132, "DAY_OF_YEAR", DAY_OF_YEAR),
+      (133, "HOURS", HOURS), (134, "MINUTES", MINUTES), (135, "SECONDS", SECONDS), (136, "TIME", TIME), (107, "MONDAY", MONDAY),
+      (108, "TUESDAY", TUESDAY), (109, "WEDNESDAY", WEDNESDAY), (110, "THURSDAY", THURSDAY), (111, "FRIDAY", FRIDAY),
+      (112, "SATURDAY", SATURDAY), (113, "SUNDAY", SUNDAY), (114, "JANUARY", JANUARY), (115, "FEBRUARY", FEBRUARY),
+      (116, "MARCH", MARCH), (117, "APRIL", APRIL), (118, "MAY", MAY), (119, "JUNE", JUNE), (120, "JULY", JULY),
+      (121, "AUGUST", AUGUST), (122, "SEPTEMBER", SEPTEMBER), (123, "OCTOBER", OCTOBER), (124, "NOVEMBER", NOVEMBER),
+      (125, "DECEMBER", DECEMBER), (137, "LITERAL", LITERAL), (144, "GROUP", GROUP), (145, "SUM", SUM), (146, "AVG", AVG),
+      (147, "MIN", MIN), (148, "MAX", MAX), (149, "SPLIT", SPLIT), (150, "UNGROUP", UNGROUP)]
   reflectEnumInfo _
    = P'.EnumInfo (P'.makePNF (P'.pack ".Ql2.Term.TermType") ["Database", "RethinkDB", "Protobuf"] ["Ql2", "Term"] "TermType")
       ["Database", "RethinkDB", "Protobuf", "Ql2", "Term", "TermType.hs"]
@@ -727,18 +784,19 @@ instance P'.ReflectEnum TermType where
        (14, "DB"), (15, "TABLE"), (16, "GET"), (78, "GET_ALL"), (17, "EQ"), (18, "NE"), (19, "LT"), (20, "LE"), (21, "GT"),
        (22, "GE"), (23, "NOT"), (24, "ADD"), (25, "SUB"), (26, "MUL"), (27, "DIV"), (28, "MOD"), (29, "APPEND"), (80, "PREPEND"),
        (95, "DIFFERENCE"), (88, "SET_INSERT"), (89, "SET_INTERSECTION"), (90, "SET_UNION"), (91, "SET_DIFFERENCE"), (30, "SLICE"),
-       (70, "SKIP"), (71, "LIMIT"), (87, "INDEXES_OF"), (93, "CONTAINS"), (31, "GET_FIELD"), (94, "KEYS"), (32, "HAS_FIELDS"),
-       (96, "WITH_FIELDS"), (33, "PLUCK"), (34, "WITHOUT"), (35, "MERGE"), (36, "BETWEEN"), (37, "REDUCE"), (38, "MAP"),
-       (39, "FILTER"), (40, "CONCATMAP"), (41, "ORDERBY"), (42, "DISTINCT"), (43, "COUNT"), (86, "IS_EMPTY"), (44, "UNION"),
-       (45, "NTH"), (46, "GROUPED_MAP_REDUCE"), (47, "GROUPBY"), (48, "INNER_JOIN"), (49, "OUTER_JOIN"), (50, "EQ_JOIN"),
-       (72, "ZIP"), (82, "INSERT_AT"), (83, "DELETE_AT"), (84, "CHANGE_AT"), (85, "SPLICE_AT"), (51, "COERCE_TO"), (52, "TYPEOF"),
-       (53, "UPDATE"), (54, "DELETE"), (55, "REPLACE"), (56, "INSERT"), (57, "DB_CREATE"), (58, "DB_DROP"), (59, "DB_LIST"),
-       (60, "TABLE_CREATE"), (61, "TABLE_DROP"), (62, "TABLE_LIST"), (75, "INDEX_CREATE"), (76, "INDEX_DROP"), (77, "INDEX_LIST"),
-       (64, "FUNCALL"), (65, "BRANCH"), (66, "ANY"), (67, "ALL"), (68, "FOREACH"), (69, "FUNC"), (73, "ASC"), (74, "DESC"),
-       (79, "INFO"), (97, "MATCH"), (81, "SAMPLE"), (92, "DEFAULT"), (98, "JSON"), (99, "ISO8601"), (100, "TO_ISO8601"),
-       (101, "EPOCH_TIME"), (102, "TO_EPOCH_TIME"), (103, "NOW"), (104, "IN_TIMEZONE"), (105, "DURING"), (106, "DATE"),
-       (126, "TIME_OF_DAY"), (127, "TIMEZONE"), (128, "YEAR"), (129, "MONTH"), (130, "DAY"), (131, "DAY_OF_WEEK"),
-       (132, "DAY_OF_YEAR"), (133, "HOURS"), (134, "MINUTES"), (135, "SECONDS"), (136, "TIME"), (107, "MONDAY"), (108, "TUESDAY"),
-       (109, "WEDNESDAY"), (110, "THURSDAY"), (111, "FRIDAY"), (112, "SATURDAY"), (113, "SUNDAY"), (114, "JANUARY"),
-       (115, "FEBRUARY"), (116, "MARCH"), (117, "APRIL"), (118, "MAY"), (119, "JUNE"), (120, "JULY"), (121, "AUGUST"),
-       (122, "SEPTEMBER"), (123, "OCTOBER"), (124, "NOVEMBER"), (125, "DECEMBER"), (137, "LITERAL")]
+       (70, "SKIP"), (71, "LIMIT"), (87, "INDEXES_OF"), (93, "CONTAINS"), (31, "GET_FIELD"), (94, "KEYS"), (143, "OBJECT"),
+       (32, "HAS_FIELDS"), (96, "WITH_FIELDS"), (33, "PLUCK"), (34, "WITHOUT"), (35, "MERGE"), (36, "BETWEEN"), (37, "REDUCE"),
+       (38, "MAP"), (39, "FILTER"), (40, "CONCATMAP"), (41, "ORDERBY"), (42, "DISTINCT"), (43, "COUNT"), (86, "IS_EMPTY"),
+       (44, "UNION"), (45, "NTH"), (48, "INNER_JOIN"), (49, "OUTER_JOIN"), (50, "EQ_JOIN"), (72, "ZIP"), (82, "INSERT_AT"),
+       (83, "DELETE_AT"), (84, "CHANGE_AT"), (85, "SPLICE_AT"), (51, "COERCE_TO"), (52, "TYPEOF"), (53, "UPDATE"), (54, "DELETE"),
+       (55, "REPLACE"), (56, "INSERT"), (57, "DB_CREATE"), (58, "DB_DROP"), (59, "DB_LIST"), (60, "TABLE_CREATE"),
+       (61, "TABLE_DROP"), (62, "TABLE_LIST"), (138, "SYNC"), (75, "INDEX_CREATE"), (76, "INDEX_DROP"), (77, "INDEX_LIST"),
+       (139, "INDEX_STATUS"), (140, "INDEX_WAIT"), (64, "FUNCALL"), (65, "BRANCH"), (66, "ANY"), (67, "ALL"), (68, "FOREACH"),
+       (69, "FUNC"), (73, "ASC"), (74, "DESC"), (79, "INFO"), (97, "MATCH"), (141, "UPCASE"), (142, "DOWNCASE"), (81, "SAMPLE"),
+       (92, "DEFAULT"), (98, "JSON"), (99, "ISO8601"), (100, "TO_ISO8601"), (101, "EPOCH_TIME"), (102, "TO_EPOCH_TIME"),
+       (103, "NOW"), (104, "IN_TIMEZONE"), (105, "DURING"), (106, "DATE"), (126, "TIME_OF_DAY"), (127, "TIMEZONE"), (128, "YEAR"),
+       (129, "MONTH"), (130, "DAY"), (131, "DAY_OF_WEEK"), (132, "DAY_OF_YEAR"), (133, "HOURS"), (134, "MINUTES"), (135, "SECONDS"),
+       (136, "TIME"), (107, "MONDAY"), (108, "TUESDAY"), (109, "WEDNESDAY"), (110, "THURSDAY"), (111, "FRIDAY"), (112, "SATURDAY"),
+       (113, "SUNDAY"), (114, "JANUARY"), (115, "FEBRUARY"), (116, "MARCH"), (117, "APRIL"), (118, "MAY"), (119, "JUNE"),
+       (120, "JULY"), (121, "AUGUST"), (122, "SEPTEMBER"), (123, "OCTOBER"), (124, "NOVEMBER"), (125, "DECEMBER"), (137, "LITERAL"),
+       (144, "GROUP"), (145, "SUM"), (146, "AVG"), (147, "MIN"), (148, "MAX"), (149, "SPLIT"), (150, "UNGROUP")]
