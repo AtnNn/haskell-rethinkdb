@@ -767,4 +767,25 @@ infixr 9 .
 -- > Just "FOO"
 toUpper, toLower :: Expr str => str -> ReQL
 toUpper s = op UPCASE [s]
-toLower s = op DOWNCASE [s] 
+toLower s = op DOWNCASE [s]
+
+-- | Split a string on whitespace characters
+--
+-- > >>> run' h $ split (str "foo bar")
+-- > ["foo", "bar"]
+split :: Expr str => str -> ReQL
+split s = op SPLIT [s]
+
+-- | Split a string on a given delimiter
+--
+-- > >>> run' h $ str "foo, bar" # splitOn ","
+-- > ["foo", " bar"]
+splitOn :: Expr str => ReQL -> str -> ReQL
+splitOn sep str = op SPLIT [expr str, sep]
+
+-- | Split a string up to a given number of times
+--
+-- > >>> run' h $ "a:b:c:d" # splitMax ":" 2
+-- > ["a", "b", "c:d"]
+splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
+splitMax sep n str = op SPLIT [expr str, sep, n]

@@ -34,6 +34,7 @@ import Control.Concurrent (
   newEmptyMVar, putMVar, mkWeakMVar)
 import Data.Bits (shiftL, (.|.), shiftR)
 import Data.Monoid ((<>))
+import Control.Applicative ((<$>))
 import Data.Foldable hiding (forM_)
 import Control.Exception (catch, Exception, throwIO, SomeException(..))
 import Data.Aeson (toJSON, object, (.=), Value(Null, Bool), decode)
@@ -306,11 +307,11 @@ close RethinkDBHandle{ rdbHandle, rdbThread } = do
 convertDatum :: Datum.Datum -> Either String O.Datum
 convertDatum Datum { type' = Just R_NULL } = Right Null
 convertDatum Datum { type' = Just R_BOOL, r_bool = Just b } = Right $ Bool b
-convertDatum Datum { type' = Just R_ARRAY, r_array = a } = Right $ toJSON (map convertDatum $ toList a)
+convertDatum Datum { type' = Just R_ARRAY, r_array = a } = toJSON <$> (sequence $ map convertDatum $ toList a)
 convertDatum Datum { type' = Just R_OBJECT, r_object = o } =
-  Right $ object $ Prelude.concatMap pair $ toList o
+  object <$> (sequence $ Prelude.concatMap pair $ toList o)
     where
-      pair (AssocPair (Just k) (Just v))  = [(T.pack $ uToString $ k) .= convertDatum v]
+      pair (AssocPair (Just k) (Just v))  = [((T.pack $ uToString $ k) .=) <$> convertDatum v]
       pair _ = []
 convertDatum Datum { type' = Just R_STR, r_str = Just s } = Right $ toJSON (uToString s)
 convertDatum Datum { type' = Just R_NUM, r_num = Just n } = Right $ toJSON n
