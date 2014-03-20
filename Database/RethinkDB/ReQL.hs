@@ -399,9 +399,16 @@ instance Expr e => Expr (M.HashMap T.Text e) where
   expr m = expr $ obj $ map (uncurry (:=)) $ M.toList m
 
 instance Expr Object where
-  expr = op OBJECT . concatMap pairs . objectAttributes
+  expr (Object attrs) =
+    if all knownKey attrs
+    then op' MAKE_OBJ () $ map toOptArg attrs
+    else op OBJECT $ concatMap pairs attrs
     where pairs (k := v) = [expr k, expr v]
           pairs (k ::= v) = [expr k, expr v]
+          knownKey (_ := _) = True
+          knownKey (_ ::= _) = False
+          toOptArg (k := v) = k :== v
+          toOptArg (_ ::= _) = error "unreachable"
 
 buildBaseReQL :: BaseReQL -> Term
 buildBaseReQL BaseReQL {..} = defaultValue {

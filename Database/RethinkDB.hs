@@ -67,12 +67,14 @@ module Database.RethinkDB (
 
   -- * Aggregators
 
-  length, sum, avg,
+  length, sum, average,
+  min, max, argmin, argmax,
 
   -- * Document manipulation
 
   pluck, without,
-  merge, append,
+  merge, literal, remove,
+  append,
   prepend, (\\),
   setInsert, setUnion, setIntersection, setDifference,
   (!), hasFields,

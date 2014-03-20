@@ -305,6 +305,7 @@ orderBy o s = ReQL $ do
     buildOrder (Asc k) = op ASC [k]
     buildOrder (Desc k) = op DESC [k]
 
+-- TODO: GROUP and UNGROUP
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
 -- > >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
@@ -331,16 +332,34 @@ groupBy g mr s = ReQL $ do
 -- > >>> run h $ sum [1, 2, 3] :: IO (Maybe Int)
 -- > Just 6
 sum :: (Expr s) => s -> ReQL
-sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (num 0)
+-- sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (num 0)
+sum s = op SUM [s]
 
 -- | The average of a sequence
 --
--- > >>> run h $ avg [1, 2, 3, 4] :: IO (Maybe Double)
+-- > >>> run h $ average [1, 2, 3, 4] :: IO (Maybe Double)
 -- > Just 2.5
-avg :: (Expr s) => s -> ReQL
-avg = (\x -> (x!!0) / (x!!1)) .
-  reduce (\a b -> [(a!!0) + (b!!0), (a!!1) + (b!!1)]) [num 0, num 0] .
-  map (\x -> [x, 1])
+average :: (Expr s) => s -> ReQL
+--average = (\x -> (x!!0) / (x!!1)) .
+--  reduce (\a b -> [(a!!0) + (b!!0), (a!!1) + (b!!1)]) [num 0, num 0] .
+--  map (\x -> [x, 1])
+average s = op AVG [s]
+
+-- | Minimum value
+min :: Expr s => s -> ReQL
+min s = op MIN [s]
+
+-- | Value that minimizes the function
+argmin :: (Expr s, Expr a) => (ReQL -> a) -> s -> ReQL
+argmin f s = op MIN (s, expr . f)
+
+-- | Minimum value
+max :: Expr s => s -> ReQL
+max s = op MAX [s]
+
+-- | Value that maximizes the function
+argmax :: (Expr s, Expr a) => (ReQL -> a) -> s -> ReQL
+argmax f s = op MAX (s, expr . f)
 
 -- * Accessors
 
@@ -381,10 +400,24 @@ elem x s = op CONTAINS (s, x)
 
 -- | Merge two objects together
 --
--- > >>> run' h $ merge (obj ["a" := 1, "b" := 1]) (obj ["b" := 2, "c" := 2])
+-- > >>> run' h $ merge (obj ["a" := 1, "b" := 1]) (obj ["b" := 1, "c" := 2])
 -- > [{"a":1.0,"b":2.0,"c":2.0}]
 merge :: (Expr a, Expr b) => a -> b -> ReQL
-merge a b = op MERGE (a, b)
+merge a b = op MERGE (b, a)
+
+-- | Literal objects, in a merge or update, are not processed recursively.
+--
+-- > >>> run' h $ (obj ["a" := obj ["b" := 1]]) # merge (obj ["a" := literal (obj ["c" := 2])])
+-- > [{"a":{"c":2}}]
+literal :: Expr a => a -> ReQL
+literal a = op LITERAL [a]
+
+-- | Remove fields when doing a merge or update
+--
+-- > >>> run' h $ obj ["a" := obj ["b" := 1]] # merge (obj ["a" := remove])
+-- > [{}]
+remove :: ReQL
+remove = op LITERAL ()
 
 -- | Evaluate a JavaScript expression
 --
