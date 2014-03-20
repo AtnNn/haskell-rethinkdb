@@ -168,7 +168,7 @@ map f a = op MAP (a, expr P.. f)
 -- > >>> run h $ R.filter (R.< 4) [3, 1, 4, 1, 5, 9, 2, 6] :: IO (Maybe [Int])
 -- > Just [3,1,1,2]
 filter :: (Expr predicate, Expr seq) => predicate -> seq -> ReQL
-filter f a = op FILTER (a, f)
+filter f a = op' FILTER (a, f) ["default" :== op ERROR ()]
 
 -- | Query all the documents whose value for the given index is in a given range
 --
@@ -814,11 +814,11 @@ split s = op SPLIT [s]
 -- > >>> run' h $ str "foo, bar" # splitOn ","
 -- > ["foo", " bar"]
 splitOn :: Expr str => ReQL -> str -> ReQL
-splitOn sep str = op SPLIT [expr str, sep]
+splitOn sep s = op SPLIT [expr s, sep]
 
 -- | Split a string up to a given number of times
 --
 -- > >>> run' h $ "a:b:c:d" # splitMax ":" 2
 -- > ["a", "b", "c:d"]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
-splitMax sep n str = op SPLIT [expr str, sep, n]
+splitMax sep n s = op SPLIT [expr s, sep, n]
