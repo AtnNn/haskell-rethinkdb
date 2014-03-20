@@ -85,7 +85,7 @@ module Database.RethinkDB (
 
   -- * String manipulation
   
-  (=~),
+  (=~), toUpper, toLower,
   
   -- * Dates and times
   

@@ -760,3 +760,11 @@ infixr 9 .
 -- | Specialised function composition
 (.) :: (Expr a, Expr b, Expr c) =>  (ReQL -> b) -> (ReQL -> a) -> c -> ReQL
 (f . g) x = expr (f (expr (g (expr x))))
+
+-- | Case manipulation
+--
+-- > >>> run h $ toUpper (str "Foo") :: IO (Maybe String)
+-- > Just "FOO"
+toUpper, toLower :: Expr str => str -> ReQL
+toUpper s = op UPCASE [s]
+toLower s = op DOWNCASE [s] 
