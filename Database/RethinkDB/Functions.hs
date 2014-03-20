@@ -479,13 +479,12 @@ table n = O.Table Nothing n Nothing
 --
 -- > >>> run' h $ tableCreate (table "posts") def
 -- > >>> run' h $ tableCreate (table "users") def
--- > >>> run' h $ tableCreate (Table (db "prod") "bar" (Just "name")) def{ tableDataCenter = Just "cloud", tableCacheSize = Just 10 }
+-- > >>> run' h $ tableCreate (Table (db "prod") "bar" (Just "name")) def{ tableDataCenter = Just "cloud" }
 tableCreate :: Table -> TableCreateOptions -> ReQL
 tableCreate (O.Table mdb table_name pkey) opts =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
     op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
       ("datacenter" :==) <$> tableDataCenter opts,
-      ("cache_size" :==) <$> tableCacheSize opts,
       ("primary_key" :==) <$> pkey ]
 
 -- | Drop a table

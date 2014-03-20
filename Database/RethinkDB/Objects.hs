@@ -8,7 +8,6 @@ module Database.RethinkDB.Objects (
   ) where
 
 import Data.Default (def, Default)
-import Data.Int (Int64)
 import Data.Text as Text
 import Data.Aeson (Value)
 
@@ -24,12 +23,11 @@ instance Show Database where
 
 -- | Options used to create a table
 data TableCreateOptions = TableCreateOptions {
-  tableDataCenter :: Maybe Text,
-  tableCacheSize :: Maybe Int64
+  tableDataCenter :: Maybe Text
   }
 
 instance Default TableCreateOptions where
-  def = TableCreateOptions Nothing Nothing
+  def = TableCreateOptions Nothing
 
 -- | Options used to create an index
 data IndexCreateOptions = IndexCreateOptions {

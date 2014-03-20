@@ -10,7 +10,7 @@ module Database.RethinkDB.Driver (
   JSON(..)
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?))
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), encode)
 import Data.Aeson.Encode (encodeToTextBuilder)
 import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Builder (toLazyText)
@@ -36,12 +36,14 @@ import Database.RethinkDB.ReQL
 data RunOptions =
   UseOutdated |
   NoReply |
-  SoftDurability Bool
+  SoftDurability Bool |
+  ResultsAsJSON
 
 applyOption :: RunOptions -> Query -> Query
 applyOption UseOutdated q = addQueryOption q "user_outdated" True
 applyOption NoReply q = addQueryOption q "noreply" True
 applyOption (SoftDurability b) q = addQueryOption q "soft_durability" b
+applyOption ResultsAsJSON q = q { accepts_r_json = Just True }
 
 addQueryOption :: Query -> String -> Bool -> Query
 addQueryOption q k v = q {

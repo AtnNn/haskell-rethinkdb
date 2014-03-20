@@ -164,6 +164,7 @@ showD d = case Datum.type' d of
   Just R_OBJECT ->
     "{" ++ (concat $ intersperse ", " $ map showDatumAttr $ toList $ r_object d) ++ "}"
   Just R_NULL -> "null"
+  Just R_JSON -> "(JSON)" ++ show' (r_str d)
   Nothing -> "Nothing"
   where show' Nothing = "Nothing"
         show' (Just a) = show a

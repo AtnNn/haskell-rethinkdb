@@ -1,5 +1,7 @@
 {-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns #-}
 
+-- TODO: the code sends an extra query after getting SUCCESS_ATOM when doing e.g. (expr 1)
+
 module Database.RethinkDB.Network (
   RethinkDBHandle(..),
   connect,
@@ -34,7 +36,7 @@ import Data.Bits (shiftL, (.|.), shiftR)
 import Data.Monoid ((<>))
 import Data.Foldable hiding (forM_)
 import Control.Exception (catch, Exception, throwIO, SomeException(..))
-import Data.Aeson (toJSON, object, (.=), Value(Null, Bool))
+import Data.Aeson (toJSON, object, (.=), Value(Null, Bool), decode)
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -44,7 +46,7 @@ import Data.Int (Int64)
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
 
-import Text.ProtocolBuffers.Basic (uToString)
+import Text.ProtocolBuffers.Basic (uToString, Utf8(..))
 import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
 
 import Database.RethinkDB.Protobuf.Ql2.Query as Query
@@ -195,14 +197,18 @@ instance Show Response where
 
 convertResponse :: RethinkDBHandle -> BaseReQL -> Int64 -> Ql2.Response -> Response
 convertResponse h q t Ql2.Response{ .. } = case type' of
-  Just SUCCESS_ATOM -> SuccessResponse Success (map convertDatum r)
-  Just SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) (map convertDatum r)
-  Just SUCCESS_SEQUENCE -> SuccessResponse Success (map convertDatum r)
+  Just SUCCESS_ATOM -> SuccessResponse Success <!< map convertDatum r
+  Just SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) <!< map convertDatum r
+  Just SUCCESS_SEQUENCE -> SuccessResponse Success <!< map convertDatum r
   Just CLIENT_ERROR -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
   Just COMPILE_ERROR -> ErrorResponse $ RethinkDBError ErrorBadQuery q e bt
   Just RUNTIME_ERROR -> ErrorResponse $ RethinkDBError ErrorRuntime q e bt
+  Just WAIT_COMPLETE -> SuccessResponse Success []
   Nothing -> ErrorResponse $ RethinkDBError ErrorUnexpectedResponse q e bt
   where
+    f <!< xs =
+      either (\err -> ErrorResponse (RethinkDBError ErrorUnexpectedResponse q err [])) f
+      (sequence xs)
     bt = maybe [] convertBacktrace backtrace
     r = toList response
     e = maybe "" uToString $ r_str =<< listToMaybe (toList response)
@@ -297,18 +303,20 @@ close RethinkDBHandle{ rdbHandle, rdbThread } = do
   killThread rdbThread
   hClose rdbHandle
 
-convertDatum :: Datum.Datum -> O.Datum
-convertDatum Datum { type' = Just R_NULL } = Null
-convertDatum Datum { type' = Just R_BOOL, r_bool = Just b } = Bool b
-convertDatum Datum { type' = Just R_ARRAY, r_array = a } = toJSON (map convertDatum $ toList a)
+convertDatum :: Datum.Datum -> Either String O.Datum
+convertDatum Datum { type' = Just R_NULL } = Right Null
+convertDatum Datum { type' = Just R_BOOL, r_bool = Just b } = Right $ Bool b
+convertDatum Datum { type' = Just R_ARRAY, r_array = a } = Right $ toJSON (map convertDatum $ toList a)
 convertDatum Datum { type' = Just R_OBJECT, r_object = o } =
-  object $ Prelude.concatMap pair $ toList o
+  Right $ object $ Prelude.concatMap pair $ toList o
     where
       pair (AssocPair (Just k) (Just v))  = [(T.pack $ uToString $ k) .= convertDatum v]
       pair _ = []
-convertDatum Datum { type' = Just R_STR, r_str = Just s } = toJSON (uToString s)
-convertDatum Datum { type' = Just R_NUM, r_num = Just n } = toJSON n
-convertDatum d = error ("Invalid Datum: " ++ show d)
+convertDatum Datum { type' = Just R_STR, r_str = Just s } = Right $ toJSON (uToString s)
+convertDatum Datum { type' = Just R_NUM, r_num = Just n } = Right $ toJSON n
+convertDatum Datum { type' = Just R_JSON, r_str = Just (Utf8 bs) } =
+  maybe (Left $ "Invalid JSON string: " ++ show bs) Right $ decode bs
+convertDatum d = Left ("Invalid Datum: " ++ show d)
 
 closeToken :: RethinkDBHandle -> Token -> IO ()
 closeToken h tok = do
