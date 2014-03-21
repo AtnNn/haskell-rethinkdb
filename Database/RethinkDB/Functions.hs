@@ -822,3 +822,5 @@ splitOn sep s = op SPLIT [expr s, sep]
 -- > ["a", "b", "c:d"]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
 splitMax sep n s = op SPLIT [expr s, sep, n]
+
+-- TODO: index_status, index_wait, sync
