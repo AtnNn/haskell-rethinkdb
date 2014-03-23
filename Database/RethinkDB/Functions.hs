@@ -305,7 +305,6 @@ orderBy o s = ReQL $ do
     buildOrder (Asc k) = op ASC [k]
     buildOrder (Desc k) = op DESC [k]
 
--- TODO: GROUP and UNGROUP
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
 -- > >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
@@ -315,17 +314,15 @@ orderBy o s = ReQL $ do
 groupBy ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
-groupBy = P.undefined 
-{- TODO
-groupBy g mr s = ReQL $ do
-  (m, r, mf) <- termToMapReduce (expr . mr)
-  let gmr = op GROUPED_MAP_REDUCE [expr s, expr $ expr P.. g, expr m, expr r]
-  baseReQL $ case mf of
-    Nothing -> gmr
-    Just f -> op MAP [gmr, expr $ \x -> expr $
-                      obj ["group" := (x!"group"), "reduction" := f (x!"reduction")]]
--}
+groupBy g f s = ReQL $ do
+  mr <- termToMapReduce (expr . f)
+  let group = op GROUP [expr s, expr g]
+  baseReQL $ op UNGROUP [mr group] ! "reduction"
 
+mapReduce :: (ReQL -> reduction) -> seq -> ReQL
+mapReduce f s = ReQL $ do
+  mr <- termToMapReduce (expr . f)
+  baseReQL $ mr s
 
 -- | The sum of a sequence
 --
