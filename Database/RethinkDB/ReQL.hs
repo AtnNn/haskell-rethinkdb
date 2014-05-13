@@ -269,7 +269,7 @@ toDouble _ = Nothing
 
 varsOf :: [BaseReQL] -> Maybe [Double]
 varsOf = sequence . map varOf
-    
+
 varOf :: BaseReQL -> Maybe Double
 varOf (BaseReQL VAR Nothing [BaseReQL DATUM (Just d) [] []] []) = toDouble d
 varOf _ = Nothing
@@ -326,7 +326,7 @@ instance Num ReQL where
   a + b = op ADD (a, b) ()
   a * b = op MUL (a, b) ()
   a - b = op SUB (a, b) ()
-  negate a = op SUB (0, a) ()
+  negate a = op SUB (0 :: Double, a) ()
   abs n = op BRANCH (op TermType.LT (n, 0 :: Double) (), negate n, n) ()
   signum n = op BRANCH (op TermType.LT (n, 0 :: Double) (),
                         -1 :: Double,
