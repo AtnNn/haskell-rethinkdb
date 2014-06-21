@@ -308,7 +308,7 @@ orderBy o s = ReQL $ do
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
 -- > >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
-    -- > [[{"group":"b2908215-1d3c-4ff5-b9ee-1a003fa9690c","reduction":"hi\nhello"},{"group":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c","reduction":"lorem ipsum"}]]
+-- > [[{"group":"b2908215-1d3c-4ff5-b9ee-1a003fa9690c","reduction":"hi\nhello"},{"group":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c","reduction":"lorem ipsum"}]]
 -- > >>> run' h $ table "users" # groupBy (!"level") (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 -- > [[{"group":1,"reduction":[1.5,3.0]},{"group":2,"reduction":[0.0,0.0]}]]
 groupBy ::
@@ -329,7 +329,6 @@ mapReduce f s = ReQL $ do
 -- > >>> run h $ sum [1, 2, 3] :: IO (Maybe Int)
 -- > Just 6
 sum :: (Expr s) => s -> ReQL
--- sum = reduce ((+) :: ReQL -> ReQL -> ReQL) (num 0)
 sum s = op SUM [s]
 
 -- | The average of a sequence
@@ -337,9 +336,6 @@ sum s = op SUM [s]
 -- > >>> run h $ average [1, 2, 3, 4] :: IO (Maybe Double)
 -- > Just 2.5
 average :: (Expr s) => s -> ReQL
---average = (\x -> (x!!0) / (x!!1)) .
---  reduce (\a b -> [(a!!0) + (b!!0), (a!!1) + (b!!1)]) [num 0, num 0] .
---  map (\x -> [x, 1])
 average s = op AVG [s]
 
 -- | Minimum value

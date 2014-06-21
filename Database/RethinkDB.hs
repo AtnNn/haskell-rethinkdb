@@ -63,7 +63,7 @@ module Database.RethinkDB (
 
   -- * Aggregation
 
-  reduce, reduce1, nub, {-groupBy,-} elem,
+  reduce, reduce1, mapReduce, nub, groupBy, elem,
 
   -- * Aggregators
 
