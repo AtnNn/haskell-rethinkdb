@@ -10,7 +10,7 @@ module Database.RethinkDB.Driver (
   JSON(..)
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), encode)
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?))
 import Data.Aeson.Encode (encodeToTextBuilder)
 import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Builder (toLazyText)

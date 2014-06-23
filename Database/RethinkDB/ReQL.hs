@@ -29,7 +29,8 @@ module Database.RethinkDB.ReQL (
   canNonAtomic,
   reqlToProtobuf,
   Bound(..),
-  closedOrOpen
+  closedOrOpen,
+  datumTerm
   ) where
 
 import qualified Data.Vector as V

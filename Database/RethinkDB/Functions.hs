@@ -10,7 +10,7 @@ import Control.Applicative
 import Data.Maybe
 
 import Database.RethinkDB.ReQL
-import Database.RethinkDB.MapReduce
+import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Objects as O
 
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType
@@ -316,13 +316,13 @@ groupBy ::
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
 groupBy g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
-  let group = op GROUP [expr s, expr g]
+  let group = op GROUP (expr s, expr . g)
   baseReQL $ op UNGROUP [mr group] ! "reduction"
 
-mapReduce :: (ReQL -> reduction) -> seq -> ReQL
+mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
 mapReduce f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
-  baseReQL $ mr s
+  baseReQL $ mr (expr s)
 
 -- | The sum of a sequence
 --
