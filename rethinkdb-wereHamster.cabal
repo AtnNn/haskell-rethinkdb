@@ -1,4 +1,4 @@
-name:                rethinkdb
+name:                rethinkdb-wereHamster
 version:             1.8.0.5
 description:         RethinkDB is a distributed document store with a powerful query language.
 synopsis:            RethinkDB driver for Haskell
