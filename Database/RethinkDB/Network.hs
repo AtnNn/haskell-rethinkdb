@@ -99,7 +99,7 @@ instance Exception RethinkDBConnectionError
 --
 -- /Example:/ connect using the default port with no passphrase
 --
--- >>> h <- connect "localhost" 28015 Nothing
+-->> h <- connect "localhost" 28015 Nothing
 
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
