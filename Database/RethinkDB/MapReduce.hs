@@ -16,7 +16,7 @@ import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 
 import qualified Database.RethinkDB.Functions as R
-import Database.RethinkDB.NoClash hiding (get)
+import Database.RethinkDB.NoClash hiding (get, collect)
 
 -- | Takes a function that takes a sequence as an argument, and
 -- returns a function that only uses that sequence once, by merging
@@ -58,8 +58,8 @@ toFun2 f a b = op FUNCALL (wrap f, a, b)
 
 -- | Represents a map/reduce operation split into its map and reduce parts
 data MRF = MRF {
-      _mrfMapFun :: MapFun,
-      _mrfReduceFun :: ReduceFun, 
+      _mrfMapFun :: ReQL -> ReQL,
+      _mrfReduceFun :: ReQL -> ReQL -> ReQL, 
       _mrfFinally :: ReQL -> ReQL }
 
 -- | A Chain of ReQL expressions that can be transformed into
@@ -70,14 +70,12 @@ data Chain =
   -- | Just a map
   Map [Map] |
   -- | A map/reduce operation represented as parts
-  MapReduceChain [Map] Reduce (ReQL -> ReQL) MRF |
+  MapReduceChain [Map] Reduce |
   -- | A rewritten map/reduce
   MapReduce MRF |
   -- | Special cases for reduce with base
-  AddBase ReQL Chain |
-  SingletonArray ReQL
-
-data TODO
+  SingletonArray ReQL |
+  AddBase ReQL Chain
 
 -- | A built-in map operation
 data Map =
@@ -88,18 +86,18 @@ data MapFun = MapFun {
   _mapFun :: ReQL -> ReQL }
 
 data Reduce =
-  BuiltInReduce TermType [ReQL] [OptArg] ReduceFun
+  BuiltInReduce TermType [ReQL] [OptArg] MRF
   
-data ReduceFun = ReduceFun {
-  _reduceMap :: ReQL -> ReQL,
-  _reduceFun :: ReQL -> ReQL -> ReQL,
-  _reduceFinally :: ReQL -> ReQL }
-
 applyChain :: Chain -> (ReQL -> ReQL)
 applyChain (None t) x = op FUNCALL (t, x)
 applyChain (Map maps) s = applyMaps maps s
-applyChain (MapReduceChain maps red fin _) s =
-  fin $ applyReduce red $ applyMaps maps s
+applyChain (MapReduceChain maps red) s = applyMaps maps $ applyReduce red s
+applyChain (MapReduce mrf) s = applyMRF mrf s
+applyChain (SingletonArray x) s = op FUNCALL (op MAKE_ARRAY [x], s)
+applyChain (AddBase b c) s = op UNION (op MAKE_ARRAY [b], applyChain c s)
+
+applyMRF :: MRF -> ReQL -> ReQL
+applyMRF (MRF m r f) s = f . reduce1 r $ R.map m s
 
 applyMaps :: [Map] -> ReQL -> ReQL
 applyMaps maps s = foldr applyMap s maps
@@ -110,14 +108,34 @@ applyMap (BuiltInMap tt a oa _) s = op' tt (s : a) oa
 applyReduce :: Reduce -> ReQL -> ReQL
 applyReduce (BuiltInReduce tt a oa _) s = op' tt (s : a) oa
 
+chainToMRF :: Chain -> Either ReQL MRF
+chainToMRF (None t) = Left t
+chainToMRF (Map maps) = Right $ maps `thenMRF` collect
+chainToMRF (MapReduceChain maps red) = Right $ maps `thenReduce` red
+chainToMRF (MapReduce mrf) = Right $ mrf
+chainToMRF (SingletonArray x) = Left $ op MAKE_ARRAY [x]
+chainToMRF (AddBase b c) = fmap (`thenFinally` \x -> op UNION [b, x]) $ chainToMRF c
+
+thenFinally :: MRF -> (ReQL -> ReQL) -> MRF
+thenFinally (MRF m r f1) f2 = MRF m r $ f2 . f1
+
+thenMRF :: [Map] -> MRF -> MRF
+thenMRF maps (MRF m r f) = MRF (m . applyMaps maps) r f
+
+thenReduce :: [Map] -> Reduce -> MRF
+thenReduce maps (BuiltInReduce _ _ _ mrf) = maps `thenMRF` mrf
+
+collect :: MRF
+collect = MRF (\x -> expr [x]) (R.++) id
+
 -- | Rewrites the term in the second argument to merge all uses of the
 -- variable whose id is given in the first argument.
 toMapReduce :: Int -> BaseReQL -> Chain
 
 -- Singletons are singled out
 toMapReduce _ (BaseReQL DATUM (Just Datum.Datum{ Datum.type' = Just Datum.R_ARRAY,
-                                                 Datum.r_array = arr }) _ _)
-  | [datum] <- toList arr =
+                                                 Datum.r_array = arr' }) _ _)
+  | [datum] <- toList arr' =
     SingletonArray . wrap $ BaseReQL DATUM (Just datum) [] []
 
 -- A datum stays constant
@@ -136,17 +154,22 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
   
   -- Rewrite the current term. rewrite1 is optimised for
   -- the single count case
-  rewrite = (if count == 1 then rewrite1 else rewritex) type' args' optargs'
+  rewrite = MapReduce $
+            (if count == 1 then rewrite1 else rewritex) type' args' optargs'
   
   in case count of
     -- Special case for singleton arrays
     0 | Just sing <- singleton type' args' optargs -> SingletonArray sing
     
+    -- Special case for cons
+    1 | UNION <- type', [SingletonArray s, x] <- args', [] <- optargs'
+      -> AddBase s x
+
     -- Don't rewrite if there is nothing to rewrite
     0 -> None $ wrap t
     
     -- Don't rewrite an operation that can be chained
-    _ | (arg1 : _) <- args', notConst arg1 -> do
+    1 | (arg1 : _) <- args', notConst arg1 -> do
       fromMaybe rewrite $ mrChain type' arg1 (tail args) optargs
          
     -- Default to rewriting the term
@@ -160,66 +183,62 @@ singleton _ _ _ = Nothing
 mrChain :: TermType -> Chain -> [BaseReQL] -> [BaseAttribute]
         -> Maybe Chain
 
--- | The basics: map, reduce and reduce1
-mrChain MAP (Map maps) [f] [] = Just . Map $ toMap f : maps
-mrChain MAP (Map m) [f] [] = Just . Map False $ toFun1 f . m
-mrChain REDUCE (Map m) [f] [] = Just $ MapReduce m (toFun2 f) Nothing
-mrChain REDUCE (MapReduce (AddBase base (Map m)) _ _ _) [f] [] =
-  Just $ MapReduce m (toFun2 f) (Just $ toFun2 f base)
-
--- | Special case for union with a singleton
-mrChain UNION [SingletonArray sing, mr] [] = AddBase sing mr
-
 -- | A built-in map
 mrChain tt (Map maps) args optargs
     | Just mrf <- mapMRF tt args optargs =
-        Just $ MapReduceChain tt (map wrap args)
-               (map baseAttrToOptArg optargs) mrf
+       Just . Map . (: maps) $
+            BuiltInMap tt (map wrap args) (map baseAttrToOptArg optargs) mrf
 
 -- | A built-in reduction
 mrChain tt (Map maps) args optargs
     | Just mrf <- reduceMRF tt args optargs =
-        Just $ MapReduceChain tt (map wrap args)
-               (map baseAttrToOptArg optargs) mrf
-
--- | These functions map over sequences
-mrChain tt (Map m) args optargs
-    | tt `elem` [PLUCK, WITHOUT, MERGE] =
-        Just $ Map $ (. m) $ \x ->
-            op' tt (expr x : map expr args)
-            (noRecurse : map baseAttrToOptArg optargs)
+        Just . MapReduceChain maps $
+             BuiltInReduce tt (map wrap args) (map baseAttrToOptArg optargs) mrf
 
 mrChain _ _ _ _ = Nothing
+
+-- | Convert some builtin operations into a map
+mapMRF :: TermType -> [BaseReQL] -> [BaseAttribute]
+            -> Maybe MapFun
+mapMRF MAP [f] [] = Just . MapFun False $ toFun1 f
+mapMRF PLUCK ks [] =
+  Just . MapFun False $ \s -> op' PLUCK (s : map wrap ks) [noRecurse]
+mapMRF WITHOUT ks [] =
+    Just . MapFun False $ \s -> op' WITHOUT (s : map wrap ks) [noRecurse]
+mapMRF MERGE [b] [] =
+  Just . MapFun False $ \s -> op' MERGE [s,  wrap b] [noRecurse]
+mapMRF _ _ _ = Nothing
 
 -- | Convert some of the built-in operations into a map/reduce
 --
 -- TODO: test
-reduceMRF :: TermType -> (ReQL -> ReQL) -> [BaseReQL] -> [BaseAttribute]
+reduceMRF :: TermType -> [BaseReQL] -> [BaseAttribute]
             -> Maybe MRF
-reduceMRF COUNT _ [] [] = Just (const (num 1), \a b -> op ADD (a, b), Nothing)
-reduceMRF AVG f [] [] =
-    Just (\x -> expr [f x, 1],
-          \a b -> expr [a R.!! 0 R.+ b R.!! 0, a R.!! 1 R.+ b R.!! 1],
-          Just $ \x -> x R.!! 0 R./ x R.!! 1)
-reduceMRF SUM f [] [] = Just (f, (R.+), Nothing)
-reduceMRF SUM f [sel] [] = Just (sel . f, (R.+), Nothing)
-reduceMRF MIN f [] [] = Just (f, \a b -> if' (a R.< b) a b, Nothing)
-reduceMRF MIN f [sel] [] =
-    Just (\x -> [f x, sel x],
-          \a b -> if' (a R.!! 1 R.< b R.!! 1) a b,
-          (R.!! 0))
-reduceMRF MAX f [] [] = Just (f, \a b -> if' (a R.> b) a b, Nothing)
-reduceMRF MAX f [sel] [] =
-    Just (\x -> [f x, sel x],
-          \a b -> if' (a R.!! 1 R.> b R.!! 1) a b,
-          (R.!! 0))
-reduceMRF DISTINCT _ _ _ = undefined
-reduceMRF CONCATMAP _ _ _ = undefined
-reduceMRF FILTER _ _ _ = undefined
-reduceMRF GET_FIELD _ _ _ = undefined
-reduceMRF HAS_FIELDS _ _ _ = undefined
-reduceMRF WITH_FIELDS _ _ _ = undefined
-reduceMRF _ _ _ _ = Nothing
+reduceMRF REDUCE [f] [] = Just $ MRF id (toFun2 f) id
+reduceMRF COUNT [] [] = Just $ MRF (const (num 1)) (\a b -> op ADD (a, b)) id
+reduceMRF AVG [] [] =
+    Just $ MRF (\x -> expr [x, 1])
+             (\a b -> expr [a R.!! 0 R.+ b R.!! 0, a R.!! 1 R.+ b R.!! 1])
+             (\x -> x R.!! 0 R./ x R.!! 1)
+reduceMRF SUM [] [] = Just $ MRF id (R.+) id
+reduceMRF SUM [sel] [] = Just $ MRF (toFun1 sel) (R.+) id
+reduceMRF MIN [] [] = Just $ MRF id (\a b -> if' (a R.< b) a b) id
+reduceMRF MIN [sel] [] =
+    Just $ MRF (\x -> expr [x, toFun1 sel x])
+             (\a b -> if' (a R.!! 1 R.< b R.!! 1) a b)
+             (R.!! 0)
+reduceMRF MAX [] [] = Just $ MRF id (\a b -> if' (a R.> b) a b) id
+reduceMRF MAX [sel] [] =
+    Just $ MRF (\x -> expr [x, toFun1 sel x])
+             (\a b -> if' (a R.!! 1 R.> b R.!! 1) a b)
+             (R.!! 0)
+reduceMRF DISTINCT _ _ = undefined
+reduceMRF CONCATMAP _ _ = undefined
+reduceMRF FILTER _ _ = undefined
+reduceMRF GET_FIELD _ _ = undefined
+reduceMRF HAS_FIELDS _ _ = undefined
+reduceMRF WITH_FIELDS _ _ = undefined
+reduceMRF _ _ _ = Nothing
 
 -- | Convert from one representation to the other
 baseAttrToOptArg :: BaseAttribute -> OptArg
@@ -234,36 +253,24 @@ noRecurse = "_NO_RECURSE_" :== True
 --
 -- This is a special case for when only one of the arguments
 -- is itself a map/reduce
-rewrite1 :: TermType -> [Chain] -> [(T.Text, Chain)] -> Chain
-rewrite1 ttype args optargs = MapReduce maps reduce finals where
+rewrite1 :: TermType -> [Chain] -> [(T.Text, Chain)] -> MRF
+rewrite1 ttype args optargs = MRF maps red finals where
   (finally2, [mr]) = extract Nothing ttype args optargs
-  (maps, reduce, finally1) = mr
-  finals = Just $ maybe finally2 (finally2 .) finally1
+  MRF maps red fin1 = mr
+  finals = finally2 . fin1
 
 -- | Rewrite a command that combines the result of multiple map/reduce
 -- operations into a single map/reduce operation
-rewritex :: TermType -> [Chain] -> [(Key, Chain)] -> Chain
-rewritex ttype args optargs = MapReduce maps reduces finallys where
+rewritex :: TermType -> [Chain] -> [(Key, Chain)] -> MRF
+rewritex ttype args optargs = MRF maps reduces finallys where
   (finally, mrs) = extract (Just 0) ttype args optargs
   index = zip ([0..] :: [Int])
-  maps x = expr $ map (($ x) . fst3) mrs
-  reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map snd3 mrs
-  finallys = let fs = map thrd3 mrs in
-    if all isNothing fs
-       then Just finally
-       else Just $ \x -> finally $ expr $ map (uncurry $ mkFinally x) . index $
-                         map (fromMaybe id) fs
+  maps x = expr $ map (($ x) . _mrfMapFun) mrs
+  reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map _mrfReduceFun mrs
+  finallys = let fs = map _mrfFinally mrs in
+       \x -> finally . expr . map (uncurry $ mkFinally x) $ index fs
   mkReduce a b i f = f (op NTH (a, i)) (op NTH (b, i))
   mkFinally x i f = f (op NTH (x, i))
-
-fst3 :: (a,b,c) -> a
-fst3 (a,_,_) = a
-
-snd3 :: (a,b,c) -> b
-snd3 (_,b,_) = b
-
-thrd3 :: (a,b,c) -> c
-thrd3 (_,_,c) = c
 
 -- | Extract the inner map/reduce objects, also returning a function
 -- which, given the result of all the map/reduce operations, returns
@@ -277,9 +284,7 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   let optargks = map fst optargs
   return $ \v -> op' tt (map ($ v) args') (zipWith (:==) optargks $ map ($ v) optargvs')
     where
-      extractOne (None _ term) = return $ const term
-      extractOne (Map f) = go (\x -> op MAKE_ARRAY [f x], \a b -> op UNION (a,b), Nothing)
-      extractOne (MapReduce _ m r f) = go (m, r, f)
+      extractOne chain = either (return . const) go $ chainToMRF chain
       go mrf = do
         tell [mrf]
         st' <- get
