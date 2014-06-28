@@ -18,6 +18,120 @@ import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 
+-- $setup
+--
+-- Get the doctests ready
+--
+-- >>> :load Database.RethinkDB.NoClash
+-- >>> import qualified Database.RethinkDB as R
+-- >>> import Prelude
+-- >>> import Data.Text (Text)
+-- >>> import Data.Maybe
+-- >>> import Control.Exception
+-- >>> import Database.RethinkDB.Functions ()
+-- >>> import Database.RethinkDB ()
+-- >>> import Data.List
+-- >>> :set -XOverloadedStrings
+-- >>> let try' x = (try x `asTypeOf` return (Left (undefined :: SomeException))) >> return ()
+-- >>> h' <- connect "localhost" 28015 def
+-- >>> let h = use h' "doctests"
+
+-- $init_doctests
+-- >>> try' $ run' h' $ dbCreate "doctests"
+-- >>> try' $ run' h $ tableCreate "foo" def
+-- >>> try' $ run' h $ tableCreate "bar" def
+-- >>> try' $ run' h $ tableDrop "bar"
+-- >>> try' $ run' h $ tableDrop "posts"
+-- >>> try' $ run' h $ tableDrop "users"
+-- >>> try' $ run' h $ tableCreate (table "posts") def
+-- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" } def
+
+-- | Create a table on the server
+--
+-- > >>> run' h $ tableCreate (table "posts") def
+-- > [{"created":1}]
+-- > >>> run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" } def
+-- > [{"created":1}]
+-- > >>> run' h $ tableCreate (Table (Just "doctests") "bar" (Just "name")) def
+-- [{"created":1}]
+tableCreate :: Table -> TableCreateOptions -> ReQL
+tableCreate (O.Table mdb table_name pkey) opts =
+  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
+    op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
+      ("datacenter" :==) <$> tableDataCenter opts,
+      ("primary_key" :==) <$> pkey ]
+
+-- | Insert a document or a list of documents into a table
+--
+-- >>> run h $ table "users" # insert (map (\x -> obj ["name":=x]) ["bill", "bob", "nancy" :: Text]) :: IO (Maybe WriteResponse)
+-- Just {inserted:3}
+-- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hi", "id" := 1])
+-- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hello", "id" := 2])
+-- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3])
+insert :: (Expr object) => object -> Table -> ReQL
+insert a tb = canReturnVals $ op INSERT (tb, a)
+
+-- | Like insert, but replace existing documents with the same primary key
+--
+-- >>> run h $ table "users" # upsert (obj ["name" := str "bill", "occupation" := str "pianist"]) :: IO (Maybe WriteResponse)
+-- Just {replaced:1}
+upsert :: (Expr table, Expr object) => object -> table -> ReQL
+upsert a tb = canReturnVals $ op' INSERT (tb, a) ["upsert" :== P.True]
+
+-- | Add to or modify the contents of a document
+--
+-- >>> run h $ table "users" # getAll "name" [str "bob"] # update (const $ obj ["occupation" := str "tailor"]) :: IO (Maybe WriteResponse)
+-- Just {replaced:1}
+update :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
+update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, expr . f)
+
+-- | Replace a document with another
+--
+-- >>> run h $ replace (\user -> obj ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!"occupation")) $ table "users" :: IO (Maybe WriteResponse)
+-- Just {replaced:1}
+replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
+replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, expr . f)
+
+-- | Delete the documents
+--
+-- >>> run h $ delete . getAll "name" [str "bob"] $ table "users" :: IO (Maybe WriteResponse)
+-- Just {deleted:1}
+delete :: (Expr selection) => selection -> ReQL
+delete s = canReturnVals $ op DELETE [s]
+
+-- | Like map but for write queries
+--
+-- >>> _ <- run' h $ table "users" # replace (without ["post_count"])
+-- >>> run h $ forEach (table "posts") $ \post -> table "users" # get (post!"author") # update (\user -> obj ["post_count" := (R.handle 0 (user!"post_count") + 1)]) :: IO (Maybe WriteResponse)
+-- Just {replaced:3}
+forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
+forEach s f = op FOREACH (s, expr P.. f)
+
+-- | A table
+--
+-- >>> (mapM_ print =<<) $ run' h $ table "users"
+-- {"post_count":0.0,"name":"nancy"}
+-- {"post_count":1.0,"name":"bob"}
+-- {"post_count":2.0,"name":"bill"}
+table :: Text -> Table
+table n = O.Table Nothing n Nothing
+
+-- | Drop a table
+--
+-- >>> run h $ tableDrop (table "foo") :: IO (Maybe WriteResponse)
+-- Just {dropped:1}
+tableDrop :: Table -> ReQL
+tableDrop (O.Table mdb table_name _) =
+  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
+    op TABLE_DROP (fromMaybe ddb mdb, table_name)
+
+-- | List the tables in a database
+--
+-- >>> fmap (fmap sort) run h $ tableList (db "test") :: IO (Maybe [String])
+-- Just ["posts", "bar", "foo"]
+tableList :: Database -> ReQL
+tableList name = op TABLE_LIST [name]
+
 infixl 6 +, -
 infixl 7 *, /
 
@@ -29,7 +143,7 @@ infixl 7 *, /
 -- Just 7
 -- >>> run h $ 2 R.+ 5 :: IO (Maybe Int)
 -- Just 7
--- >>> run h $ (str "foo") + (str "bar") :: IO (Just String)
+-- >>> run h $ (str "foo") + (str "bar") :: IO (Maybe String)
 -- Just "foobar"
 (+) :: (Expr a, Expr b) => a -> b -> ReQL
 (+) a b = op ADD (a, b)
@@ -140,8 +254,8 @@ not a = op NOT [a]
 --
 -- Called /count/ in the official drivers
 --
--- >>> run h $ R.length (table "foo") :: IO (Maybe Int)
--- Just 17
+-- >>> run h $ R.length (table "users") :: IO (Maybe Int)
+-- Just 2
 length :: (Expr a) => a -> ReQL
 length e = op COUNT [e]
 
@@ -152,7 +266,7 @@ infixr 5 ++
 -- Called /union/ in the official drivers
 --
 -- >>> run h $ [1,2,3] R.++ ["a", "b", "c" :: Text] :: IO (Maybe [JSON])
--- Just [1.0,2.0,3.0,"a","b","c"]
+-- Just [1,2,3,"a","b","c"]
 (++) :: (Expr a, Expr b) => a -> b -> ReQL
 a ++ b = op UNION (a, b)
 
@@ -172,8 +286,8 @@ filter f a = op' FILTER (a, f) ["default" :== op ERROR ()]
 
 -- | Query all the documents whose value for the given index is in a given range
 --
--- >>> run h $ table "users" # between "id" (Closed $ str "a") (Open $ str "n") :: IO [JSON]
--- [{"post_count":4.0,"name":"bob","id":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c"},{"post_count":4.0,"name":"bill","id":"b2908215-1d3c-4ff5-b9ee-1a003fa9690c"}]
+-- >>> run h $ table "users" # between "name" (Closed $ str "a") (Open $ str "c") :: IO [JSON]
+-- [{"name":"bill","occupation":"pianist"}]
 between :: (Expr left, Expr right, Expr seq) => Key -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
   op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b]
@@ -195,14 +309,14 @@ concatMap f e = op CONCATMAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
--- >>> run' h $ innerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # without ["id", "author"]
+-- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # pluck ["name", "message"]
 -- [[{"name":"bob","message":"lorem ipsum"},{"name":"bill","message":"hello"},{"name":"bill","message":"hi"}]]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f)
 
 -- | SQL-like outer join of two sequences
 --
--- >>> run' h $ outerJoin (\user post -> user!"id" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # without ["id", "author"]
+-- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # without ["id", "author"]
 -- [[{"name":"nancy"},{"name":"bill","message":"hello"},{"name":"bill","message":"hi"},{"name":"bob","message":"lorem ipsum"}]]
 outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
@@ -270,14 +384,6 @@ reduce1 f s = op REDUCE (s, fmap expr P.. f)
 -- Just ["pinned", "deleted"]
 nub :: (Expr s) => s -> ReQL
 nub s = op DISTINCT [s]
-
--- | Like map but for write queries
---
--- >>> run' h $ table "users" # replace (without ["post_count"])
--- >>> run' h $ forEach (table "posts") $ \post -> table "users" # get (post!"author") # update (\user -> obj ["post_count" := (handle 0 (user!"post_count") + 1)])
--- [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":0.0,"replaced":3.0,"errors":0.0}]
-forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
-forEach s f = op FOREACH (s, expr P.. f)
 
 -- | Merge the "left" and "right" attributes of the objects in a sequence.
 --
@@ -380,7 +486,7 @@ pluck ks e = op PLUCK (cons e $ arr (P.map expr ks))
 -- | Remove the given attributes from an object
 --
 -- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # without ["a"]
--- [[{"b":2.0},{"c":7.0},{"b":4.0}]]
+-- [[{"b":2},{"c":7},{"b":4}]]
 without :: (Expr o) => [ReQL] -> o -> ReQL
 without ks e = op WITHOUT (cons e $ arr (P.map expr ks))
 
@@ -394,7 +500,7 @@ elem x s = op CONTAINS (s, x)
 -- | Merge two objects together
 --
 -- >>> run' h $ merge (obj ["a" := 1, "b" := 1]) (obj ["b" := 1, "c" := 2])
--- [{"a":1.0,"b":2.0,"c":2.0}]
+-- [{"a":1,"b":2,"c":2}]
 merge :: (Expr a, Expr b) => a -> b -> ReQL
 merge a b = op MERGE (b, a)
 
@@ -492,87 +598,12 @@ indexList tbl = op INDEX_LIST [tbl]
 getAll :: (Expr value) => Key -> [value] -> Table -> ReQL
 getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" :== idx]
 
--- | A table
---
--- >>> (mapM_ print =<<) $ run' h $ table "users"
--- {"post_count":0.0,"name":"nancy","id":"8d674d7a-873c-4c0f-8a4a-32a4bd5bdee8"}
--- {"post_count":1.0,"name":"bob","id":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c"}
--- {"post_count":2.0,"name":"bill","id":"b2908215-1d3c-4ff5-b9ee-1a003fa9690c"}
-table :: Text -> Table
-table n = O.Table Nothing n Nothing
-
--- | Create a table on the server
---
--- >>> run' h $ tableCreate (table "posts") def
--- >>> run' h $ tableCreate (table "users") def
--- >>> run' h $ tableCreate (Table (db "prod") "bar" (Just "name")) def{ tableDataCenter = Just "cloud" }
-tableCreate :: Table -> TableCreateOptions -> ReQL
-tableCreate (O.Table mdb table_name pkey) opts =
-  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
-    op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
-      ("datacenter" :==) <$> tableDataCenter opts,
-      ("primary_key" :==) <$> pkey ]
-
--- | Drop a table
---
--- >>> run' h $ tableDrop (table "bar")
--- [{"dropped":1.0}]
-tableDrop :: Table -> ReQL
-tableDrop (O.Table mdb table_name _) =
-  withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
-    op TABLE_DROP (fromMaybe ddb mdb, table_name)
-
--- | List the tables in a database
---
--- >>> run h $ tableList (db "test") :: IO (Maybe [String])
--- Just ["foo","posts","users"]
-tableList :: Database -> ReQL
-tableList name = op TABLE_LIST [name]
-
 -- | Get a document by primary key
 --
 -- >>> run' h $ table "users" # get "8d674d7a-873c-4c0f-8a4a-32a4bd5bdee8"
 -- [{"post_count":0.0,"name":"nancy","id":"8d674d7a-873c-4c0f-8a4a-32a4bd5bdee8"}]
 get :: Expr s => ReQL -> s -> ReQL
 get k e = op GET (e, k)
-
--- | Insert a document or a list of documents into a table
---
--- >>> Just wr@WriteResponse{} <- run h $ table "users" # insert (map (\x -> obj ["name":=x]) ["bill", "bob", "nancy" :: Text])
--- >>> let Just [bill, bob, nancy] = writeResponseGeneratedKeys wr
--- >>> run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hi"])
--- >>> run' h $ table "posts" # insert (obj ["author" := bill, "message" := str "hello"])
--- >>> run' h $ table "posts" # insert (obj ["author" := bob, "message" := str "lorem ipsum"])
-insert :: (Expr object) => object -> Table -> ReQL
-insert a tb = canReturnVals $ op INSERT (tb, a)
-
--- | Like insert, but update existing documents with the same primary key
---
--- >>> run' h $ table "users" # upsert (obj ["id" := "79bfe377-9593-402a-ad47-f94c76c36a51", "name" := "rupert"])
--- [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":0.0,"replaced":1.0,"errors":0.0}]
-upsert :: (Expr table, Expr object) => object -> table -> ReQL
-upsert a tb = canReturnVals $ op' INSERT (tb, a) ["upsert" :== P.True]
-
--- | Add to or modify the contents of a document
---
--- >>> run' h $ table "users" # getAll "name" [str "bob"] # update (const $ obj ["name" := str "benjamin"])
--- [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":0.0,"replaced":1.0,"errors":0.0}]
-update :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
-update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, expr . f)
-
--- | Replace a document with another
---
--- >>> run' h $ replace (\bill -> obj ["name" := str "stoyan", "id" := bill!"id"]) . R.filter ((R.== str "bill") . (!"name")) $ table "users"
--- [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":0.0,"replaced":1.0,"errors":0.0}]
-replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
-replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, expr . f)
-
--- | Delete the documents
---
--- >>> run' h $ delete . getAll "name" [str "bob"] $ table "users"
--- [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":1.0,"replaced":0.0,"errors":0.0}]
-delete :: (Expr selection) => selection -> ReQL
-delete s = canReturnVals $ op DELETE [s]
 
 -- | Convert a value to a different type
 --

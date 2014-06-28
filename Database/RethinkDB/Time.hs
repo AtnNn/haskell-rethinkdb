@@ -13,10 +13,15 @@ import Database.RethinkDB.ReQL
 
 import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 
+-- $setup
+-- >>> :load Database.RethinkDB
+-- >>> import qualified Database.RethinkDB as R
+-- >>> import Database.RethinkDB.NoClash
+
 -- | The time and date when the query is executed
 --
--- >>> run h $ now :: IO (Maybe R.ZonedTime)
--- Just 2013-10-28 00:01:43.930000066757 +0000
+-- > >>> run h $ now :: IO (Maybe R.ZonedTime)
+-- > Just 2013-10-28 00:01:43.930000066757 +0000
 now :: ReQL
 now = op NOW ()
 

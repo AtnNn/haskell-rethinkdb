@@ -20,6 +20,8 @@ import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Sequence ((|>))
 import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
+import Data.List
+import Data.Maybe
 
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
 import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
@@ -108,9 +110,10 @@ data WriteResponse = WriteResponse {
   writeResponseErrors :: Int,
   writeResponseFirstError :: Maybe Text,
   writeResponseGeneratedKeys :: Maybe [Text],
+  -- TODO: just "vals" in 1.12
   writeResponseOldVal :: Maybe Value,
   writeResponseNewVal :: Maybe Value
-  } deriving Show
+  }
 
 instance FromJSON WriteResponse where
   parseJSON (Data.Aeson.Object o) =
@@ -126,6 +129,25 @@ instance FromJSON WriteResponse where
     <*> o .:? "old_val"
     <*> o .:? "new_val"
   parseJSON _ = mzero
+
+instance Show WriteResponse where
+  show wr = "{" ++
+            intercalate "," (catMaybes [
+              zero "inserted" writeResponseInserted,
+              zero "deleted" writeResponseDeleted,
+              zero "replaced" writeResponseReplaced,
+              zero "unchanged" writeResponseUnchanged,
+              zero "skipped" writeResponseSkipped,
+              zero "errors" writeResponseErrors,
+              nothing "first_error" writeResponseFirstError,
+              nothing "generated_keys" writeResponseGeneratedKeys,
+              nothing "old_val" writeResponseOldVal,
+              nothing "new_val" writeResponseNewVal ]) ++
+            "}"
+    where
+      go k v = Just $ k ++ ":" ++ show v
+      zero k f = if f wr == 0 then Nothing else go k (f wr)
+      nothing k f = maybe Nothing (go k) (f wr)
 
 data JSON = JSON Value
 

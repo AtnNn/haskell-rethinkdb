@@ -10,6 +10,7 @@ module Database.RethinkDB.Objects (
 import Data.Default (def, Default)
 import Data.Text as Text
 import Data.Aeson (Value)
+import Data.String
 
 type Key = Text
 
@@ -20,6 +21,9 @@ data Database = Database {
 
 instance Show Database where
   show (Database d) = show d
+
+instance IsString Database where
+  fromString name = Database $ fromString name
 
 -- | Options used to create a table
 data TableCreateOptions = TableCreateOptions {
@@ -48,5 +52,8 @@ instance Show Table where
   show (Table db' nam mkey) =
     maybe "" (\(Database d) -> Text.unpack d++".") db' ++ Text.unpack nam ++
     maybe "" (\k -> "[" ++ show k ++ "]") mkey
+
+instance IsString Table where
+  fromString name = Table Nothing (fromString name) Nothing
 
 type Datum = Value

@@ -54,3 +54,9 @@ library
                        protocol-buffers-descriptor,
                        time,
                        utf8-string
+
+test-suite doctests
+  type:          exitcode-stdio-1.0
+  ghc-options:   -threaded
+  main-is:       doctests.hs
+  build-depends: base, doctest >= 0.8
