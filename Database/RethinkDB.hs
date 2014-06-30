@@ -77,7 +77,7 @@ module Database.RethinkDB (
   append,
   prepend, (\\),
   setInsert, setUnion, setIntersection, setDifference,
-  (!), hasFields,
+  (!), (!?), hasFields,
   insertAt, spliceAt, deleteAt, changeAt, keys,
 
   -- * Math and logic

@@ -17,6 +17,8 @@ import Database.RethinkDB.Protobuf.Ql2.Term.TermType
 -- >>> :load Database.RethinkDB
 -- >>> import qualified Database.RethinkDB as R
 -- >>> import Database.RethinkDB.NoClash
+-- >>> import Prelude
+-- >>> h <- connect "localhost" 28015 def
 
 -- | The time and date when the query is executed
 --
@@ -48,15 +50,14 @@ iso8601 t = op ISO8601 [t]
 
 -- | The same time in a different timezone
 --
--- >>> run h $ inTimezone "+0800" now :: IO (Maybe R.ZonedTime)
--- Just 2013-10-28 08:16:39.22000002861 +0800
+-- >>> _ <- run' h $ inTimezone "+0800" now
 inTimezone :: Expr time => ReQL -> time -> ReQL
 inTimezone tz t = op IN_TIMEZONE (t, tz)
 
 -- | Test if a time is between two other times
 --
--- >>> run h $ during (Open $ now - (60*60)) (Closed now) $ epochTime 1382919271 :: IO (Maybe Bool)
--- Just True
+-- >>> run h $ during (Open $ now R.- (60*60)) (Closed now) $ epochTime 1382919271 :: IO (Maybe Bool)
+-- Just False
 during :: (Expr left, Expr right, Expr time) => Bound left -> Bound right -> time -> ReQL
 during l r t = op' DURING (t, getBound l, getBound r) [
   "left_bound" :== closedOrOpen l, "right_bound" :== closedOrOpen r]
@@ -98,17 +99,20 @@ instance Show ZonedTime where
   show (ZonedTime t) = show t
 
 instance FromJSON UTCTime where
-  parseJSON (JSON.Object v) = UTCTime . Time.posixSecondsToUTCTime . fromRational <$> v .: "epoch_time"
+  parseJSON (JSON.Object v) = UTCTime . Time.posixSecondsToUTCTime . doubleToPOSIXTime <$> v .: "epoch_time"
   parseJSON _ = mzero
 
 instance FromJSON ZonedTime where
   parseJSON (JSON.Object v) = do
                          tz <- v .: "timezone"
-                         t <- v.: "epoch_time"
+                         t <- v .: "epoch_time"
                          tz' <- parseTimeZone tz
                          return . ZonedTime $ Time.utcToZonedTime tz'
-                           (Time.posixSecondsToUTCTime (fromRational t))
+                           (Time.posixSecondsToUTCTime (doubleToPOSIXTime t))
   parseJSON _ = mzero
+
+doubleToPOSIXTime :: Double -> Time.POSIXTime
+doubleToPOSIXTime d = fromRational $ toRational d
 
 parseTimeZone :: String -> Parser Time.TimeZone
 parseTimeZone "Z" = return Time.utc

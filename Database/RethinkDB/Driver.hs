@@ -22,6 +22,8 @@ import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
 import Data.List
 import Data.Maybe
+import Data.Monoid
+import qualified Data.HashMap.Strict as HM
 
 import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
 import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
@@ -32,7 +34,7 @@ import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
 import Text.ProtocolBuffers.Basic (uFromString, defaultValue)
 
 import Database.RethinkDB.Network
-import Database.RethinkDB.ReQL
+import Database.RethinkDB.ReQL hiding (Object)
 
 -- | Per-query settings
 data RunOptions =
@@ -116,7 +118,7 @@ data WriteResponse = WriteResponse {
   }
 
 instance FromJSON WriteResponse where
-  parseJSON (Data.Aeson.Object o) =
+  parseJSON (Object o) =
     WriteResponse
     <$> o .: "inserted"
     <*> o .: "deleted"
@@ -149,12 +151,34 @@ instance Show WriteResponse where
       zero k f = if f wr == 0 then Nothing else go k (f wr)
       nothing k f = maybe Nothing (go k) (f wr)
 
-data JSON = JSON Value
+data JSON = JSON Value deriving Eq
 
 instance Show JSON where
   show (JSON a) = unpack . toLazyText . encodeToTextBuilder $ a
 
 instance FromJSON JSON where
   parseJSON = fmap JSON . parseJSON
+
+instance Ord JSON where
+  compare (JSON x) (JSON y) = x <=> y
+    where
+      Object a <=> Object b =
+        compare (HM.keys a) (HM.keys b) <>
+        mconcat (map (\k -> (a HM.! k) <=> (b HM.! k) ) (HM.keys a))
+      Object _ <=> _ = LT
+      _ <=> Object _ = GT
+      Array a <=> Array b = compare (fmap JSON a) (fmap JSON b)
+      Array _ <=> _ = LT
+      _ <=> Array _ = GT
+      String a <=> String b = compare a b
+      String _ <=> _ = LT
+      _ <=> String _ = GT
+      Number a <=> Number b = compare a b
+      Number _ <=> _ = LT
+      _ <=> Number _ = GT
+      Bool a <=> Bool b = compare a b
+      Bool _ <=> _ = LT
+      _ <=> Bool _ = GT
+      Null <=> Null = EQ
 
 -- TODO: profile

@@ -30,21 +30,24 @@ import qualified Prelude as P
 -- >>> import Control.Exception
 -- >>> import Database.RethinkDB.Functions ()
 -- >>> import Database.RethinkDB ()
--- >>> import Data.List
+-- >>> import Data.List (sort)
+-- >>> import System.IO.Unsafe
 -- >>> :set -XOverloadedStrings
 -- >>> let try' x = (try x `asTypeOf` return (Left (undefined :: SomeException))) >> return ()
--- >>> h' <- connect "localhost" 28015 def
+-- >>> h' <- unsafeInterleaveIO $ connect "localhost" 28015 def
 -- >>> let h = use h' "doctests"
 
 -- $init_doctests
 -- >>> try' $ run' h' $ dbCreate "doctests"
 -- >>> try' $ run' h $ tableCreate "foo" def
+-- >>> try' $ run' h $ delete $ table "foo"
 -- >>> try' $ run' h $ tableCreate "bar" def
+-- >>> try' $ run' h $ delete $ table "bar"
 -- >>> try' $ run' h $ tableDrop "bar"
--- >>> try' $ run' h $ tableDrop "posts"
--- >>> try' $ run' h $ tableDrop "users"
 -- >>> try' $ run' h $ tableCreate (table "posts") def
+-- >>> try' $ run' h $ delete $ table "posts"
 -- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" } def
+-- >>> try' $ run' h $ delete $ table "users"
 
 -- | Create a table on the server
 --
@@ -53,7 +56,7 @@ import qualified Prelude as P
 -- > >>> run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" } def
 -- > [{"created":1}]
 -- > >>> run' h $ tableCreate (Table (Just "doctests") "bar" (Just "name")) def
--- [{"created":1}]
+-- > [{"created":1}]
 tableCreate :: Table -> TableCreateOptions -> ReQL
 tableCreate (O.Table mdb table_name pkey) opts =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
@@ -66,8 +69,8 @@ tableCreate (O.Table mdb table_name pkey) opts =
 -- >>> run h $ table "users" # insert (map (\x -> obj ["name":=x]) ["bill", "bob", "nancy" :: Text]) :: IO (Maybe WriteResponse)
 -- Just {inserted:3}
 -- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hi", "id" := 1])
--- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hello", "id" := 2])
--- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3])
+-- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hello", "id" := 2, "flag" := str "deleted"])
+-- >>> _ <- run' h $ table "posts" # insert (obj ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3, "flag" := str "pinned"])
 insert :: (Expr object) => object -> Table -> ReQL
 insert a tb = canReturnVals $ op INSERT (tb, a)
 
@@ -87,7 +90,7 @@ update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, expr . f)
 
 -- | Replace a document with another
 --
--- >>> run h $ replace (\user -> obj ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!"occupation")) $ table "users" :: IO (Maybe WriteResponse)
+-- >>> run h $ replace (\user -> obj ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!?"occupation")) $ table "users" :: IO (Maybe WriteResponse)
 -- Just {replaced:1}
 replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
 replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, expr . f)
@@ -102,24 +105,23 @@ delete s = canReturnVals $ op DELETE [s]
 -- | Like map but for write queries
 --
 -- >>> _ <- run' h $ table "users" # replace (without ["post_count"])
--- >>> run h $ forEach (table "posts") $ \post -> table "users" # get (post!"author") # update (\user -> obj ["post_count" := (R.handle 0 (user!"post_count") + 1)]) :: IO (Maybe WriteResponse)
--- Just {replaced:3}
+-- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # update (const $ obj ["post_count" := R.length (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) # nonAtomic :: IO (Maybe WriteResponse)
+-- Just {replaced:2}
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
 forEach s f = op FOREACH (s, expr P.. f)
 
 -- | A table
 --
--- >>> (mapM_ print =<<) $ run' h $ table "users"
+-- >>> (mapM_ print . sort =<<) $ run' h $ table "users"
 -- {"post_count":0.0,"name":"nancy"}
--- {"post_count":1.0,"name":"bob"}
--- {"post_count":2.0,"name":"bill"}
+-- {"post_count":2,"name":"bill","occupation":"pianist"}
 table :: Text -> Table
 table n = O.Table Nothing n Nothing
 
 -- | Drop a table
 --
--- >>> run h $ tableDrop (table "foo") :: IO (Maybe WriteResponse)
--- Just {dropped:1}
+-- >>> run' h $ tableDrop (table "foo")
+-- [{"dropped":1}]
 tableDrop :: Table -> ReQL
 tableDrop (O.Table mdb table_name _) =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
@@ -127,8 +129,8 @@ tableDrop (O.Table mdb table_name _) =
 
 -- | List the tables in a database
 --
--- >>> fmap (fmap sort) run h $ tableList (db "test") :: IO (Maybe [String])
--- Just ["posts", "bar", "foo"]
+-- >>> fmap (fmap sort) $ run h $ tableList (db "doctests") :: IO (Maybe [String])
+-- Just ["posts","users"]
 tableList :: Database -> ReQL
 tableList name = op TABLE_LIST [name]
 
@@ -287,7 +289,7 @@ filter f a = op' FILTER (a, f) ["default" :== op ERROR ()]
 -- | Query all the documents whose value for the given index is in a given range
 --
 -- >>> run h $ table "users" # between "name" (Closed $ str "a") (Open $ str "c") :: IO [JSON]
--- [{"name":"bill","occupation":"pianist"}]
+-- [{"post_count":2,"name":"bill","occupation":"pianist"}]
 between :: (Expr left, Expr right, Expr seq) => Key -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
   op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b]
@@ -309,22 +311,22 @@ concatMap f e = op CONCATMAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
--- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # pluck ["name", "message"]
--- [[{"name":"bob","message":"lorem ipsum"},{"name":"bill","message":"hello"},{"name":"bill","message":"hi"}]]
+-- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
+-- [[{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f)
 
 -- | SQL-like outer join of two sequences
 --
--- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # without ["id", "author"]
--- [[{"name":"nancy"},{"name":"bill","message":"hello"},{"name":"bill","message":"hi"},{"name":"bob","message":"lorem ipsum"}]]
+-- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [Asc "id", Asc "name"] # pluck ["name", "message"]
+-- [[{"name":"nancy"},{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]]
 outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 
 -- | An efficient inner_join that uses a key for the left table and an index for the right table.
 --
--- >>> run' h $ table "posts" # eqJoin "author" (table "users") "id" # mergeLeftRight # without ["id", "author"]
--- [[{"name":"bill","message":"hi"},{"name":"bob","message":"lorem ipsum"},{"name":"bill","message":"hello"}]]
+-- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
+-- [[{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]]
 eqJoin :: (Expr right, Expr left) => Key -> right -> Key -> left -> ReQL
 eqJoin key right index left = op' EQ_JOIN (left, key, right) ["index" :== index]
 
@@ -367,7 +369,7 @@ s !! n = op NTH (s, n)
 -- >>> run h $ reduce (+) 0 [1, 2, 3] :: IO (Maybe Int)
 -- Just 6
 reduce :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
-reduce f b s = op REDUCE ([b] ++ s, fmap expr P.. f)
+reduce f b s = op REDUCE (s ++ [b], fmap expr P.. f)
 
 -- | Reduce a non-empty sequence to a single value
 --
@@ -380,8 +382,8 @@ reduce1 f s = op REDUCE (s, fmap expr P.. f)
 --
 -- Called /distint/ in the official drivers
 --
--- >>> run h $ nub (table "posts" ! "flag") :: IO (Maybe [String])
--- Just ["pinned", "deleted"]
+-- >>> fmap (fmap sort) $ run h $ nub (table "posts" ! "flag") :: IO (Maybe [String])
+-- Just ["deleted","pinned"]
 nub :: (Expr s) => s -> ReQL
 nub s = op DISTINCT [s]
 
@@ -389,7 +391,7 @@ nub s = op DISTINCT [s]
 --
 -- Called /zip/ in the official drivers
 --
--- >>> run' h $ table "posts" # eqJoin "author" (table "users") "id" # mergeLeftRight
+-- >>> _ <- run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight
 mergeLeftRight :: (Expr a) => a -> ReQL
 mergeLeftRight a = op ZIP [a]
 
@@ -401,7 +403,7 @@ data Order =
 -- | Order a sequence by the given keys
 --
 -- >>> run' h $ table "users" # orderBy [Desc "post_count", Asc "name"] # pluck ["name", "post_count"]
--- [[{"post_count":2.0,"name":"bill"},{"post_count":1.0,"name":"bob"},{"name":"nancy"}]]
+-- [[{"post_count":2,"name":"bill"},{"post_count":0.0,"name":"nancy"}]]
 orderBy :: (Expr s) => [Order] -> s -> ReQL
 orderBy o s = ReQL $ do
   s' <- baseReQL (expr s)
@@ -411,11 +413,14 @@ orderBy o s = ReQL $ do
     buildOrder (Asc k) = op ASC [k]
     buildOrder (Desc k) = op DESC [k]
 
+-- TODO: orderBy index
+-- TODO: orderBy function
+
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
--- >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
--- [[{"group":"b2908215-1d3c-4ff5-b9ee-1a003fa9690c","reduction":"hi\nhello"},{"group":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c","reduction":"lorem ipsum"}]]
--- >>> run' h $ table "users" # groupBy (!"level") (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
+-- > >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
+-- > [["hello\nhi","lorem ipsum"]]
+-- >>> run' h $ table "users" # groupBy (!"level") (\users -> let pc = users!"post_count" in [average pc, R.sum pc])
 -- [[{"group":1,"reduction":[1.5,3.0]},{"group":2,"reduction":[0.0,0.0]}]]
 groupBy ::
   (Expr group, Expr reduction, Expr seq)
@@ -476,10 +481,17 @@ infixl 9 !
 (!) :: (Expr s) => s -> ReQL -> ReQL
 s ! k = op GET_FIELD (s, k)
 
+-- | Get a single field, or null if not present
+--
+-- >>> run h $ obj [] !? "foo" :: IO (Maybe (Maybe Bool))
+-- Just Nothing
+(!?) :: (Expr s) => s -> ReQL -> ReQL
+s !? k = op DEFAULT (op GET_FIELD (s, k), ())
+
 -- | Keep only the given attributes
 --
 -- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # pluck ["a"]
--- [[{"a":1.0},{"a":2.0},{}]]
+-- [[{"a":1},{"a":2},{}]]
 pluck :: (Expr o) => [ReQL] -> o -> ReQL
 pluck ks e = op PLUCK (cons e $ arr (P.map expr ks))
 
@@ -500,7 +512,7 @@ elem x s = op CONTAINS (s, x)
 -- | Merge two objects together
 --
 -- >>> run' h $ merge (obj ["a" := 1, "b" := 1]) (obj ["b" := 1, "c" := 2])
--- [{"a":1,"b":2,"c":2}]
+-- [{"a":1,"b":1,"c":2}]
 merge :: (Expr a, Expr b) => a -> b -> ReQL
 merge a b = op MERGE (b, a)
 
@@ -520,8 +532,7 @@ remove = op LITERAL ()
 
 -- | Evaluate a JavaScript expression
 --
--- >>> run h $ js "Math.random()" :: IO (Maybe Double)
--- Just 0.9119815775193274
+-- >>> _ <- run h $ js "Math.random()" :: IO (Maybe Double)
 -- >>> run h $ R.map (\x -> js "Math.sin" `apply` [x]) [pi, pi/2] :: IO (Maybe [Double])
 -- Just [1.2246063538223773e-16,1.0]
 js :: ReQL -> ReQL
@@ -551,57 +562,56 @@ db s = O.Database s
 -- | Create a database on the server
 --
 -- >>> run' h $ dbCreate "dev"
--- [{"created":1.0}]
+-- [{"created":1}]
 dbCreate :: P.String -> ReQL
 dbCreate db_name = op DB_CREATE [str db_name]
 
 -- | Drop a database
 --
 -- >>> run' h $ dbDrop (db "dev")
--- [{"dropped":1.0}]
+-- [{"dropped":1}]
 dbDrop :: Database -> ReQL
 dbDrop (O.Database name) = op DB_DROP [name]
 
 -- | List the databases on the server
 --
--- >>> run h $ dbList :: IO (Maybe [String])
--- Just ["test"]
+-- >>> _ <- run h $ dbList :: IO (Maybe [String])
 dbList :: ReQL
 dbList = op DB_LIST ()
 
 -- | Create an index on the table from the given function
 --
--- >>> run' h $ table "users" # indexCreate "name" (!"name") def
--- [{"created":1.0}]
+-- >>> run' h $ table "users" # indexCreate "occupation" (!"occupation") def
+-- [{"created":1}]
 indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> ReQL
 indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
   ("multi" :==) <$> indexMulti opts]
 
--- | Drop an index
---
--- >>> run' h $ table "users" # indexDrop "name"
--- [{"dropped":1.0}]
-indexDrop :: Key -> Table -> ReQL
-indexDrop name tbl = op INDEX_DROP (tbl, name)
-
 -- | List the indexes on the table
 --
 -- >>> run' h $ indexList (table "users")
--- [["name"]]
+-- [["occupation"]]
 indexList :: Table -> ReQL
 indexList tbl = op INDEX_LIST [tbl]
 
+-- | Drop an index
+--
+-- >>> run' h $ table "users" # indexDrop "occupation"
+-- [{"dropped":1}]
+indexDrop :: Key -> Table -> ReQL
+indexDrop name tbl = op INDEX_DROP (tbl, name)
+
 -- | Retreive documents by their indexed value
 --
--- >>> run' h $ table "users" # getAll "name" ["bob"]
--- [{"post_count":1.0,"name":"bob","id":"b6a9df6a-b92c-46d1-ae43-1d2dd8ec293c"}]
+-- >>> run' h $ table "users" # getAll "name" [str "bill"]
+-- [[{"post_count":2,"name":"bill","occupation":"pianist"}]]
 getAll :: (Expr value) => Key -> [value] -> Table -> ReQL
 getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" :== idx]
 
 -- | Get a document by primary key
 --
--- >>> run' h $ table "users" # get "8d674d7a-873c-4c0f-8a4a-32a4bd5bdee8"
--- [{"post_count":0.0,"name":"nancy","id":"8d674d7a-873c-4c0f-8a4a-32a4bd5bdee8"}]
+-- >>> run' h $ table "users" # get "nancy"
+-- [{"post_count":0.0,"name":"nancy"}]
 get :: Expr s => ReQL -> s -> ReQL
 get k e = op GET (e, k)
 
@@ -636,7 +646,7 @@ asNumber = coerceTo "NUMBER"
 -- | Convert a value to an object
 --
 -- >>> run' h $ asObject $ [(str "a",1),("b",2)]
--- [{"a":1.0,"b":2.0}]
+-- [{"a":1,"b":2}]
 asObject :: Expr x => x -> ReQL
 asObject = coerceTo "OBJECT"
 
@@ -647,7 +657,7 @@ asBool = coerceTo "BOOL"
 -- | Like hasFields followed by pluck
 --
 -- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # withFields ["a"]
--- [[{"a":1.0},{"a":2.0}]]
+-- [[{"a":1},{"a":2}]]
 withFields :: Expr seq => [ReQL] -> seq -> ReQL
 withFields p s = op WITH_FIELDS (s, p)
 
@@ -667,8 +677,7 @@ isEmpty s = op IS_EMPTY [s]
 
 -- | Select a given number of elements from a sequence with uniform random distribution
 --
--- >>> run h $ sample 3 [0,1,2,3,4,5,6,7,8,9] :: IO (Maybe [Int])
--- Just [4,3,8]
+-- >>> _ <- run h $ sample 3 [0,1,2,3,4,5,6,7,8,9] :: IO (Maybe [Int])
 sample :: (Expr n, Expr seq) => n -> seq -> ReQL
 sample n s = op SAMPLE (s, n)
 
@@ -718,7 +727,7 @@ setDifference r s = op SET_DIFFERENCE (s, r)
 
 -- | Test if an object has the given fields
 --
--- >>> run h $ hasFields ["a"] $ obj ["a" := 1] :: IO (Maybe Bool)
+-- >>> run h $ hasFields "a" $ obj ["a" := 1] :: IO (Maybe Bool)
 -- Just True
 hasFields :: (Expr obj) => ReQL -> obj -> ReQL
 hasFields p o = op HAS_FIELDS (o, expr p)
@@ -763,7 +772,7 @@ keys o = op KEYS [o]
 -- Called /match/ in the official drivers
 --
 -- >>> run' h $ str "foobar" =~ "f(.)+[bc](.+)"
--- [{"groups":[{"start":2.0,"end":3.0,"str":"o"},{"start":4.0,"end":6.0,"str":"ar"}],"start":0.0,"end":6.0,"str":"foobar"}]
+-- [{"groups":[{"start":2,"end":3,"str":"o"},{"start":4,"end":6,"str":"ar"}],"start":0.0,"end":6,"str":"foobar"}]
 (=~) :: (Expr string) => string -> ReQL -> ReQL
 s =~ r = op MATCH (s, r)
 
@@ -780,9 +789,9 @@ f `apply` as = op FUNCALL (expr f : P.map expr as)
 --
 -- Called /default/ in the official drivers
 --
--- >>> run h $ handle 0 $ obj ["a" := 1] ! "b" :: IO (Maybe Int)
+-- >>> run h $ R.handle 0 $ obj ["a" := 1] ! "b" :: IO (Maybe Int)
 -- Just 0
--- >>> run h $ handle (expr . id) $ obj ["a" := 1] ! "b" :: IO (Maybe String)
+-- >>> run h $ R.handle (expr . id) $ obj ["a" := 1] ! "b" :: IO (Maybe String)
 -- Just "No attribute `b` in object:\n{\n\t\"a\":\t1\n}"
 handle :: (Expr handler, Expr reql) => handler -> reql -> ReQL
 handle h r = op DEFAULT (r, h)
@@ -796,15 +805,15 @@ typeOf a = op TYPEOF [a]
 
 -- | Get information on a given expression. Useful for tables and databases.
 --
--- >>> run' h $ info $ table "foo"
--- [{"primary_key":"id","name":"foo","indexes":[],"type":"TABLE","db":{"name":"test","type":"DB"}}]
+-- >>> run' h $ info $ table "users"
+-- [{"primary_key":"name","name":"users","indexes":[],"type":"TABLE","db":{"name":"doctests","type":"DB"}}]
 info :: Expr a => a -> ReQL
 info a = op INFO [a]
 
 -- | Parse a json string into an object
 --
--- >>> run' h $ json "{a:1}"
--- [{"a":1.0}]
+-- >>> run' h $ json "{\"a\":1}"
+-- [{"a":1}]
 json :: ReQL -> ReQL
 json s = op JSON [s]
 
@@ -829,21 +838,21 @@ toLower s = op DOWNCASE [s]
 -- | Split a string on whitespace characters
 --
 -- >>> run' h $ split (str "foo bar")
--- ["foo", "bar"]
+-- [["foo","bar"]]
 split :: Expr str => str -> ReQL
 split s = op SPLIT [s]
 
 -- | Split a string on a given delimiter
 --
 -- >>> run' h $ str "foo, bar" # splitOn ","
--- ["foo", " bar"]
+-- [["foo"," bar"]]
 splitOn :: Expr str => ReQL -> str -> ReQL
 splitOn sep s = op SPLIT [expr s, sep]
 
 -- | Split a string up to a given number of times
 --
--- >>> run' h $ "a:b:c:d" # splitMax ":" 2
--- ["a", "b", "c:d"]
+-- >>> run' h $ str "a:b:c:d" # splitMax ":" 2
+-- [["a","b","c:d"]]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
 splitMax sep n s = op SPLIT [expr s, sep, n]
 

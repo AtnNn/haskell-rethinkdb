@@ -30,7 +30,8 @@ module Database.RethinkDB.ReQL (
   reqlToProtobuf,
   Bound(..),
   closedOrOpen,
-  datumTerm
+  datumTerm,
+  baseBool
   ) where
 
 import qualified Data.Vector as V
