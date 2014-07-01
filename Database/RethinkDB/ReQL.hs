@@ -31,7 +31,8 @@ module Database.RethinkDB.ReQL (
   Bound(..),
   closedOrOpen,
   datumTerm,
-  baseBool
+  baseBool,
+  nil
   ) where
 
 import qualified Data.Vector as V
@@ -76,7 +77,8 @@ data BaseReQL = BaseReQL {
     termType :: TermType,
     termDatum :: Maybe Datum.Datum,
     termArgs :: BaseArray,
-    termOptArgs :: [BaseAttribute] }
+    termOptArgs :: [BaseAttribute]
+} deriving Eq
 
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
@@ -229,7 +231,7 @@ data Attribute where
   (:=) :: Expr e => T.Text -> e -> Attribute
   (::=) :: (Expr k, Expr v) => k -> v -> Attribute
 
-data BaseAttribute = BaseAttribute T.Text BaseReQL
+data BaseAttribute = BaseAttribute T.Text BaseReQL deriving Eq
 
 data OptArg = forall e . Expr e => T.Text :== e
 
@@ -484,6 +486,9 @@ data Bound a =
 closedOrOpen :: Bound a -> T.Text
 closedOrOpen Open{} = "open"
 closedOrOpen Closed{} = "closed"
+
+nil :: ReQL
+nil = expr ([] :: [()])
 
 instance (Expr a, Expr b) => Expr (a, b) where
   expr (a, b) = expr [expr a, expr b]

@@ -430,6 +430,7 @@ groupBy g f s = ReQL $ do
   let group = op GROUP (expr s, expr . g)
   baseReQL $ op UNGROUP [mr group] ! "reduction"
 
+-- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
 mapReduce f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
@@ -793,8 +794,8 @@ f `apply` as = op FUNCALL (expr f : P.map expr as)
 -- Just 0
 -- >>> run h $ R.handle (expr . id) $ obj ["a" := 1] ! "b" :: IO (Maybe String)
 -- Just "No attribute `b` in object:\n{\n\t\"a\":\t1\n}"
-handle :: (Expr handler, Expr reql) => handler -> reql -> ReQL
-handle h r = op DEFAULT (r, h)
+handle :: (Expr instead, Expr reql) => (ReQL -> instead) -> reql -> ReQL
+handle h r = op DEFAULT (r, expr . h)
 
 -- | A string representing the type of an expression
 --

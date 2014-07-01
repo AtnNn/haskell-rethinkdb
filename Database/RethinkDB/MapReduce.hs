@@ -69,8 +69,9 @@ data Chain =
   None ReQL |
   -- | Just a map
   Map [Map] |
-  -- | A map/reduce operation represented as parts
+  -- | map/reduce operations represented as parts
   MapReduceChain [Map] Reduce |
+  MapReduceBase [Map] ReQL Reduce |
   -- | A rewritten map/reduce
   MapReduce MRF |
   -- | Special cases for reduce with base
@@ -91,10 +92,13 @@ data Reduce =
 applyChain :: Chain -> (ReQL -> ReQL)
 applyChain (None t) x = op FUNCALL (t, x)
 applyChain (Map maps) s = applyMaps maps s
-applyChain (MapReduceChain maps red) s = applyReduce red $ applyMaps maps s
+applyChain (MapReduceChain maps red) s =
+  applyReduce red $ applyMaps maps s
+applyChain (MapReduceBase maps base red) s =
+  applyReduce red $ (R.++ [base]) $ applyMaps maps s
 applyChain (MapReduce mrf) s = applyMRF mrf s
 applyChain (SingletonArray x) s = op FUNCALL (op MAKE_ARRAY [x], s)
-applyChain (AddBase b c) s = applyChain c $ op UNION (s, op MAKE_ARRAY [b]) -- TODO: this is completely wrong
+applyChain (AddBase b c) s = applyChain c s R.++ [b]
 
 applyMRF :: MRF -> ReQL -> ReQL
 applyMRF (MRF m r f) s = f . reduce1 r $ applyMapFun m s
@@ -117,6 +121,7 @@ chainToMRF :: Chain -> Either ReQL MRF
 chainToMRF (None t) = Left t
 chainToMRF (Map maps) = Right $ maps `thenMRF` collect
 chainToMRF (MapReduceChain maps red) = Right $ maps `thenReduce` red
+chainToMRF (MapReduceBase maps _base red) = Right $ maps `thenReduce` red
 chainToMRF (MapReduce mrf) = Right $ mrf
 chainToMRF (SingletonArray x) = Left $ op MAKE_ARRAY [x]
 chainToMRF (AddBase b c) = fmap (`thenFinally` \x -> op UNION [b, x]) $ chainToMRF c
@@ -177,8 +182,8 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
     -- Special case for singleton arrays
     0 | Just sing <- singleton type' args' optargs -> SingletonArray sing
     
-    -- Special case for cons
-    1 | UNION <- type', [SingletonArray s, x] <- args', [] <- optargs'
+    -- Special case for snoc
+    1 | UNION <- type', [x, SingletonArray s] <- args', [] <- optargs'
       -> AddBase s x
 
     -- Don't rewrite if there is nothing to rewrite
@@ -198,6 +203,12 @@ singleton _ _ _ = Nothing
 -- | Chain a ReQL command onto a MapReduce operation
 mrChain :: TermType -> Chain -> [BaseReQL] -> [BaseAttribute]
         -> Maybe Chain
+
+mrChain REDUCE (AddBase base (Map maps)) [f] [] =
+  Just $
+  MapReduceBase maps base $
+  BuiltInReduce REDUCE [wrap f] [] $
+  MRF (MapFun id) (toFun2 f) id
 
 -- | A built-in map
 mrChain tt (Map maps) args optargs
@@ -223,13 +234,22 @@ mapMRF WITHOUT ks [] =
     Just . MapFun $ \s -> op' WITHOUT (s : map wrap ks) [noRecurse]
 mapMRF MERGE [b] [] =
   Just . MapFun $ \s -> op' MERGE [s,  wrap b] [noRecurse]
-mapMRF CONCATMAP [f] [] = undefined
-mapMRF FILTER [f] [] = undefined
-mapMRF FILTER [f] [BaseAttribute "default" defval]
-  | defval == baseBool False = undefined
-mapMRF GET_FIELD [attr] [] = undefined
-mapMRF HAS_FIELDS sel [] = undefined
-mapMRF WITH_FIELDS sel [] = undefined
+mapMRF CONCATMAP [f] [] = Just . ConcatMapFun $ toFun1 f
+mapMRF FILTER [f] [] =
+  Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const False)) x nil
+mapMRF FILTER [f] [BaseAttribute "default" defval] =
+    Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const defval)) x nil
+mapMRF GET_FIELD [attr] [] =
+  Just . ConcatMapFun $ \x ->
+  if' (op' HAS_FIELDS (x, wrap attr) [noRecurse])
+  [op' GET_FIELD (x, attr) [noRecurse]] nil
+mapMRF HAS_FIELDS sel [] =
+  Just . ConcatMapFun $ \x ->
+  if' (op' HAS_FIELDS (x : map wrap sel) [noRecurse]) [x] nil
+mapMRF WITH_FIELDS sel [] =
+  Just . ConcatMapFun $ \x ->
+  if' (op' HAS_FIELDS (x : map wrap sel) [noRecurse])
+  [op' PLUCK (x : map wrap sel) [noRecurse]] nil
 mapMRF _ _ _ = Nothing
 
 -- | Convert some of the built-in operations into a map/reduce
@@ -252,7 +272,7 @@ reduceMRF MIN [sel] [] =
              (R.!! 0)
 reduceMRF MAX [] [] = Just $ MRF (MapFun id) (\a b -> if' (a R.> b) a b) id
 reduceMRF MAX [sel] [] =
-    Just $ MRF (MapFun $\x -> expr [x, toFun1 sel x])
+    Just $ MRF (MapFun $ \x -> expr [x, toFun1 sel x])
              (\a b -> if' (a R.!! 1 R.> b R.!! 1) a b)
              (R.!! 0)
 reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> nub (a R.++ b)) id
@@ -293,8 +313,8 @@ rewritex ttype args optargs = MRF maps reduces finallys where
   getMapFun (MRF (ConcatMapFun f) _ _) = f
   getReduceFun (MRF (MapFun _) f _) = f
   getReduceFun (MRF (ConcatMapFun _) f _) =
-    \a b -> flip apply (a R.++ b) $ \l ->
-      if' (isEmpty l) [] [reduce1 f l]
+    \a b -> flip apply [a R.++ b] $ \l ->
+      if' (isEmpty l) ([] :: [()]) [reduce1 f l]
   getFinallyFun (MRF (MapFun _) _ f) = f
   getFinallyFun (MRF (ConcatMapFun _) _ f) = f . (R.! 0) -- TODO: what if it's null
 
