@@ -81,8 +81,25 @@ toEpochTime t = op TO_EPOCH_TIME [t] ()
 -- The default FromJSON instance for Data.Time.UTCTime is incompatible with ReQL's time type
 newtype UTCTime = UTCTime Time.UTCTime
 
+timeToDouble :: Time.UTCTime -> Double
+timeToDouble = realToFrac . Time.utcTimeToPOSIXSeconds
+
+doubleToTime :: Double -> Time.UTCTime
+doubleToTime = Time.posixSecondsToUTCTime . realToFrac
+
 instance Show UTCTime where
   show (UTCTime t) = show t
+
+instance FromJSON UTCTime where
+  parseJSON (JSON.Object v) = UTCTime . doubleToTime <$> v .: "epoch_time"
+  parseJSON _ = mzero
+
+instance ToJSON UTCTime where
+  toJSON (UTCTime t) = object
+    [ "$reql_type$" .= ("TIME" :: String)
+    , "timezone"    .= ("Z" :: String)
+    , "epoch_time"  .= timeToDouble t
+    ]
 
 -- | Time with a time zone
 --
@@ -92,17 +109,19 @@ newtype ZonedTime = ZonedTime Time.ZonedTime
 instance Show ZonedTime where
   show (ZonedTime t) = show t
 
-instance FromJSON UTCTime where
-  parseJSON (JSON.Object v) = UTCTime . Time.posixSecondsToUTCTime . fromRational <$> v .: "epoch_time"
-  parseJSON _ = mzero
+instance ToJSON ZonedTime where
+  toJSON (ZonedTime t) = object
+    [ "$reql_type$" .= ("TIME" :: String)
+    , "timezone"    .= Time.timeZoneOffsetString (Time.zonedTimeZone t)
+    , "epoch_time"  .= timeToDouble (Time.zonedTimeToUTC t)
+    ]
 
 instance FromJSON ZonedTime where
   parseJSON (JSON.Object v) = do
                          tz <- v .: "timezone"
                          t <- v.: "epoch_time"
                          tz' <- parseTimeZone tz
-                         return . ZonedTime $ Time.utcToZonedTime tz'
-                           (Time.posixSecondsToUTCTime (fromRational t))
+                         return . ZonedTime $ Time.utcToZonedTime tz' $ doubleToTime t
   parseJSON _ = mzero
 
 parseTimeZone :: String -> Parser Time.TimeZone
