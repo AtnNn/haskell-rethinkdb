@@ -524,7 +524,7 @@ insert a tb = canReturnVals $ op INSERT (tb, a) ()
 -- > >>> run' h $ table "users" # upsert (obj ["id" := "79bfe377-9593-402a-ad47-f94c76c36a51", "name" := "rupert"])
 -- > [{"skipped":0.0,"inserted":0.0,"unchanged":0.0,"deleted":0.0,"replaced":1.0,"errors":0.0}]
 upsert :: (Expr table, Expr object) => object -> table -> ReQL
-upsert a tb = canReturnVals $ op INSERT (tb, a) ["upsert" := P.True]
+upsert a tb = canReturnVals $ op INSERT (tb, a) ["conflict" := str "update"]
 
 -- | Add to or modify the contents of a document
 --
