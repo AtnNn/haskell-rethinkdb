@@ -1,5 +1,5 @@
 module Database.RethinkDB.Wire.Response where
-import Prelude (Maybe(..), Int)
+import Prelude (Maybe(..), Int, Eq, Show)
 import Database.RethinkDB.Wire
 data ResponseType = SUCCESS_ATOM | SUCCESS_SEQUENCE | SUCCESS_PARTIAL | SUCCESS_FEED | WAIT_COMPLETE | CLIENT_ERROR | COMPILE_ERROR | RUNTIME_ERROR
   deriving (Eq, Show)

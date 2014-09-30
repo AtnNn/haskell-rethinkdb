@@ -1,5 +1,5 @@
 module Database.RethinkDB.Wire.VersionDummy where
-import Prelude (Maybe(..), Int)
+import Prelude (Maybe(..), Int, Eq, Show)
 import Database.RethinkDB.Wire
 data Version = V0_1 | V0_2 | V0_3
   deriving (Eq, Show)

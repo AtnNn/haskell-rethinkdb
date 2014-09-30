@@ -30,7 +30,6 @@ main = do
       forM_ mod $ \(name, enums) ->
         writeFile (unpack $ "Database/RethinkDB/Wire/" <> name <> ".hs")
         (renderMessage (name, enums))
-  print 1
   True
 
 protoFile = tr "protoFile" $ do
@@ -93,7 +92,7 @@ genRaw = unlines $ [
 
 renderMessage (name, enums) = unlines $ [
   unwords ["module", "Database.RethinkDB.Wire." <> name, "where"],
-  "import Prelude (Maybe(..), Int)",
+  "import Prelude (Maybe(..), Int, Eq, Show)",
   "import Database.RethinkDB.Wire"
   ] ++ map renderEnum enums
 

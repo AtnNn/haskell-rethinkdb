@@ -1,5 +1,5 @@
 module Database.RethinkDB.Wire.Frame where
-import Prelude (Maybe(..), Int)
+import Prelude (Maybe(..), Int, Eq, Show)
 import Database.RethinkDB.Wire
 data FrameType = POS | OPT
   deriving (Eq, Show)

@@ -26,12 +26,13 @@ module Database.RethinkDB.ReQL (
   nonAtomic,
   canReturnVals,
   canNonAtomic,
-  reqlToProtobuf,
+  reqlToJSON,
   Bound(..),
   closedOrOpen,
   datumTerm,
   boolToTerm,
-  nil
+  nil,
+  WireQuery(..)
   ) where
 
 import qualified Data.Vector as V
@@ -53,6 +54,7 @@ import Control.Monad.Fix
 import Data.Int
 import Data.Attoparsec.Number (Number(I, D))
 import Data.Monoid
+import Data.Scientific
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
@@ -71,7 +73,7 @@ data Term = Term {
   termDatum :: Datum
   } deriving Eq
 
-newtype WireTerm = WireTerm { wireJSON :: Value }
+newtype WireTerm = WireTerm { termJSON :: Value }
 
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
@@ -125,7 +127,7 @@ canNonAtomic (ReQL t) = ReQL $ t >>= \ret -> do
       termOptArgs = TermAttribute "non_atomic" (boolToTerm $ not atomic) : termOptArgs ret }
 
 boolToTerm :: Bool -> Term
-boolToTerm b = Term DATUM (Just $ J.Bool b) [] []
+boolToTerm b = Datum $ J.Bool b
 
 newVarId :: State QuerySettings Int
 newVarId = do
@@ -135,19 +137,19 @@ newVarId = do
   return $ n
 
 instance Show Term where
-  show (Term DATUM (Just dat) _ _) = show dat
-  show (Term MAKE_ARRAY _ x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
-  show (Term MAKE_OBJ _ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
-  show (Term MAKE_OBJ _ args []) = "{" ++ (concat $ intersperse ", " $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
+  show (Datum dat) = show dat
+  show (Term MAKE_ARRAY x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
+  show (Term MAKE_OBJ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
+  show (Term MAKE_OBJ args []) = "{" ++ (concat $ intersperse ", " $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
      where pairs (a:b:xs) = (a,b) : pairs xs
            pairs _ = []
-  show (Term VAR _ [Term DATUM (Just d) [] []] []) | Just x <- toDouble d =
+  show (Term VAR [Datum d] []) | Just x <- toDouble d =
     "x" ++ show (round x :: Int)
-  show (Term FUNC _ [Term DATUM (Just d) [] [], body] []) | Just vars <- toDoubles d =
+  show (Term FUNC [Datum d, body] []) | Just vars <- toDoubles d =
     "(\\" ++ (concat $ intersperse " " $ map (("x"++) . show . (round :: Double -> Int)) $ vars)
     ++ " -> " ++ show body ++ ")"
-  show (Term GET_FIELD _ [o, k] []) = show o ++ "!" ++ show k
-  show (Term fun _ args optargs) =
+  show (Term GET_FIELD [o, k] []) = show o ++ "!" ++ show k
+  show (Term fun args optargs) =
     show fun ++ "(" ++
     concat (intersperse ", " (map show args ++ map show optargs)) ++ ")"
 
@@ -227,32 +229,31 @@ op' t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseOptArgs b
   case (t, a') of
-    (FUNCALL, (Term FUNC Nothing [argsFunDatum, fun] [] : argsCall)) |
-      Term DATUM (Just argsFunArray) [] [] <- argsFunDatum,
+    (FUNCALL, (Term FUNC [argsFunDatum, fun] [] : argsCall)) |
+      Datum argsFunArray <- argsFunDatum,
       Just varsFun <- toDoubles argsFunArray,
       length varsFun == length argsCall,
       Just varsCall <- varsOf argsCall ->
         return $ alphaRename (zip varsFun varsCall) fun
-    _ -> return $ Term t Nothing a' b'
+    _ -> return $ Term t a' b'
 
 -- | Build a term with no optargs
 op :: Arr a => TermType -> a -> ReQL
 op t a = op' t a []
 
 toDoubles :: Datum -> Maybe [Double]
-toDoubles (J.Array xs) = mapM toDouble xs
+toDoubles (J.Array xs) = mapM toDouble $ toList xs
 toDoubles _ = Nothing
 
 toDouble :: Datum -> Maybe Double
-toDouble (J.Number (D d)) = d
-toDouble (J.Number (I i)) = fromInteger i
+toDouble (J.Number n) = Just $ toRealFloat n
 toDouble _ = Nothing
 
 varsOf :: [Term] -> Maybe [Double]
 varsOf = sequence . map varOf
     
 varOf :: Term -> Maybe Double
-varOf (Term VAR Nothing [Term DATUM (Just d) [] []] []) = toDouble d
+varOf (Term VAR [Datum d] []) = toDouble d
 varOf _ = Nothing
 
 alphaRename :: [(Double, Double)] -> Term -> Term
@@ -265,9 +266,11 @@ alphaRename assoc = fix $ \f x ->
     _ -> updateChildren x f
 
 updateChildren :: Term -> (Term -> Term) -> Term
-updateChildren (Term t d a o) f = Term t d (map f a) (map (mapTermAttribute f) o)
+updateChildren d@Datum{} _ = d
+updateChildren (Term t a o) f = Term t (map f a) (map (mapTermAttribute f) o)
 
-datumTerm = return . Datum . toJSON
+datumTerm :: J.ToJSON a => a -> ReQL
+datumTerm = ReQL . return . Datum . toJSON
 
 -- | A shortcut for inserting strings into ReQL expressions
 -- Useful when OverloadedStrings makes the type ambiguous
@@ -304,7 +307,7 @@ instance Expr Bool where
   expr = datumTerm
 
 instance Expr () where
-  expr _ = return $ Datum J.Null
+  expr _ = ReQL $ return $ Datum J.Null
 
 instance IsString ReQL where
   fromString = datumTerm
@@ -369,20 +372,20 @@ instance Expr Object where
 buildTerm :: Term -> WireTerm
 buildTerm (Datum arr@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, arr)
 buildTerm (Term type_ args optargs) =
-  WireTerm $ toJSON [
+  WireTerm $ toJSON (
     toWire type_,
-    map (wireJSON . buildTerm) args,
-    buildAttributes optargs]
+    map (termJSON . buildTerm) args,
+    buildAttributes optargs)
 
 buildAttributes :: [TermAttribute] -> J.Value
-buildAttributes = toJSON $ M.fromList $ map toPair TermAttribute
- where toPair (TermAttribute a b) = (a, wireJSON $ buildTerm b)
+buildAttributes ts = toJSON $ M.fromList $ map toPair ts
+ where toPair (TermAttribute a b) = (a, termJSON $ buildTerm b)
 
 newtype WireQuery = WireQuery { queryJSON :: Value }
 
 buildQuery :: ReQL -> Int64 -> Database -> (WireQuery, Term)
 buildQuery reql token db =
-  (WireQuery $ toJSON [toWire START, pterm, J.object []], bterm)
+  (WireQuery $ toJSON (toWire START, termJSON pterm, J.object []), bterm)
   where
     bterm = fst $ runState (runReQL reql) (def {queryToken = token,
                                                 queryDefaultDatabase = db })
@@ -403,7 +406,7 @@ instance Show Frame where
     show (FrameOpt k) = show k
 
 instance J.FromJSON Frame where
-  parseJSON (J.Number (I i)) = return $ FramePos $ fromInteger i
+  parseJSON (J.Number n) | Just i <- toBoundedInteger n = return $ FramePos i
   parseJSON (J.String s) = return $ FrameOpt s
   parseJSON _ = mempty
 
@@ -411,7 +414,7 @@ newtype WireBacktrace = WireBacktrace { backtraceJSON :: Value }
 
 convertBacktrace :: WireBacktrace -> Backtrace
 convertBacktrace (WireBacktrace b) =
-  case J.parseJSON b of
+  case J.fromJSON b of
     J.Success a -> a
     J.Error _ -> []
 

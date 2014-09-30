@@ -1,5 +1,5 @@
 module Database.RethinkDB.Wire.Query where
-import Prelude (Maybe(..), Int)
+import Prelude (Maybe(..), Int, Eq, Show)
 import Database.RethinkDB.Wire
 data QueryType = START | CONTINUE | STOP | NOREPLY_WAIT
   deriving (Eq, Show)
