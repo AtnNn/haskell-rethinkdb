@@ -9,8 +9,9 @@ import Control.Monad.State
 import Control.Applicative
 import Data.Maybe
 
+import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
-import {-# SOURCE #-} Database.RethinkDB.MapReduce
+-- import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Objects as O
 
 import Prelude (($), return, Double, Bool, String)
@@ -406,7 +407,7 @@ orderBy :: (Expr s) => [Order] -> s -> ReQL
 orderBy o s = ReQL $ do
   s' <- runReQL (expr s)
   o' <- baseArray $ arr $ P.map buildOrder o
-  return $ Term ORDERBY P.Nothing (s' : o') []
+  return $ Term ORDERBY (s' : o') []
   where
     buildOrder (Asc k) = op ASC [k]
     buildOrder (Desc k) = op DESC [k]
@@ -423,16 +424,18 @@ orderBy o s = ReQL $ do
 groupBy ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
-groupBy g f s = ReQL $ do
-  mr <- termToMapReduce (expr . f)
-  let group = op GROUP (expr s, expr . g)
-  runReQL $ op UNGROUP [mr group] ! "reduction"
+groupBy _g _f _s = ReQL $ do
+  P.undefined
+--  mr <- termToMapReduce (expr . f)
+--  let group = op GROUP (expr s, expr . g)
+--  runReQL $ op UNGROUP [mr group] ! "reduction"
 
 -- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
-mapReduce f s = ReQL $ do
-  mr <- termToMapReduce (expr . f)
-  runReQL $ mr (expr s)
+mapReduce _f _s = ReQL $ do
+  P.undefined
+  --mr <- termToMapReduce (expr . f)
+  --runReQL $ mr (expr s)
 
 -- | The sum of a sequence
 --

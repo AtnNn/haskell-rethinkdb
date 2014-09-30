@@ -14,7 +14,6 @@ module Database.RethinkDB.Network (
   collect,
   nextResponse,
   Response(..),
-  SuccessCode(..),
   ErrorCode(..),
   RethinkDBError(..),
   RethinkDBConnectionError(..),
@@ -24,31 +23,26 @@ import Control.Monad (when, forever)
 import Data.Typeable (Typeable)
 import Network (HostName, connectTo, PortID(PortNumber))
 import System.IO (Handle, hClose, hIsEOF)
-import Data.ByteString.Lazy (pack, unpack, hPut, hGet, ByteString)
+import Data.ByteString.Lazy (hPut, hGet, ByteString)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
-import qualified Data.Text as T
 import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, takeMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, newChan, killThread,
   newEmptyMVar, putMVar, mkWeakMVar)
-import Data.Bits (shiftL, (.|.), shiftR)
-import Data.Monoid ((<>), mconcat)
-import Control.Applicative ((<$>))
-import Data.Foldable hiding (forM_)
+import Data.Monoid((<>))
 import Control.Exception (catch, Exception, throwIO, SomeException(..))
-import Data.Aeson (toJSON, object, (.=), (.:), Value(Null, Bool), decode)
+import Data.Aeson (toJSON, Value)
 import qualified Data.Aeson as J
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, isNothing)
 import Control.Monad.Fix (fix)
-import Data.Int (Int64)
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
-import Data.Binary.Get (Get, runGet, getWord32be, getWord64be, getBytes)
-import Data.Binary.Put (Put, runPut, putWord32be, putWord64be, putLazyByteString)
+import Data.Binary.Get (runGet, getWord32be, getWord64be)
+import Data.Binary.Put (runPut, putWord32be, putWord64be, putLazyByteString)
 import Data.Word (Word64, Word32)
 import qualified Data.HashMap.Strict as HM
 
@@ -58,7 +52,8 @@ import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.VersionDummy
 import Database.RethinkDB.Objects
 import Database.RethinkDB.ReQL (
-  Term, Backtrace, convertBacktrace, WireQuery(..))
+  Term, Backtrace, convertBacktrace, WireQuery(..),
+  WireBacktrace(..), Term(..))
 
 type Token = Word64
 
@@ -147,15 +142,17 @@ data RethinkDBError = RethinkDBError {
 
 instance Exception RethinkDBError
 
--- | The raw response to a query
-data Response = ErrorResponse {
-  errorResponse :: RethinkDBError
-  } | SuccessResponse {
-  successCode :: SuccessCode,
-  successResult:: QueryResult
-  }
+-- | The response to a query
+data Response =
+  ResponseError RethinkDBError |
+  ResponseSingle Datum |
+  ResponseBatch (Maybe More) [Datum]
 
-data QueryResult = Atom Datum | Sequence [Datum] deriving Show
+data More = More {
+  _moreFeed :: Bool,
+  _moreHandle :: RethinkDBHandle, 
+  _moreToken :: Token
+  } deriving Show
 
 data ErrorCode =
   ErrorBrokenClient |
@@ -169,41 +166,46 @@ instance Show ErrorCode where
   show ErrorRuntime = "runtime error"
   show ErrorUnexpectedResponse = "unexpected response"
 
-data SuccessCode =
-  SuccessPartial RethinkDBHandle Int64 |
-  Success
-  deriving Show
-
 instance Show Response where
-  show (ErrorResponse RethinkDBError {..}) =
+  show (ResponseError RethinkDBError {..}) =
     show errorCode ++ ": " ++
     show errorMessage ++ " (" ++
     show errorBacktrace ++ ")"
-  show SuccessResponse {..} = show successCode ++ ": " ++ show successResult
+  show (ResponseSingle datum) = show datum
+  show (ResponseBatch more batch) = show more ++ " " ++ show batch
 
-newtype WireResponse = WireResponse { responseJSON :: Value }
+newtype WireResponse = WireResponse { _responseJSON :: Value }
 
-convertResponse :: RethinkDBHandle -> Term -> Int64 -> WireResponse -> Response
+convertResponse :: RethinkDBHandle -> Term -> Token -> WireResponse -> Response
 convertResponse h q t (WireResponse (J.Object o)) = let
   type_    = o .? "t" >>= fromWire
+  results :: Maybe [Datum]
   results  = o .? "r"
-  bt       = o .? "b" --> maybe [] convertBacktrace
-  _profile = o .? "p" -- TODO
-  m (.?) k = HM.lookup k m >>= resultToMaybe . J.fromJSON
+  bt       = o .? "b" --> maybe [] (convertBacktrace . WireBacktrace)
+  -- _profile = o .? "p" -- TODO
+  atom :: Maybe Datum
+  atom     = case results of Just [single] -> Just single; _ -> Nothing
+  m .? k   = HM.lookup k m >>= resultToMaybe . J.fromJSON
   resultToMaybe (J.Success a) = Just a
   resultToMaybe (J.Error _) = Nothing
   (-->) = flip ($)
-  e = fromMaybe "" $ listToMaybe results
+  e = fromMaybe "" $ resultToMaybe . J.fromJSON =<< listToMaybe =<< results
+  _ <!< Nothing = ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
+  f <!< (Just a) = f a
   in case type_ of
-  Just SUCCESS_ATOM | [atom] <- results -> SuccessResponse Success atom
-  Just SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) results
-  Just SUCCESS_SEQUENCE -> SuccessResponse Success results
-  Just CLIENT_ERROR -> ErrorResponse $ RethinkDBError ErrorBrokenClient q e bt
-  Just COMPILE_ERROR -> ErrorResponse $ RethinkDBError ErrorBadQuery q e bt
-  Just RUNTIME_ERROR -> ErrorResponse $ RethinkDBError ErrorRuntime q e bt
-  Just WAIT_COMPLETE -> SuccessResponse Success []
-  Nothing -> ErrorResponse $ RethinkDBError ErrorUnexpectedResponse q e bt
-      -- TODO: nicer backtrace
+  Just SUCCESS_ATOM -> ResponseSingle <!< atom
+  Just SUCCESS_PARTIAL -> ResponseBatch (Just $ More False h t) <!< results
+  Just SUCCESS_FEED -> ResponseBatch (Just $ More True h t) <!< results
+  Just SUCCESS_SEQUENCE -> ResponseBatch Nothing <!< results
+  Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
+  Just COMPILE_ERROR -> ResponseError $ RethinkDBError ErrorBadQuery q e bt
+  Just RUNTIME_ERROR -> ResponseError $ RethinkDBError ErrorRuntime q e bt
+  Just WAIT_COMPLETE -> ResponseSingle (toJSON True)
+  Nothing -> ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
+      -- TODO: nicer backtraces
+convertResponse _ q _ (WireResponse json) =
+  ResponseError $
+  RethinkDBError ErrorUnexpectedResponse q ("Response is not a JSON object: " ++ show json) []
 
 runQLQuery :: RethinkDBHandle -> WireQuery -> Term -> IO (MVar Response)
 runQLQuery h query term = do
@@ -254,6 +256,7 @@ readResponses h' = do
         writeIORef (rdbWait h) M.empty
   flip catch handler $ forever $ readSingleResponse h
 
+-- TODO: maybe invalidate the connection object if an error happens here
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
   tokenString <- hGet (rdbHandle h) 8
@@ -264,17 +267,14 @@ readSingleResponse h = do
   when (B.length header /= 4) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let replyLength = runGet getWord32be header
-  rawResponse <- hGet (rdbHandle h) replyLength
-  let parsedResponse = J.decode rawResponse
+  rawResponse <- hGet (rdbHandle h) (fromIntegral replyLength)
+  let parsedResponse = J.eitherDecode rawResponse
   case parsedResponse of
     Left errMsg -> fail errMsg
-    Right (response, rest)
-      | B.null rest -> dispatch token response
-      | otherwise -> fail "readSingleResponse: invalid reply length"
+    Right response -> dispatch token $ WireResponse response
 
   where
-  dispatch Nothing _ = return ()
-  dispatch (Just tok) response = do
+  dispatch tok response = do
     mboxes <- readIORef $ rdbWait h
     case M.lookup tok mboxes of
       Nothing -> return ()
@@ -284,10 +284,11 @@ readSingleResponse h = do
         when (isLastResponse convertedResponse) $ closetok
 
 isLastResponse :: Response -> Bool
-isLastResponse ErrorResponse{} = True
-isLastResponse SuccessResponse{ successCode = Success } = True
-isLastResponse SuccessResponse{ successCode = SuccessPartial{} } = False
-
+isLastResponse ResponseError{} = True
+isLastResponse ResponseSingle{} = True
+isLastResponse (ResponseBatch (Just _) _) = False
+isLastResponse (ResponseBatch Nothing _) = True
+ 
 -- | Set the default database
 --
 -- The new handle is an alias for the old one. Calling close on either one
@@ -307,7 +308,7 @@ closeToken h tok = do
   sendQLQuery h tok query
 
 nextResponse :: Response -> IO ()
-nextResponse SuccessResponse { successCode = SuccessPartial h tok } = do
+nextResponse (ResponseBatch (Just (More _ h tok)) _) = do
   let query = WireQuery $ toJSON [toWire CONTINUE]
   sendQLQuery h tok query
 nextResponse _ = return ()
@@ -331,9 +332,11 @@ cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([Datum], Bool))
 cursorFetchBatch c = do
   response <- takeMVar (cursorMBox c)
   case response of
-    ErrorResponse e -> return $ Left e
-    SuccessResponse Success datums -> return $ Right (datums, True)
-    SuccessResponse SuccessPartial{} datums -> return $ Right (datums, False)
+    ResponseError e -> return $ Left e
+    ResponseBatch more datums -> return $ Right (datums, isNothing more)
+    ResponseSingle _ ->
+      return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum J.Null)
+      "Expected a sequence but got a datum" []
 
 -- | A lazy stream of all the elements in the cursor
 collect :: Cursor a -> IO [a]

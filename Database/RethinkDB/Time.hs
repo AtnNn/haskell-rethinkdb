@@ -9,6 +9,7 @@ import Data.Aeson.Types (Parser)
 import Control.Monad
 import Control.Applicative
 
+import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
 
 -- $setup

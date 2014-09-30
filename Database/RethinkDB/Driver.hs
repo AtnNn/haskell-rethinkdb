@@ -5,19 +5,18 @@ module Database.RethinkDB.Driver (
   run',
   Result(..),
   runOpts,
-  RunOptions(..),
+  RunFlag(..),
   WriteResponse(..),
   JSON(..)
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?))
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), (.=))
 import Data.Aeson.Encode (encodeToTextBuilder)
 import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Builder (toLazyText)
 import qualified Data.Aeson (Result(Error, Success))
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
-import Data.Sequence ((|>))
 import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
 import Data.List
@@ -29,32 +28,28 @@ import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL hiding (Object)
 
 -- | Per-query settings
-data RunOptions =
+data RunFlag =
   UseOutdated |
   NoReply |
-  SoftDurability Bool |
-  ResultsAsJSON
+  Durability Durability |
+  Profile |
+  ArrayLimit Int
 
-applyOption :: RunOptions -> Query -> Query
-applyOption UseOutdated q = addQueryOption q "user_outdated" True
-applyOption NoReply q = addQueryOption q "noreply" True
-applyOption (SoftDurability b) q = addQueryOption q "soft_durability" b
-applyOption ResultsAsJSON q = q { accepts_r_json = Just True }
+data Durability = Hard | Soft
 
-addQueryOption :: Query -> String -> Bool -> Query
-addQueryOption q k v = q {
-  global_optargs = global_optargs q |> AssocPair (Just $ uFromString k) (Just boolTrue) }
-  where
-    boolTrue = defaultValue{
-      Term.type' = Just DATUM, datum = Just defaultValue{
-         Datum.type' = Just R_BOOL, r_bool = Just v } }
+renderOption :: RunFlag -> (Text, Value)
+renderOption UseOutdated = "user_outdated" .= True
+renderOption NoReply = "noreply" .= True
+renderOption (Durability Soft) = "durability" .= ("soft" :: String)
+renderOption (Durability Hard) = "durability" .= ("hard" :: String)
+renderOption Profile = "profile" .= True
+renderOption (ArrayLimit n) = "array_limit" .= n
 
 -- | Run a query with the given options
-runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunOptions] -> query -> IO r
+runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunFlag] -> query -> IO r
 runOpts h opts t = do
-  let (q, bt) = buildQuery (expr t) 0 (rdbDatabase h)
-  let q' = foldr (fmap . applyOption) id opts q
-  r <- runQLQuery h q' bt
+  let (q, bt) = buildQuery (expr t) 0 (rdbDatabase h) (map renderOption opts)
+  r <- runQLQuery h q bt
   convertResult r
 
 -- | Run a given query and return a Result

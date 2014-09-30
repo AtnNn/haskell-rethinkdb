@@ -7,7 +7,9 @@ import Control.Monad.Writer
 import qualified Data.Text as T
 import Data.Maybe
 import Data.Foldable (toList)
+import qualified Data.Aeson as J
 
+import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 
@@ -30,8 +32,8 @@ termToMapReduce f = do
 
 -- | Compares the two representations of a variable
 sameVar :: Int -> [Term] -> Bool
-sameVar x [Term DATUM (Just (Datum.Datum{ Datum.r_num = Just y })) _ _] =
-  fromIntegral x == y
+sameVar x [Datum (J.Number y)] =
+  fromIntegral x == fromIntegral y
 sameVar _ _ = False
 
 -- | notNone checks that it is a map/reduce and not a constant

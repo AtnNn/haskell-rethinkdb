@@ -32,7 +32,8 @@ module Database.RethinkDB.ReQL (
   datumTerm,
   boolToTerm,
   nil,
-  WireQuery(..)
+  WireQuery(..),
+  WireBacktrace(..)
   ) where
 
 import qualified Data.Vector as V
@@ -40,7 +41,6 @@ import qualified Data.HashMap.Lazy as M
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.String (IsString(..))
 import Data.List (intersperse)
-import qualified Data.Sequence as S
 import Control.Monad.State (State, get, put, runState)
 import Control.Applicative ((<$>))
 import Data.Default (Default, def)
@@ -52,14 +52,12 @@ import Data.Time
 import Data.Time.Clock.POSIX
 import Control.Monad.Fix
 import Data.Int
-import Data.Attoparsec.Number (Number(I, D))
 import Data.Monoid
 import Data.Scientific
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.Term as Term
-import Database.RethinkDB.Wire.Datum
 import Database.RethinkDB.Objects
 
 -- | A ReQL term
@@ -370,7 +368,8 @@ instance Expr Object where
           toOptArg (_ ::= _) = error "unreachable"
 
 buildTerm :: Term -> WireTerm
-buildTerm (Datum arr@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, arr)
+buildTerm (Datum a@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, a)
+buildTerm (Datum json) = WireTerm json
 buildTerm (Term type_ args optargs) =
   WireTerm $ toJSON (
     toWire type_,
@@ -383,19 +382,19 @@ buildAttributes ts = toJSON $ M.fromList $ map toPair ts
 
 newtype WireQuery = WireQuery { queryJSON :: Value }
 
-buildQuery :: ReQL -> Int64 -> Database -> (WireQuery, Term)
-buildQuery reql token db =
-  (WireQuery $ toJSON (toWire START, termJSON pterm, J.object []), bterm)
+buildQuery :: ReQL -> Int64 -> Database -> [(T.Text, Value)] -> (WireQuery, Term)
+buildQuery reql token db opts =
+  (WireQuery $ toJSON (toWire START, termJSON pterm, J.object opts), bterm)
   where
     bterm = fst $ runState (runReQL reql) (def {queryToken = token,
                                                 queryDefaultDatabase = db })
     pterm = buildTerm bterm
 
 instance Show ReQL where
-  show t = show . snd $ buildQuery t 0 (Database "")
+  show t = show . snd $ buildQuery t 0 (Database "") []
 
 reqlToJSON :: ReQL -> Value
-reqlToJSON t = queryJSON $ fst $ buildQuery t 0 (Database "")
+reqlToJSON t = queryJSON $ fst $ buildQuery t 0 (Database "") []
 
 type Backtrace = [Frame]
 
