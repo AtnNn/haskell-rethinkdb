@@ -2,6 +2,7 @@ module Database.RethinkDB.Wire.Query where
 import Prelude (Maybe(..), Int)
 import Database.RethinkDB.Wire
 data QueryType = START | CONTINUE | STOP | NOREPLY_WAIT
+  deriving (Eq, Show)
 instance WireValue QueryType where
   toWire START = 1
   toWire CONTINUE = 2

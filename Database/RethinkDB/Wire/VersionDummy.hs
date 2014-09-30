@@ -2,6 +2,7 @@ module Database.RethinkDB.Wire.VersionDummy where
 import Prelude (Maybe(..), Int)
 import Database.RethinkDB.Wire
 data Version = V0_1 | V0_2 | V0_3
+  deriving (Eq, Show)
 instance WireValue Version where
   toWire V0_1 = 0x3f61ba36
   toWire V0_2 = 0x723081e1
@@ -13,6 +14,7 @@ instance WireValue Version where
 
 
 data Protocol = PROTOBUF | JSON
+  deriving (Eq, Show)
 instance WireValue Protocol where
   toWire PROTOBUF = 0x271ffc41
   toWire JSON = 0x7e6970c7

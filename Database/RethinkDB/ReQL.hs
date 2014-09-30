@@ -52,7 +52,10 @@ import Data.Time.Clock.POSIX
 import Control.Monad.Fix
 import Data.Int
 import Data.Attoparsec.Number (Number(I, D))
+import Data.Monoid
 
+import Database.RethinkDB.Wire
+import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.Wire.Datum
 import Database.RethinkDB.Objects
@@ -68,7 +71,7 @@ data Term = Term {
   termDatum :: Datum
   } deriving Eq
 
-newtype WireTerm = WireTerm Value
+newtype WireTerm = WireTerm { wireJSON :: Value }
 
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
@@ -317,9 +320,6 @@ instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
     b <- newVarId
     runReQL $ op FUNC (toJSON [a, b], expr $ f (op VAR [a]) (op VAR [b]))
 
-instance Expr Datum where
-  expr = ReQL . return . Datum
-
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
     op' TABLE (fromMaybe queryDefaultDatabase mdb, name) $ catMaybes [
@@ -367,37 +367,32 @@ instance Expr Object where
           toOptArg (_ ::= _) = error "unreachable"
 
 buildTerm :: Term -> WireTerm
-buildTerm Term {..} = defaultValue {
-    Term.type' = Just termType,
-    datum = termDatum,
-    args = build[Term] termArgs,
-    optargs = buildTermAssoc termOptArgs }
+buildTerm (Datum arr@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, arr)
+buildTerm (Term type_ args optargs) =
+  WireTerm $ toJSON [
+    toWire type_,
+    map (wireJSON . buildTerm) args,
+    buildAttributes optargs]
 
-buildTerms :: [Term] -> Seq Term
-buildTerms [] = S.empty
-buildTerms (x:xs) = buildTerm x S.<| buildTerms xs
+buildAttributes :: [TermAttribute] -> J.Value
+buildAttributes = toJSON $ M.fromList $ map toPair TermAttribute
+ where toPair (TermAttribute a b) = (a, wireJSON $ buildTerm b)
 
-buildTermAssoc :: [TermAttribute] -> Seq AssocPair
-buildTermAssoc = S.fromList . map buildTermAttribute
+newtype WireQuery = WireQuery { queryJSON :: Value }
 
-buildTermAttribute :: TermAttribute -> AssocPair
-buildTermAttribute (TermAttribute k v) = AssocPair (Just $ uFromString $ T.unpack k) (Just $ buildTerm v)
-
-buildQuery :: ReQL -> Int64 -> Database -> (Query.Query, Term)
-buildQuery term token db = (defaultValue {
-                              Query.type' = Just START,
-                              Query.query = Just pterm },
-                            bterm)
-  where bterm =
-         fst $ runState (runReQL term) (def {queryToken = token,
-                                              queryDefaultDatabase = db })
-        pterm = buildTerm bterm
+buildQuery :: ReQL -> Int64 -> Database -> (WireQuery, Term)
+buildQuery reql token db =
+  (WireQuery $ toJSON [toWire START, pterm, J.object []], bterm)
+  where
+    bterm = fst $ runState (runReQL reql) (def {queryToken = token,
+                                                queryDefaultDatabase = db })
+    pterm = buildTerm bterm
 
 instance Show ReQL where
   show t = show . snd $ buildQuery t 0 (Database "")
 
-reqlToProtobuf :: ReQL -> Query.Query
-reqlToProtobuf t = fst $ buildQuery t 0 (Database "")
+reqlToJSON :: ReQL -> Value
+reqlToJSON t = queryJSON $ fst $ buildQuery t 0 (Database "")
 
 type Backtrace = [Frame]
 
@@ -407,11 +402,18 @@ instance Show Frame where
     show (FramePos n) = show n
     show (FrameOpt k) = show k
 
-convertBacktrace :: QL.Backtrace -> Backtrace
-convertBacktrace = concatMap convertFrame . toList . QL.frames
-    where convertFrame QL.Frame { type' = Just QL.POS, pos = Just n } = [FramePos n]
-          convertFrame QL.Frame { type' = Just QL.OPT, opt = Just k } = [FrameOpt (T.pack $ uToString k)]
-          convertFrame _ = []
+instance J.FromJSON Frame where
+  parseJSON (J.Number (I i)) = return $ FramePos $ fromInteger i
+  parseJSON (J.String s) = return $ FrameOpt s
+  parseJSON _ = mempty
+
+newtype WireBacktrace = WireBacktrace { backtraceJSON :: Value }
+
+convertBacktrace :: WireBacktrace -> Backtrace
+convertBacktrace (WireBacktrace b) =
+  case J.parseJSON b of
+    J.Success a -> a
+    J.Error _ -> []
 
 instance Expr UTCTime where
   expr t = op EPOCH_TIME [expr . toRational $ utcTimeToPOSIXSeconds t]

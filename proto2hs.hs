@@ -1,4 +1,5 @@
 #!/usr/bin/env runhaskell
+{-# OPTIONS_GHC -fdefer-type-errors #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
@@ -29,6 +30,8 @@ main = do
       forM_ mod $ \(name, enums) ->
         writeFile (unpack $ "Database/RethinkDB/Wire/" <> name <> ".hs")
         (renderMessage (name, enums))
+  print 1
+  True
 
 protoFile = tr "protoFile" $ do
   many message
@@ -96,6 +99,7 @@ renderMessage (name, enums) = unlines $ [
 
 renderEnum (name, decls) = unlines $ [
   unwords $ ["data", name, "="] <> intersperse "|" (map fst decls),
+  "  deriving (Eq, Show)",
   unwords ["instance WireValue", name, "where"],
   indent $
   (for decls $ \(var, val) -> "toWire " <> var <> " = " <> val) <>

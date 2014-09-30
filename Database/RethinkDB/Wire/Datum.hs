@@ -2,6 +2,7 @@ module Database.RethinkDB.Wire.Datum where
 import Prelude (Maybe(..), Int)
 import Database.RethinkDB.Wire
 data DatumType = R_NULL | R_BOOL | R_NUM | R_STR | R_ARRAY | R_OBJECT | R_JSON
+  deriving (Eq, Show)
 instance WireValue DatumType where
   toWire R_NULL = 1
   toWire R_BOOL = 2
