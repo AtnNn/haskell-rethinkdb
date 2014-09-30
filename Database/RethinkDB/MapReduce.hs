@@ -24,13 +24,13 @@ termToMapReduce f = do
   -- is being performed on. This variable is no longer present
   -- in the return value
   v <- newVarId
-  body <- baseReQL $ f (op VAR [v])
+  body <- runReQL $ f (op VAR [v])
   
   return . applyChain $ toMapReduce v body
 
 -- | Compares the two representations of a variable
-sameVar :: Int -> BaseArray -> Bool
-sameVar x [BaseReQL DATUM (Just (Datum.Datum{ Datum.r_num = Just y })) _ _] =
+sameVar :: Int -> [Term] -> Bool
+sameVar x [Term DATUM (Just (Datum.Datum{ Datum.r_num = Just y })) _ _] =
   fromIntegral x == y
 sameVar _ _ = False
 
@@ -40,16 +40,16 @@ notConst None{} = False
 notConst SingletonArray{} = False
 notConst _ = True
 
--- | Helper function for casting up from BaseReQL into ReQL
-wrap :: BaseReQL -> ReQL
+-- | Helper function for casting up from Term into ReQL
+wrap :: Term -> ReQL
 wrap = ReQL . return
 
 -- | Build a single argument function from a constant ReQL expression
-toFun1 :: BaseReQL -> (ReQL -> ReQL)
+toFun1 :: Term -> (ReQL -> ReQL)
 toFun1 f a = op FUNCALL (wrap f, a)
 
 -- | Build a two argument function from a constant ReQL expression
-toFun2 :: BaseReQL -> (ReQL -> ReQL -> ReQL)
+toFun2 :: Term -> (ReQL -> ReQL -> ReQL)
 toFun2 f a b = op FUNCALL (wrap f, a, b)
 
 -- | Represents a map/reduce operation split into its map and reduce parts
@@ -152,24 +152,24 @@ collect = MRF (MapFun $ \x -> expr [x]) (R.++) (Just []) id
 
 -- | Rewrites the term in the second argument to merge all uses of the
 -- variable whose id is given in the first argument.
-toMapReduce :: Int -> BaseReQL -> Chain
+toMapReduce :: Int -> Term -> Chain
 
 -- Singletons are singled out
-toMapReduce _ (BaseReQL DATUM (Just Datum.Datum{ Datum.type' = Just Datum.R_ARRAY,
+toMapReduce _ (Term DATUM (Just Datum.Datum{ Datum.type' = Just Datum.R_ARRAY,
                                                  Datum.r_array = arr' }) _ _)
   | [datum] <- toList arr' =
-    SingletonArray . wrap $ BaseReQL DATUM (Just datum) [] []
+    SingletonArray . wrap $ Term DATUM (Just datum) [] []
 
 -- A datum stays constant
-toMapReduce _ t@(BaseReQL DATUM _ _ _) = None $ wrap t
+toMapReduce _ t@(Term DATUM _ _ _) = None $ wrap t
 
 -- The presence of the variable 
-toMapReduce v (BaseReQL VAR _ w _) | sameVar v w = Map []
-toMapReduce v t@(BaseReQL type' _ args optargs) = let
+toMapReduce v (Term VAR _ w _) | sameVar v w = Map []
+toMapReduce v t@(Term type' _ args optargs) = let
   
   -- Recursively convert all arguments
   args' = map (toMapReduce v) args
-  optargs' = map (\(BaseAttribute k vv) -> (k, toMapReduce v vv)) optargs
+  optargs' = map (\(TermAttribute k vv) -> (k, toMapReduce v vv)) optargs
   
   -- Count how many of the arguments have been rewritten
   count = length $ filter notConst $ args' ++ map snd optargs'
@@ -197,12 +197,12 @@ toMapReduce v t@(BaseReQL type' _ args optargs) = let
     -- Default to rewriting the term
     _ -> rewrite
 
-singleton :: TermType -> [Chain] -> [BaseAttribute] -> Maybe ReQL
+singleton :: TermType -> [Chain] -> [TermAttribute] -> Maybe ReQL
 singleton MAKE_ARRAY [None el] [] = Just el
 singleton _ _ _ = Nothing
 
 -- | Chain a ReQL command onto a MapReduce operation
-mrChain :: TermType -> Chain -> [BaseReQL] -> [BaseAttribute]
+mrChain :: TermType -> Chain -> [Term] -> [TermAttribute]
         -> Maybe Chain
 
 mrChain REDUCE (AddBase base (Map maps)) [f] [] =
@@ -226,7 +226,7 @@ mrChain tt (Map maps) args optargs
 mrChain _ _ _ _ = Nothing
 
 -- | Convert some builtin operations into a map
-mapMRF :: TermType -> [BaseReQL] -> [BaseAttribute]
+mapMRF :: TermType -> [Term] -> [TermAttribute]
             -> Maybe MapFun
 mapMRF MAP [f] [] = Just . MapFun $ toFun1 f
 mapMRF PLUCK ks [] =
@@ -238,7 +238,7 @@ mapMRF MERGE [b] [] =
 mapMRF CONCATMAP [f] [] = Just . ConcatMapFun $ toFun1 f
 mapMRF FILTER [f] [] =
   Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const False)) x nil
-mapMRF FILTER [f] [BaseAttribute "default" defval] =
+mapMRF FILTER [f] [TermAttribute "default" defval] =
     Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const defval)) x nil
 mapMRF GET_FIELD [attr] [] =
   Just . ConcatMapFun $ \x ->
@@ -256,7 +256,7 @@ mapMRF _ _ _ = Nothing
 -- | Convert some of the built-in operations into a map/reduce
 --
 -- TODO: test
-reduceMRF :: TermType -> [BaseReQL] -> [BaseAttribute]
+reduceMRF :: TermType -> [Term] -> [TermAttribute]
             -> Maybe MRF
 reduceMRF REDUCE [f] [] = Just $ MRF (MapFun id) (toFun2 f) id
 reduceMRF COUNT [] [] = Just $ MRF (MapFun $ const (num 1)) (\a b -> op ADD (a, b)) id
@@ -280,8 +280,8 @@ reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> nub (a 
 reduceMRF _ _ _ = Nothing
 
 -- | Convert from one representation to the other
-baseAttrToOptArg :: BaseAttribute -> OptArg
-baseAttrToOptArg (BaseAttribute k v) = k :== v
+baseAttrToOptArg :: TermAttribute -> OptArg
+baseAttrToOptArg (TermAttribute k v) = k :== v
 
 -- | This undocumented optional argument circumvents stream
 -- polymorphism on some operations

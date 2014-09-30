@@ -49,7 +49,7 @@ import System.Mem.Weak (finalize)
 
 import Database.RethinkDB.Objects as O
 import Database.RethinkDB.ReQL (
-  BaseReQL, Backtrace, convertBacktrace)
+  Term, Backtrace, convertBacktrace)
 
 type Token = Int64
 
@@ -59,7 +59,7 @@ data RethinkDBHandle = RethinkDBHandle {
   rdbWriteLock :: MVar (Maybe SomeException),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
-  rdbWait :: IORef (Map Token (Chan Response, BaseReQL, IO ())),
+  rdbWait :: IORef (Map Token (Chan Response, Term, IO ())),
   rdbThread :: ThreadId
   }
 
@@ -145,7 +145,7 @@ withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
 
 data RethinkDBError = RethinkDBError {
   errorCode :: ErrorCode,
-  errorTerm :: BaseReQL,
+  errorTerm :: Term,
   errorMessage :: String,
   errorBacktrace :: Backtrace
   } deriving (Typeable, Show)
@@ -184,7 +184,7 @@ instance Show Response where
     show errorBacktrace ++ ")"
   show SuccessResponse {..} = show successCode ++ ": " ++ show successDatums
 
-convertResponse :: RethinkDBHandle -> BaseReQL -> Int64 -> Ql2.Response -> Response
+convertResponse :: RethinkDBHandle -> Term -> Int64 -> Ql2.Response -> Response
 convertResponse h q t Ql2.Response{ .. } = case type' of
   Just SUCCESS_ATOM -> SuccessResponse Success <!< map convertDatum r
   Just SUCCESS_PARTIAL -> SuccessResponse (SuccessPartial h t) <!< map convertDatum r
@@ -203,14 +203,14 @@ convertResponse h q t Ql2.Response{ .. } = case type' of
     e = maybe "" uToString $ r_str =<< listToMaybe (toList response)
         -- TODO: nicer backtrace
 
-runQLQuery :: RethinkDBHandle -> Query -> BaseReQL -> IO (MVar Response)
+runQLQuery :: RethinkDBHandle -> Query -> Term -> IO (MVar Response)
 runQLQuery h query term = do
   tok <- newToken h
   mbox <- addMBox h tok term
   sendQLQuery h query{ Query.token = Just tok }
   return mbox
 
-addMBox :: RethinkDBHandle -> Token -> BaseReQL -> IO (MVar Response)
+addMBox :: RethinkDBHandle -> Token -> Term -> IO (MVar Response)
 addMBox h tok term = do
   chan <- newChan
   mbox <- newEmptyMVar

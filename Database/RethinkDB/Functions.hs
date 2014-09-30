@@ -404,9 +404,9 @@ data Order =
 -- [[{"post_count":2,"name":"bill"},{"post_count":0.0,"name":"nancy"}]]
 orderBy :: (Expr s) => [Order] -> s -> ReQL
 orderBy o s = ReQL $ do
-  s' <- baseReQL (expr s)
+  s' <- runReQL (expr s)
   o' <- baseArray $ arr $ P.map buildOrder o
-  return $ BaseReQL ORDERBY P.Nothing (s' : o') []
+  return $ Term ORDERBY P.Nothing (s' : o') []
   where
     buildOrder (Asc k) = op ASC [k]
     buildOrder (Desc k) = op DESC [k]
@@ -426,13 +426,13 @@ groupBy ::
 groupBy g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
   let group = op GROUP (expr s, expr . g)
-  baseReQL $ op UNGROUP [mr group] ! "reduction"
+  runReQL $ op UNGROUP [mr group] ! "reduction"
 
 -- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
 mapReduce f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
-  baseReQL $ mr (expr s)
+  runReQL $ mr (expr s)
 
 -- | The sum of a sequence
 --
