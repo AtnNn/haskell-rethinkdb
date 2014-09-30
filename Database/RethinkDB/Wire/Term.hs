@@ -1,95 +1,6 @@
-module Database.RethinkDB.RawQuery where
-class WireValue a where
-  toWire :: a -> Int
-  fromWire :: Int -> a
-data Version = V0_1 | V0_2 | V0_3
-instance WireValue Version where
-  toWire V0_1 = 0x3f61ba36
-  toWire V0_2 = 0x723081e1
-  toWire V0_3 = 0x5f75e83e
-  fromWire 0x3f61ba36 = Just V0_1
-  fromWire 0x723081e1 = Just V0_2
-  fromWire 0x5f75e83e = Just V0_3
-  fromWire _ = Nothing
-
-
-data Protocol = PROTOBUF | JSON
-instance WireValue Protocol where
-  toWire PROTOBUF = 0x271ffc41
-  toWire JSON = 0x7e6970c7
-  fromWire 0x271ffc41 = Just PROTOBUF
-  fromWire 0x7e6970c7 = Just JSON
-  fromWire _ = Nothing
-
-
-
-data QueryType = START | CONTINUE | STOP | NOREPLY_WAIT
-instance WireValue QueryType where
-  toWire START = 1
-  toWire CONTINUE = 2
-  toWire STOP = 3
-  toWire NOREPLY_WAIT = 4
-  fromWire 1 = Just START
-  fromWire 2 = Just CONTINUE
-  fromWire 3 = Just STOP
-  fromWire 4 = Just NOREPLY_WAIT
-  fromWire _ = Nothing
-
-
-
-data FrameType = POS | OPT
-instance WireValue FrameType where
-  toWire POS = 1
-  toWire OPT = 2
-  fromWire 1 = Just POS
-  fromWire 2 = Just OPT
-  fromWire _ = Nothing
-
-
-
-
-data ResponseType = SUCCESS_ATOM | SUCCESS_SEQUENCE | SUCCESS_PARTIAL | SUCCESS_FEED | WAIT_COMPLETE | CLIENT_ERROR | COMPILE_ERROR | RUNTIME_ERROR
-instance WireValue ResponseType where
-  toWire SUCCESS_ATOM = 1
-  toWire SUCCESS_SEQUENCE = 2
-  toWire SUCCESS_PARTIAL = 3
-  toWire SUCCESS_FEED = 5
-  toWire WAIT_COMPLETE = 4
-  toWire CLIENT_ERROR = 16
-  toWire COMPILE_ERROR = 17
-  toWire RUNTIME_ERROR = 18
-  fromWire 1 = Just SUCCESS_ATOM
-  fromWire 2 = Just SUCCESS_SEQUENCE
-  fromWire 3 = Just SUCCESS_PARTIAL
-  fromWire 5 = Just SUCCESS_FEED
-  fromWire 4 = Just WAIT_COMPLETE
-  fromWire 16 = Just CLIENT_ERROR
-  fromWire 17 = Just COMPILE_ERROR
-  fromWire 18 = Just RUNTIME_ERROR
-  fromWire _ = Nothing
-
-
-
-data DatumType = R_NULL | R_BOOL | R_NUM | R_STR | R_ARRAY | R_OBJECT | R_JSON
-instance WireValue DatumType where
-  toWire R_NULL = 1
-  toWire R_BOOL = 2
-  toWire R_NUM = 3
-  toWire R_STR = 4
-  toWire R_ARRAY = 5
-  toWire R_OBJECT = 6
-  toWire R_JSON = 7
-  fromWire 1 = Just R_NULL
-  fromWire 2 = Just R_BOOL
-  fromWire 3 = Just R_NUM
-  fromWire 4 = Just R_STR
-  fromWire 5 = Just R_ARRAY
-  fromWire 6 = Just R_OBJECT
-  fromWire 7 = Just R_JSON
-  fromWire _ = Nothing
-
-
-
+module Database.RethinkDB.Wire.Term where
+import Prelude (Maybe(..), Int)
+import Database.RethinkDB.Wire
 data TermType = DATUM | MAKE_ARRAY | MAKE_OBJ | VAR | JAVASCRIPT | UUID | HTTP | ERROR | IMPLICIT_VAR | DB | TABLE | GET | GET_ALL | EQ | NE | LT | LE | GT | GE | NOT | ADD | SUB | MUL | DIV | MOD | APPEND | PREPEND | DIFFERENCE | SET_INSERT | SET_INTERSECTION | SET_UNION | SET_DIFFERENCE | SLICE | SKIP | LIMIT | INDEXES_OF | CONTAINS | GET_FIELD | KEYS | OBJECT | HAS_FIELDS | WITH_FIELDS | PLUCK | WITHOUT | MERGE | BETWEEN | REDUCE | MAP | FILTER | CONCATMAP | ORDERBY | DISTINCT | COUNT | IS_EMPTY | UNION | NTH | BRACKET | INNER_JOIN | OUTER_JOIN | EQ_JOIN | ZIP | INSERT_AT | DELETE_AT | CHANGE_AT | SPLICE_AT | COERCE_TO | TYPEOF | UPDATE | DELETE | REPLACE | INSERT | DB_CREATE | DB_DROP | DB_LIST | TABLE_CREATE | TABLE_DROP | TABLE_LIST | SYNC | INDEX_CREATE | INDEX_DROP | INDEX_LIST | INDEX_STATUS | INDEX_WAIT | INDEX_RENAME | FUNCALL | BRANCH | ANY | ALL | FOREACH | FUNC | ASC | DESC | INFO | MATCH | UPCASE | DOWNCASE | SAMPLE | DEFAULT | JSON | ISO8601 | TO_ISO8601 | EPOCH_TIME | TO_EPOCH_TIME | NOW | IN_TIMEZONE | DURING | DATE | TIME_OF_DAY | TIMEZONE | YEAR | MONTH | DAY | DAY_OF_WEEK | DAY_OF_YEAR | HOURS | MINUTES | SECONDS | TIME | MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY | JANUARY | FEBRUARY | MARCH | APRIL | MAY | JUNE | JULY | AUGUST | SEPTEMBER | OCTOBER | NOVEMBER | DECEMBER | LITERAL | GROUP | SUM | AVG | MIN | MAX | SPLIT | UNGROUP | RANDOM | CHANGES | ARGS | BINARY | GEOJSON | TO_GEOJSON | POINT | LINE | POLYGON | DISTANCE | INTERSECTS | INCLUDES | CIRCLE | GET_INTERSECTING | FILL | GET_NEAREST | POLYGON_SUB
 instance WireValue TermType where
   toWire DATUM = 1
@@ -417,7 +328,5 @@ instance WireValue TermType where
   fromWire 168 = Just GET_NEAREST
   fromWire 171 = Just POLYGON_SUB
   fromWire _ = Nothing
-
-
 
 

@@ -1,13 +1,14 @@
+#!/usr/bin/env runhaskell
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
 import Prelude hiding (
-  readFile, putStr, putStrLn, takeWhile, hPutStrLn,
+  readFile, putStr, putStrLn, takeWhile, hPutStrLn, writeFile,
   unlines, unwords)
 import Data.Attoparsec.Text
 import Data.Text.IO
-import Data.Text (unwords, unlines, pack)
+import Data.Text (unwords, unlines, pack, unpack)
 import System.Exit
 import System.IO (stderr)
 import Data.Maybe
@@ -15,6 +16,7 @@ import Control.Applicative
 import Data.Monoid
 import Data.List (intersperse)
 import Data.Char
+import Control.Monad
 
 import Debug.Trace
 
@@ -22,7 +24,11 @@ main = do
   proto <- readFile "ql2.proto"
   case parseOnly protoFile proto of
     Left err -> hPutStrLn stderr ("Error: " <> pack err) >> exitWith ExitSuccess
-    Right mod -> putStrLn (render mod)
+    Right mod -> do
+      writeFile "Database/RethinkDB/Wire.hs" genRaw
+      forM_ mod $ \(name, enums) ->
+        writeFile (unpack $ "Database/RethinkDB/Wire/" <> name <> ".hs")
+        (renderMessage (name, enums))
 
 protoFile = tr "protoFile" $ do
   many message
@@ -75,14 +81,18 @@ whitespace = do
     string "//" >> skipWhile (not . isEndOfLine) ]
   return ()
 
-render mod = unlines $ [
-  "module Database.RethinkDB.RawQuery where",
+genRaw = unlines $ [
+  "module Database.RethinkDB.Wire where",
   "class WireValue a where",
   "  toWire :: a -> Int",
-  "  fromWire :: Int -> a"
-  ] <> map renderMessage mod
+  "  fromWire :: Int -> Maybe a"
+  ]
 
-renderMessage (name, enums) = unlines $ map renderEnum enums
+renderMessage (name, enums) = unlines $ [
+  unwords ["module", "Database.RethinkDB.Wire." <> name, "where"],
+  "import Prelude (Maybe(..), Int)",
+  "import Database.RethinkDB.Wire"
+  ] ++ map renderEnum enums
 
 renderEnum (name, decls) = unlines $ [
   unwords $ ["data", name, "="] <> intersperse "|" (map fst decls),
