@@ -1,4 +1,0 @@
-#!/bin/bash
-file=${1:-../rethinkdb/src/rdb_protocol/ql2.proto}
-cp $file ql2.proto
-hprotoc -p Database.RethinkDB.Protobuf ql2.proto

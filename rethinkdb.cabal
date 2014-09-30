@@ -21,25 +21,7 @@ library
                        Database.RethinkDB.ReQL
                        Database.RethinkDB.Network
                        Database.RethinkDB.MapReduce
-                       Database.RethinkDB.Protobuf.Ql2
-                       Database.RethinkDB.Protobuf.Ql2.Backtrace
-                       Database.RethinkDB.Protobuf.Ql2.Datum
-                       Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
-                       Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-                       Database.RethinkDB.Protobuf.Ql2.Frame
-                       Database.RethinkDB.Protobuf.Ql2.Frame.FrameType
-                       Database.RethinkDB.Protobuf.Ql2.Query
-                       Database.RethinkDB.Protobuf.Ql2.Query.AssocPair
-                       Database.RethinkDB.Protobuf.Ql2.Query.QueryType
-                       Database.RethinkDB.Protobuf.Ql2.Response
-                       Database.RethinkDB.Protobuf.Ql2.Response.ResponseType
-                       Database.RethinkDB.Protobuf.Ql2.Term
-                       Database.RethinkDB.Protobuf.Ql2.Term.AssocPair
-                       Database.RethinkDB.Protobuf.Ql2.Term.TermType
-                       Database.RethinkDB.Protobuf.Ql2.VersionDummy
-                       Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
   build-depends:       base >= 4 && < 5,
-                       protocol-buffers,
                        unordered-containers,
                        text,
                        aeson,
@@ -51,7 +33,6 @@ library
                        ghc-prim,
                        mtl,
                        vector,
-                       protocol-buffers-descriptor,
                        time,
                        utf8-string
 

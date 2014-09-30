@@ -6,3 +6,5 @@ dist/
 .#*
 *.o-boot
 *.hi-boot
+.cabal-sandbox/
+cabal.sandbox.config

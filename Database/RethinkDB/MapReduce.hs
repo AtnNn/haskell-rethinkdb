@@ -59,7 +59,8 @@ toFun2 f a b = op FUNCALL (wrap f, a, b)
 -- | Represents a map/reduce operation split into its map and reduce parts
 data MRF = MRF {
       _mrfMapFun :: MapFun,
-      _mrfReduceFun :: ReQL -> ReQL -> ReQL, 
+      _mrfReduceFun :: ReQL -> ReQL -> ReQL,
+      _mrfBase :: Maybe ReQL,
       _mrfFinally :: ReQL -> ReQL }
 
 -- | A Chain of ReQL expressions that can be transformed into
@@ -71,7 +72,6 @@ data Chain =
   Map [Map] |
   -- | map/reduce operations represented as parts
   MapReduceChain [Map] Reduce |
-  MapReduceBase [Map] ReQL Reduce |
   -- | A rewritten map/reduce
   MapReduce MRF |
   -- | Special cases for reduce with base
@@ -94,14 +94,18 @@ applyChain (None t) x = op FUNCALL (t, x)
 applyChain (Map maps) s = applyMaps maps s
 applyChain (MapReduceChain maps red) s =
   applyReduce red $ applyMaps maps s
-applyChain (MapReduceBase maps base red) s =
-  applyReduce red $ (R.++ [base]) $ applyMaps maps s
 applyChain (MapReduce mrf) s = applyMRF mrf s
 applyChain (SingletonArray x) s = op FUNCALL (op MAKE_ARRAY [x], s)
 applyChain (AddBase b c) s = applyChain c s R.++ [b]
 
 applyMRF :: MRF -> ReQL -> ReQL
-applyMRF (MRF m r f) s = f . reduce1 r $ applyMapFun m s
+applyMRF (MRF m r Nothing f) s = f . reduce1 r $ applyMapFun m s
+applyMRF (MRF m r (Just b) f) s =
+  f $
+  apply (\x -> if' (isEmpty x) b (x R.! 0)) . return $
+  reduce1 (\a b -> [a R.! 0 `r` b R.! 0]) $
+  R.map (\x -> [x]) $
+  applyMapFun m s
 
 applyMaps :: [Map] -> ReQL -> ReQL
 applyMaps maps s = foldr applyMap s maps
@@ -121,17 +125,18 @@ chainToMRF :: Chain -> Either ReQL MRF
 chainToMRF (None t) = Left t
 chainToMRF (Map maps) = Right $ maps `thenMRF` collect
 chainToMRF (MapReduceChain maps red) = Right $ maps `thenReduce` red
-chainToMRF (MapReduceBase maps _base red) = Right $ maps `thenReduce` red
+chainToMRF (MapReduceBase maps _base red) =
+  Right $ maps `thenReduce` red -- The base should already be set in red's mrf
 chainToMRF (MapReduce mrf) = Right $ mrf
 chainToMRF (SingletonArray x) = Left $ op MAKE_ARRAY [x]
 chainToMRF (AddBase b c) = fmap (`thenFinally` \x -> op UNION [b, x]) $ chainToMRF c
 
 thenFinally :: MRF -> (ReQL -> ReQL) -> MRF
-thenFinally (MRF m r f1) f2 = MRF m r $ f2 . f1
+thenFinally (MRF m r b f1) f2 = MRF m r b $ f2 . f1
 
 thenMRF :: [Map] -> MRF -> MRF
-thenMRF maps (MRF m r f) =
-  MRF (m `composeMapFun` composeMaps maps) r f
+thenMRF maps (MRF m r b f) =
+  MRF (m `composeMapFun` composeMaps maps) r b f
 
 composeMaps :: [Map] -> MapFun
 composeMaps = foldr composeMapFun (MapFun id) . map getMapFun
@@ -147,7 +152,7 @@ thenReduce :: [Map] -> Reduce -> MRF
 thenReduce maps (BuiltInReduce _ _ _ mrf) = maps `thenMRF` mrf
 
 collect :: MRF
-collect = MRF (MapFun $ \x -> expr [x]) (R.++) id
+collect = MRF (MapFun $ \x -> expr [x]) (R.++) (Just []) id
 
 -- | Rewrites the term in the second argument to merge all uses of the
 -- variable whose id is given in the first argument.
@@ -206,9 +211,9 @@ mrChain :: TermType -> Chain -> [BaseReQL] -> [BaseAttribute]
 
 mrChain REDUCE (AddBase base (Map maps)) [f] [] =
   Just $
-  MapReduceBase maps base $
+  MapReduceChain maps $
   BuiltInReduce REDUCE [wrap f] [] $
-  MRF (MapFun id) (toFun2 f) id
+  MRF (MapFun id) (toFun2 f) (Just base) id
 
 -- | A built-in map
 mrChain tt (Map maps) args optargs
@@ -316,7 +321,9 @@ rewritex ttype args optargs = MRF maps reduces finallys where
     \a b -> flip apply [a R.++ b] $ \l ->
       if' (isEmpty l) ([] :: [()]) [reduce1 f l]
   getFinallyFun (MRF (MapFun _) _ f) = f
-  getFinallyFun (MRF (ConcatMapFun _) _ f) = f . (R.! 0) -- TODO: what if it's null
+  getFinallyFun (MRF (ConcatMapFun _) _ f) =
+    f . maybe (R.! 0) (\base s ->
+                        flip apply [s] $ handle (const base) $ s R.! 0) ?mbase
 
 -- | Extract the inner map/reduce objects, also returning a function
 -- which, given the result of all the map/reduce operations, returns
