@@ -51,23 +51,6 @@ import Data.Time
 import Data.Time.Clock.POSIX
 import Control.Monad.Fix
 
-import Text.ProtocolBuffers hiding (Key, cons, Default)
-import Text.ProtocolBuffers.Basic hiding (Default)
-
-import Database.RethinkDB.Protobuf.Ql2.Term
-import qualified Database.RethinkDB.Protobuf.Ql2.Term as Term
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType as TermType
-import Database.RethinkDB.Protobuf.Ql2.Term.AssocPair
-import qualified Database.RethinkDB.Protobuf.Ql2.Query as Query
-import Database.RethinkDB.Protobuf.Ql2.Query.QueryType
-import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum
-import qualified Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair as Datum
-import Database.RethinkDB.Protobuf.Ql2.Datum
-import qualified Database.RethinkDB.Protobuf.Ql2.Backtrace as QL
-import qualified Database.RethinkDB.Protobuf.Ql2.Frame as QL
-import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-import Database.RethinkDB.Protobuf.Ql2.Frame.FrameType as QL
-
 import Database.RethinkDB.Objects as O
 
 -- | An RQL term

@@ -13,8 +13,6 @@ import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Objects as O
 
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType
-
 import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
 

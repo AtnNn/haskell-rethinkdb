@@ -47,18 +47,6 @@ import Data.Int (Int64)
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
 
-import Text.ProtocolBuffers.Basic (uToString, Utf8(..))
-import Text.ProtocolBuffers (messagePut, defaultValue, messageGet)
-
-import Database.RethinkDB.Protobuf.Ql2.Query as Query
-import Database.RethinkDB.Protobuf.Ql2.Query.QueryType
-import qualified Database.RethinkDB.Protobuf.Ql2.Response as Ql2
-import Database.RethinkDB.Protobuf.Ql2.Response.ResponseType
-import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
-import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-import Database.RethinkDB.Protobuf.Ql2.Datum.AssocPair
-import Database.RethinkDB.Protobuf.Ql2.VersionDummy.Version
-
 import Database.RethinkDB.Objects as O
 import Database.RethinkDB.ReQL (
   BaseReQL, Backtrace, convertBacktrace)

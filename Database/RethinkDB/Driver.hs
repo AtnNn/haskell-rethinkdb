@@ -25,14 +25,6 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Strict as HM
 
-import Database.RethinkDB.Protobuf.Ql2.Query (Query(..))
-import Database.RethinkDB.Protobuf.Ql2.Query.AssocPair (AssocPair(..))
-import Database.RethinkDB.Protobuf.Ql2.Term as Term (Term(..))
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType (TermType(DATUM))
-import Database.RethinkDB.Protobuf.Ql2.Datum as Datum
-import Database.RethinkDB.Protobuf.Ql2.Datum.DatumType
-import Text.ProtocolBuffers.Basic (uFromString, defaultValue)
-
 import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL hiding (Object)
 

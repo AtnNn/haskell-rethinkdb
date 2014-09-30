@@ -11,8 +11,6 @@ import Control.Applicative
 
 import Database.RethinkDB.ReQL
 
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType
-
 -- $setup
 -- >>> :load Database.RethinkDB
 -- >>> import qualified Database.RethinkDB as R

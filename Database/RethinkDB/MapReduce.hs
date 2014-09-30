@@ -8,10 +8,6 @@ import qualified Data.Text as T
 import Data.Maybe
 import Data.Foldable (toList)
 
-import Database.RethinkDB.Protobuf.Ql2.Term.TermType
-import qualified Database.RethinkDB.Protobuf.Ql2.Datum as Datum
-import qualified Database.RethinkDB.Protobuf.Ql2.Datum.DatumType as Datum
-
 import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 
