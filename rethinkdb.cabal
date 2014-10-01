@@ -11,7 +11,12 @@ category:            Database
 build-type:          Simple
 cabal-version:       >=1.8
 
+source-repository head
+  type: git
+  location: https://github.com/atnnn/haskell-rethinkdb
+
 library
+  ghc-options: -Wall
   exposed-modules:     Database.RethinkDB
                        Database.RethinkDB.NoClash
                        Database.RethinkDB.Driver
@@ -20,24 +25,24 @@ library
                        Database.RethinkDB.Objects
                        Database.RethinkDB.ReQL
                        Database.RethinkDB.Network
-                       Database.RethinkDB.MapReduce
+                       --Database.RethinkDB.MapReduce
   build-depends:       base >= 4 && < 5,
-                       unordered-containers,
-                       text,
-                       aeson,
-                       bytestring,
-                       containers,
-                       attoparsec,
-                       data-default,
-                       network,
-                       ghc-prim,
-                       mtl,
-                       vector,
-                       time,
-                       utf8-string
+                       unordered-containers >= 0.2 && < 0.3,
+                       text >= 0.11 && < 0.12,
+                       aeson >= 0.7 && < 0.8,
+                       bytestring >= 0.10 && < 0.11,
+                       containers >= 0.5 && < 0.6,
+                       data-default >= 0.5 && < 0.6,
+                       network >= 2.6 && < 2.7,
+                       mtl >= 2.1 && < 2.2,
+                       vector >= 0.10 && < 0.11,
+                       time >= 1.4 && < 1.5,
+                       utf8-string >= 0.3 && < 0.4,
+                       binary >= 0.5 && < 0.6,
+                       scientific >= 0.3 && < 0.4
 
 test-suite doctests
   type:          exitcode-stdio-1.0
   ghc-options:   -threaded
   main-is:       doctests.hs
-  build-depends: base, doctest >= 0.8
+  build-depends: base, doctest >= 0.9 && < 0.10

@@ -13,7 +13,8 @@ import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
 
 -- $setup
--- >>> :load Database.RethinkDB
+-- >>> :set -XOverloadedStrings
+-- >>> :load Database.RethinkDB.NoClash
 -- >>> import qualified Database.RethinkDB as R
 -- >>> import Database.RethinkDB.NoClash
 -- >>> import Prelude

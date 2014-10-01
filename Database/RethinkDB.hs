@@ -40,6 +40,7 @@ module Database.RethinkDB (
   -- * Writing data
 
   WriteResponse(..),
+  Change(..),
   insert, upsert,
   update, replace, delete,
   returnVals, nonAtomic,

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances #-}
 
 module Database.RethinkDB.Driver (
   run,
@@ -7,13 +7,12 @@ module Database.RethinkDB.Driver (
   runOpts,
   RunFlag(..),
   WriteResponse(..),
-  JSON(..)
+  JSON(..),
+  Change(..),
+  getSingle
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), (.=))
-import Data.Aeson.Encode (encodeToTextBuilder)
-import Data.Text.Lazy (unpack)
-import Data.Text.Lazy.Builder (toLazyText)
+import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), (.=), toJSON)
 import qualified Data.Aeson (Result(Error, Success))
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
@@ -21,10 +20,11 @@ import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
 import Data.List
 import Data.Maybe
-import Data.Monoid
-import qualified Data.HashMap.Strict as HM
+import Control.Exception (throw, throwIO)
+import Data.Map (Map)
 
 import Database.RethinkDB.Network
+import Database.RethinkDB.Objects
 import Database.RethinkDB.ReQL hiding (Object)
 
 -- | Per-query settings
@@ -39,7 +39,7 @@ data Durability = Hard | Soft
 
 renderOption :: RunFlag -> (Text, Value)
 renderOption UseOutdated = "user_outdated" .= True
-renderOption NoReply = "noreply" .= True
+renderOption NoReply = "noreply" .= True -- TODO: handle no-reply in Network.hs
 renderOption (Durability Soft) = "durability" .= ("soft" :: String)
 renderOption (Durability Hard) = "durability" .= ("hard" :: String)
 renderOption Profile = "profile" .= True
@@ -57,38 +57,84 @@ run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
 -- | Run a given query and return a JSON
-run' :: Expr query => RethinkDBHandle -> query -> IO [JSON]
-run' h t = do
-  c <- run h t
-  collect c
+run' :: Expr query => RethinkDBHandle -> query -> IO JSON
+run' h t = run h t
 
 -- | Convert the raw query response into useful values
 class Result r where
   convertResult :: MVar Response -> IO r
 
 instance Result Response where
-    convertResult = takeMVar
+  convertResult = takeMVar
 
 instance FromJSON a => Result (Cursor a) where
-  convertResult r = fmap (fmap $ unsafe . fromJSON) $ makeCursor r
-    where
-      unsafe (Data.Aeson.Error e) = error e
-      unsafe (Data.Aeson.Success a) = a
+  convertResult r = fmap (fmap unsafeFromJSON) $ makeCursor r
+
+unsafeFromJSON :: FromJSON a => Data.Aeson.Value -> a
+unsafeFromJSON val = case fromJSON val of
+  Data.Aeson.Error e -> throw (RethinkDBError ErrorUnexpectedResponse (Datum Null) e [])
+  Data.Aeson.Success a -> a
 
 instance FromJSON a => Result [a] where
   convertResult = collect <=< convertResult
 
 instance FromJSON a => Result (Maybe a) where
-  convertResult r = do
-    c <- convertResult r
-    car <- next c
-    case car of
-      Nothing -> return Nothing
-      Just a -> do
-        cadr <- next c
-        case cadr of
-          Nothing -> return $ Just a
-          Just _ -> return Nothing
+  convertResult v = do
+    r <- takeMVar v
+    case r of
+      ResponseSingle Data.Aeson.Null -> return Nothing
+      ResponseSingle a -> return $ Just $ unsafeFromJSON a
+      ResponseError e -> throwIO e
+      ResponseBatch Nothing batch -> return . Just . unsafeFromJSON $ toJSON batch
+      ResponseBatch (Just _more) batch -> do
+        rest <- collect' =<< convertResult v
+        return . Just . unsafeFromJSON . toJSON $ batch ++ rest
+
+instance Result Int where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+instance Result Double where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+instance Result Bool where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+instance FromJSON a => Result (Map String a) where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+instance Result String where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+instance Result Text where
+  convertResult = fmap unsafeFromJSON . getSingle
+
+getSingle :: MVar Response -> IO Value
+getSingle v = do
+    r <- takeMVar v
+    case r of
+      ResponseSingle datum -> return datum
+      ResponseError e -> throwIO e
+      ResponseBatch Nothing [datum] -> return datum
+      ResponseBatch _ batch ->
+        throwIO $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
+        ("Expected a single datum but got: " ++ show batch) []
+
+instance Result Value where
+  convertResult v = do
+    r <- takeMVar v
+    case r of
+      ResponseSingle datum -> return datum
+      ResponseError e -> throwIO e
+      ResponseBatch Nothing batch -> return $ toJSON batch
+      ResponseBatch (Just _more) batch -> do
+        rest <- collect' =<< convertResult v
+        return . toJSON $ batch ++ rest
+
+instance Result JSON where
+  convertResult = fmap JSON . convertResult
+
+instance Result WriteResponse where
+  convertResult = fmap unsafeFromJSON . convertResult
 
 data WriteResponse = WriteResponse {
   writeResponseInserted :: Int,
@@ -99,10 +145,16 @@ data WriteResponse = WriteResponse {
   writeResponseErrors :: Int,
   writeResponseFirstError :: Maybe Text,
   writeResponseGeneratedKeys :: Maybe [Text],
-  -- TODO: just "vals" in 1.12
-  writeResponseOldVal :: Maybe Value,
-  writeResponseNewVal :: Maybe Value
+  writeResponseChanges :: Maybe [Change]
   }
+
+data Change = Change { newVal, oldVal :: Value }
+            deriving Show
+
+instance FromJSON Change where
+  parseJSON (Object o) =
+    Change <$> o .: "new_val" <*> o .: "old_val"
+  parseJSON _ = mzero
 
 instance FromJSON WriteResponse where
   parseJSON (Object o) =
@@ -115,8 +167,7 @@ instance FromJSON WriteResponse where
     <*> o .: "errors"
     <*> o .:? "first_error"
     <*> o .:? "generated_keys"
-    <*> o .:? "old_val"
-    <*> o .:? "new_val"
+    <*> o .:? "changes"
   parseJSON _ = mzero
 
 instance Show WriteResponse where
@@ -130,42 +181,11 @@ instance Show WriteResponse where
               zero "errors" writeResponseErrors,
               nothing "first_error" writeResponseFirstError,
               nothing "generated_keys" writeResponseGeneratedKeys,
-              nothing "old_val" writeResponseOldVal,
-              nothing "new_val" writeResponseNewVal ]) ++
+              nothing "changes" writeResponseChanges ]) ++
             "}"
     where
       go k v = Just $ k ++ ":" ++ show v
       zero k f = if f wr == 0 then Nothing else go k (f wr)
       nothing k f = maybe Nothing (go k) (f wr)
-
-data JSON = JSON Value deriving Eq
-
-instance Show JSON where
-  show (JSON a) = unpack . toLazyText . encodeToTextBuilder $ a
-
-instance FromJSON JSON where
-  parseJSON = fmap JSON . parseJSON
-
-instance Ord JSON where
-  compare (JSON x) (JSON y) = x <=> y
-    where
-      Object a <=> Object b =
-        compare (HM.keys a) (HM.keys b) <>
-        mconcat (map (\k -> (a HM.! k) <=> (b HM.! k) ) (HM.keys a))
-      Object _ <=> _ = LT
-      _ <=> Object _ = GT
-      Array a <=> Array b = compare (fmap JSON a) (fmap JSON b)
-      Array _ <=> _ = LT
-      _ <=> Array _ = GT
-      String a <=> String b = compare a b
-      String _ <=> _ = LT
-      _ <=> String _ = GT
-      Number a <=> Number b = compare a b
-      Number _ <=> _ = LT
-      _ <=> Number _ = GT
-      Bool a <=> Bool b = compare a b
-      Bool _ <=> _ = LT
-      _ <=> Bool _ = GT
-      Null <=> Null = EQ
 
 -- TODO: profile

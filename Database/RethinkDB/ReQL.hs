@@ -58,7 +58,7 @@ import Data.Scientific
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.Term as Term
-import Database.RethinkDB.Objects
+import Database.RethinkDB.Objects as O
 
 -- | A ReQL term
 data ReQL = ReQL { runReQL :: State QuerySettings Term }
@@ -135,7 +135,7 @@ newVarId = do
   return $ n
 
 instance Show Term where
-  show (Datum dat) = show dat
+  show (Datum dat) = show (O.JSON dat)
   show (Term MAKE_ARRAY x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
   show (Term MAKE_OBJ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
   show (Term MAKE_OBJ args []) = "{" ++ (concat $ intersperse ", " $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"

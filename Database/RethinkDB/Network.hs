@@ -11,12 +11,15 @@ module Database.RethinkDB.Network (
   Cursor,
   makeCursor,
   next,
+  nextBatch,
   collect,
+  collect',
   nextResponse,
   Response(..),
   ErrorCode(..),
   RethinkDBError(..),
   RethinkDBConnectionError(..),
+  More
   ) where
 
 import Control.Monad (when, forever)
@@ -41,19 +44,20 @@ import Data.Maybe (fromMaybe, listToMaybe, isNothing)
 import Control.Monad.Fix (fix)
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
-import Data.Binary.Get (runGet, getWord32be, getWord64be)
-import Data.Binary.Put (runPut, putWord32be, putWord64be, putLazyByteString)
+import Data.Binary.Get (runGet, getWord32le, getWord64le)
+import Data.Binary.Put (runPut, putWord32le, putWord64le, putLazyByteString)
 import Data.Word (Word64, Word32)
 import qualified Data.HashMap.Strict as HM
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Response
 import Database.RethinkDB.Wire.Query
-import Database.RethinkDB.Wire.VersionDummy
+import Database.RethinkDB.Wire.VersionDummy as Protocol
 import Database.RethinkDB.Objects
 import Database.RethinkDB.ReQL (
   Term, Backtrace, convertBacktrace, WireQuery(..),
   WireBacktrace(..), Term(..))
+import Data.Foldable (toList)
 
 type Token = Word64
 
@@ -98,9 +102,10 @@ connect host port mauth = do
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
   h <- connectTo host (PortNumber (fromInteger port))
   hPut h $ runPut $ do
-    putWord32be magicNumber
-    putWord32be (fromIntegral $ B.length auth)
+    putWord32le magicNumber
+    putWord32le (fromIntegral $ B.length auth)
     putLazyByteString auth
+    putWord32le $ fromIntegral $ toWire Protocol.JSON
   res <- hGetNullTerminatedString h
   when (res /= "SUCCESS") $ throwIO (RethinkDBConnectionError $ show res)
   r <- newIORef 1
@@ -123,7 +128,6 @@ hGetNullTerminatedString h = go "" where
 magicNumber :: Word32
 magicNumber = fromIntegral $ toWire V0_3
 
--- TODO: withHandle is only used for writes. why not reads?
 withHandle :: RethinkDBHandle -> (Handle -> IO a) -> IO a
 withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
   modifyMVar rdbWriteLock $ \mex ->
@@ -237,8 +241,8 @@ sendQLQuery h tok query = do
   let queryS = J.encode $ queryJSON query
   withHandle h $ \s ->
     hPut s $ runPut $ do
-      putWord64be tok
-      putWord32be (fromIntegral $ B.length queryS)
+      putWord64le tok
+      putWord32le (fromIntegral $ B.length queryS)
       putLazyByteString queryS 
 
 data RethinkDBReadError =
@@ -262,11 +266,11 @@ readSingleResponse h = do
   tokenString <- hGet (rdbHandle h) 8
   when (B.length tokenString /= 8) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
-  let token = runGet getWord64be tokenString
+  let token = runGet getWord64le tokenString
   header <- hGet (rdbHandle h) 4
   when (B.length header /= 4) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
-  let replyLength = runGet getWord32be header
+  let replyLength = runGet getWord32le header
   rawResponse <- hGet (rdbHandle h) (fromIntegral replyLength)
   let parsedResponse = J.eitherDecode rawResponse
   case parsedResponse of
@@ -293,8 +297,8 @@ isLastResponse (ResponseBatch Nothing _) = True
 --
 -- The new handle is an alias for the old one. Calling close on either one
 -- will close both.
-use :: RethinkDBHandle -> Database -> RethinkDBHandle
-use h db' = h { rdbDatabase = db' }
+use :: Database -> RethinkDBHandle -> RethinkDBHandle
+use db' h = h { rdbDatabase = db' }
 
 -- | Close an open connection
 close :: RethinkDBHandle -> IO ()
@@ -328,22 +332,42 @@ next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
     Right (x:xs, end) -> return $ (Right (xs, end), Just (cursorMap x))
     Right ([], False) -> cursorFetchBatch c >>= loop
 
+-- | Get the next batch from a cursor
+nextBatch :: Cursor a -> IO [a]
+nextBatch c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
+  case mbuffer of
+    Left err -> throwIO err
+    Right ([], True) -> return (Right ([], True), [])
+    Right (xs@(_:_), end) -> return $ (Right ([], end), map cursorMap xs)
+    Right ([], False) -> cursorFetchBatch c >>= loop
+
 cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([Datum], Bool))
 cursorFetchBatch c = do
   response <- takeMVar (cursorMBox c)
   case response of
     ResponseError e -> return $ Left e
     ResponseBatch more datums -> return $ Right (datums, isNothing more)
+    ResponseSingle (J.Array a) -> return $ Right (toList a, True)
     ResponseSingle _ ->
       return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum J.Null)
-      "Expected a sequence but got a datum" []
+      "Expected a stream or an array but got a datum" []
 
 -- | A lazy stream of all the elements in the cursor
 collect :: Cursor a -> IO [a]
 collect c = fix $ \loop -> do
-    n <- next c
-    case n of
-      Nothing -> return []
-      Just x -> do
-        xs <- unsafeInterleaveIO $ loop
-        return $ x : xs
+    b <- nextBatch c
+    case b of
+      [] -> return []
+      xs -> do
+        ys <- unsafeInterleaveIO $ loop
+        return $ xs ++ ys
+
+-- | A strict version of collect
+collect' :: Cursor a -> IO [a]
+collect' c = fix $ \loop -> do
+    b <- nextBatch c
+    case b of
+      [] -> return []
+      xs -> do
+        ys <- loop
+        return $ xs ++ ys
