@@ -361,15 +361,6 @@ take n s = op LIMIT (s, n)
 slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
 slice n m s = op SLICE (s, n, m)
 
-infixl 9 !!
-
--- | Get the nth value of a sequence or array
---
--- >>> run h $ [1, 2, 3] !! 0
--- 1
-(!!) :: (Expr a) => a -> ReQL -> ReQL
-s !! n = op NTH (s, n)
-
 -- | Reduce a sequence to a single value
 --
 -- >>> run h $ reduce (+) 0 [1, 2, 3]
@@ -476,24 +467,27 @@ argmax f s = op MAX (s, expr . f)
 
 infixl 9 !
 
--- | Get a single field from an object
+-- | Get a single field from an object or an element of an array
 --
 -- >>> run h $ (obj ["foo" := True]) ! "foo"
 -- true
+--
+-- >>> run h $ [1, 2, 3] !! 0
+-- 1
 --
 -- Or a single field from each object in a sequence
 --
 -- >>> run h $ [obj ["foo" := True], obj ["foo" := False]] ! "foo"
 -- [true,false]
 (!) :: (Expr s) => s -> ReQL -> ReQL
-s ! k = op GET_FIELD (s, k)
+s ! k = op BRACKET (s, k)
 
 -- | Get a single field, or null if not present
 --
 -- >>> run h $ obj [] !? "foo"
 -- null
 (!?) :: (Expr s) => s -> ReQL -> ReQL
-s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op GET_FIELD (s', k'), ())
+s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op BRACKET (s', k'), ())
 
 -- | Keep only the given attributes
 --

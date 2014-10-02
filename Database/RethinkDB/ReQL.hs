@@ -151,8 +151,7 @@ instance Show Term where
   show (Term FUNC [args, body] []) | Just vars <- argList args =
     "(\\" ++ (shortLines " " $ map varName vars)
     ++ " -> " ++ show body ++ ")"
-  show (Term GET_FIELD [o, k] []) = show o ++ "[" ++ show k ++ "]"
-  show (Term NTH [o, k] []) = show o ++ "[" ++ show k ++ "]"
+  show (Term BRACKET [o, k] []) = show o ++ "[" ++ show k ++ "]"
   show (Term FUNCALL (f : as) []) = "(" ++ show f ++ ")(" ++ shortLines "," (map show as) ++ ")"
   show (Term fun args optargs) =
     map toLower (show fun) ++ "(" ++

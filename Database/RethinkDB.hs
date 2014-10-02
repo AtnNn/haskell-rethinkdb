@@ -57,7 +57,7 @@ module Database.RethinkDB (
   -- * Transformations
 
   map, withFields, concatMap, drop, take,
-  (!!), slice,
+  slice,
   orderBy,  Order(..),
   indexesOf, isEmpty, (++), sample,
 

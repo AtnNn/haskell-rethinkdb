@@ -270,23 +270,23 @@ reduceMRF REDUCE [f] [] = Just $ MRF (MapFun id) (toFun2 f) Nothing id
 reduceMRF COUNT [] [] = Just $ MRF (MapFun $ const (num 1)) (\a b -> op ADD (a, b)) (Just 0) id
 reduceMRF AVG [] [] =
     Just $ MRF (MapFun $ \x -> expr [x, 1])
-             (\a b -> expr [a R.!! 0 R.+ b R.!! 0, a R.!! 1 R.+ b R.!! 1])
+             (\a b -> expr [a R.! 0 R.+ b R.! 0, a R.! 1 R.+ b R.! 1])
              Nothing
-             (\x -> x R.!! 0 R./ x R.!! 1)
+             (\x -> x R.! 0 R./ x R.! 1)
 reduceMRF SUM [] [] = Just $ MRF (MapFun id) (R.+) (Just 0) id
 reduceMRF SUM [sel] [] = Just $ MRF (MapFun $ toFun1 sel) (R.+) (Just 0) id
 reduceMRF MIN [] [] = Just $ MRF (MapFun id) (\a b -> if' (a R.< b) a b) Nothing id
 reduceMRF MIN [sel] [] =
     Just $ MRF (MapFun $ \x -> expr [x, toFun1 sel x])
-             (\a b -> if' (a R.!! 1 R.< b R.!! 1) a b)
+             (\a b -> if' (a R.! 1 R.< b R.! 1) a b)
              Nothing
-             (R.!! 0)
+             (R.! 0)
 reduceMRF MAX [] [] = Just $ MRF (MapFun id) (\a b -> if' (a R.> b) a b) Nothing id
 reduceMRF MAX [sel] [] =
     Just $ MRF (MapFun $ \x -> expr [x, toFun1 sel x])
-             (\a b -> if' (a R.!! 1 R.> b R.!! 1) a b)
+             (\a b -> if' (a R.! 1 R.> b R.! 1) a b)
              Nothing
-             (R.!! 0)
+             (R.! 0)
 reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> nub (a R.++ b)) (Just nil) id
 reduceMRF _ _ _ = Nothing
 
@@ -314,13 +314,13 @@ rewrite1 ttype args optargs = MRF maps red mbase finals where
 rewritex :: TermType -> [Chain] -> [(Key, Chain)] -> MRF
 rewritex ttype args optargs = MRF maps reduces Nothing finallys where
   (finally, mrs) = extract (Just 0) ttype args optargs
-  index = zip ([0..] :: [Int])
+  index = zip $ map expr ([0..] :: [Int])
   maps = MapFun $ \x -> expr $ map (($ x) . getMapFun) mrs
   reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map getReduceFun mrs
   finallys = let fs = map getFinallyFun mrs in
        \x -> finally . expr . map (uncurry $ mkFinally x) $ index fs
-  mkReduce a b i f = note "rewritex reduce nth" $ f (op NTH (a, i)) (op NTH (b, i))
-  mkFinally x i f = f (note "rewritex mkFinally nth" $ op NTH (x, i))
+  mkReduce a b i f = f (a!i) (b!i)
+  mkFinally x i f = f (x!i)
   getMapFun (MRF (MapFun f) _ _ _) = f
   getMapFun (MRF (ConcatMapFun f) _ _ _) = f
   getReduceFun (MRF (MapFun _) f _ _) = f
@@ -352,4 +352,4 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
           Nothing -> return id
           Just n -> do
             put $ Just $ n + 1
-            return $ \v -> note "extract" $ op NTH (v, n)
+            return $ \v -> v ! expr n
