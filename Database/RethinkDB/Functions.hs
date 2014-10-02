@@ -2,6 +2,8 @@
 
 -- | Functions from the ReQL (RethinkDB Query Language)
 
+-- TODO: go through rethinkdb-dev archives and make sure everything is implemented
+
 module Database.RethinkDB.Functions where
 
 import Data.Text (Text)
@@ -11,7 +13,7 @@ import Data.Maybe
 
 import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
--- import {-# SOURCE #-} Database.RethinkDB.MapReduce
+import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import qualified Database.RethinkDB.Objects as O
 import Database.RethinkDB.Objects (Key, Table, Database, IndexCreateOptions(..), TableCreateOptions(..))
 
@@ -429,18 +431,16 @@ orderBy o s = ReQL $ do
 groupBy ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
-groupBy _g _f _s = ReQL $ do
-  P.undefined
---  mr <- termToMapReduce (expr . f)
---  let group = op GROUP (expr s, expr . g)
---  runReQL $ op UNGROUP [mr group] ! "reduction"
+groupBy g f s = ReQL $ do
+  mr <- termToMapReduce (expr . f)
+  let group = op GROUP (expr s, expr . g)
+  runReQL $ op UNGROUP [mr group] ! "reduction"
 
 -- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
-mapReduce _f _s = ReQL $ do
-  P.undefined
-  --mr <- termToMapReduce (expr . f)
-  --runReQL $ mr (expr s)
+mapReduce f s = ReQL $ do
+  mr <- termToMapReduce (expr . f)
+  runReQL $ mr (expr s)
 
 -- | The sum of a sequence
 --
@@ -834,12 +834,18 @@ infixr 9 .
 (.) :: (Expr a, Expr b, Expr c) =>  (ReQL -> b) -> (ReQL -> a) -> c -> ReQL
 (f . g) x = expr (f (expr (g (expr x))))
 
--- | Case manipulation
+-- | Convert to upper case
 --
 -- >>> run h $ toUpper (str "Foo")
 -- "FOO"
-toUpper, toLower :: Expr str => str -> ReQL
+toUpper :: Expr str => str -> ReQL
 toUpper s = op UPCASE [s]
+
+-- | Convert to lower case
+--
+-- >>> run h $ toLower (str "Foo")
+-- "foo"
+toLower :: Expr str => str -> ReQL
 toLower s = op DOWNCASE [s]
 
 -- | Split a string on whitespace characters
