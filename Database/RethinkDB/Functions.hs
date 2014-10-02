@@ -425,7 +425,7 @@ groupBy ::
 groupBy g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
   let group = op GROUP (expr s, expr . g)
-  runReQL $ op UNGROUP [mr group] ! "reduction"
+  runReQL $ op UNGROUP [mr group]
 
 -- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
@@ -549,7 +549,10 @@ if' a b c = op BRANCH (a, b, c)
 -- | Abort the query with an error
 --
 -- >>> run' h $ R.error (str "haha") R./ 2 + 1
--- *** Exception: RethinkDBError {errorCode = runtime error, errorTerm = ADD(DIV(ERROR("haha"), 2), 1), errorMessage = "haha", errorBacktrace = [0,0]}
+-- *** Exception: runtime error: "haha"
+--             in error("haha")
+--             in div(error("haha"), 2)
+--             in add(div(error("haha"), 2), 1)
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m]
 
