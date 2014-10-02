@@ -40,7 +40,7 @@ import qualified Data.Vector as V
 import qualified Data.HashMap.Lazy as M
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.String (IsString(..))
-import Data.List (intersperse)
+import Data.List (intercalate)
 import Control.Monad.State (State, get, put, runState)
 import Control.Applicative ((<$>))
 import Data.Default (Default, def)
@@ -54,6 +54,7 @@ import Control.Monad.Fix
 import Data.Int
 import Data.Monoid
 import Data.Scientific
+import Data.Char
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
@@ -136,20 +137,34 @@ newVarId = do
 
 instance Show Term where
   show (Datum dat) = show (O.JSON dat)
-  show (Term MAKE_ARRAY x []) = "[" ++ (concat $ intersperse ", " $ map show x) ++ "]"
-  show (Term MAKE_OBJ [] x) = "{" ++ (concat $ intersperse ", " $ map show x) ++ "}"
-  show (Term MAKE_OBJ args []) = "{" ++ (concat $ intersperse ", " $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
+  show (Term MAKE_ARRAY x []) = "[" ++ (shortLines "," $ map show x) ++ "]"
+  show (Term MAKE_OBJ [] x) = "{" ++ (shortLines "," $ map show x) ++ "}"
+  show (Term MAKE_OBJ args []) = "{" ++ (shortLines "," $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
      where pairs (a:b:xs) = (a,b) : pairs xs
            pairs _ = []
-  show (Term VAR [Datum d] []) | Just x <- toDouble d =
-    "x" ++ show (round x :: Int)
-  show (Term FUNC [Datum d, body] []) | Just vars <- toDoubles d =
-    "(\\" ++ (concat $ intersperse " " $ map (("x"++) . show . (round :: Double -> Int)) $ vars)
+  show (Term VAR [Datum d] []) | Just x <- toInt d = varName x
+  show (Term FUNC [args, body] []) | Just vars <- argList args =
+    "(\\" ++ (shortLines " " $ map varName vars)
     ++ " -> " ++ show body ++ ")"
-  show (Term GET_FIELD [o, k] []) = show o ++ "!" ++ show k
+  show (Term GET_FIELD [o, k] []) = show o ++ "[" ++ show k ++ "]"
+  show (Term NTH [o, k] []) = show o ++ "[" ++ show k ++ "]"
+  show (Term FUNCALL (f : as) []) = "(" ++ show f ++ ")(" ++ shortLines "," (map show as) ++ ")"
   show (Term fun args optargs) =
-    show fun ++ "(" ++
-    concat (intersperse ", " (map show args ++ map show optargs)) ++ ")"
+    map toLower (show fun) ++ "(" ++
+    shortLines "," (map show args ++ map show optargs) ++ ")"
+
+shortLines :: String -> [String] -> String
+shortLines sep args =
+  if tooLong
+  then "\n" ++ intercalate (sep ++ "\n") (map indent args)
+  else intercalate (sep ++ " ") args
+  where
+    tooLong = any ('\n' `elem`) args || 80 < (length $ concat args)
+    indent = init . unlines . map ("  "++) . lines 
+
+varName :: Int -> String
+varName n = replicate (q+1) (chr $ ord 'a' + r)
+  where (q, r) = quotRem n 26
 
 -- | Convert other types into ReqL expressions
 class Expr e where
@@ -227,9 +242,9 @@ op' t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseOptArgs b
   case (t, a') of
-    (FUNCALL, (Term FUNC [argsFunDatum, fun] [] : argsCall)) |
-      Datum argsFunArray <- argsFunDatum,
-      Just varsFun <- toDoubles argsFunArray,
+    -- TODO: make sure this does the right think before enabling it again
+    (FUNCALL, (Term FUNC [argsFunTerm, fun] [] : argsCall)) | False,
+      Just varsFun <- argList argsFunTerm,
       length varsFun == length argsCall,
       Just varsCall <- varsOf argsCall ->
         return $ alphaRename (zip varsFun varsCall) fun
@@ -239,22 +254,28 @@ op' t a b = ReQL $ do
 op :: Arr a => TermType -> a -> ReQL
 op t a = op' t a []
 
-toDoubles :: Datum -> Maybe [Double]
-toDoubles (J.Array xs) = mapM toDouble $ toList xs
-toDoubles _ = Nothing
+argList :: Term -> Maybe [Int]
+argList (Datum d) | Just a <- toInts d = Just a
+argList (Term MAKE_ARRAY a []) = mapM toInt =<< datums a
+  where datums (Datum d:xs) = fmap (d:) $ datums xs; datums [] = Just []; datums _ = Nothing
+argList _ = Nothing
 
-toDouble :: Datum -> Maybe Double
-toDouble (J.Number n) = Just $ toRealFloat n
-toDouble _ = Nothing
+toInts :: Datum -> Maybe [Int]
+toInts (J.Array xs) = mapM toInt $ toList xs
+toInts _ = Nothing
 
-varsOf :: [Term] -> Maybe [Double]
+toInt :: Datum -> Maybe Int
+toInt (J.Number n) = toBoundedInteger n
+toInt _ = Nothing
+
+varsOf :: [Term] -> Maybe [Int]
 varsOf = sequence . map varOf
     
-varOf :: Term -> Maybe Double
-varOf (Term VAR [Datum d] []) = toDouble d
+varOf :: Term -> Maybe Int
+varOf (Term VAR [Datum d] []) = toInt d
 varOf _ = Nothing
 
-alphaRename :: [(Double, Double)] -> Term -> Term
+alphaRename :: [(Int, Int)] -> Term -> Term
 alphaRename assoc = fix $ \f x ->
   case varOf x of
     Just n
