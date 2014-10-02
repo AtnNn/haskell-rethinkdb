@@ -16,7 +16,7 @@ source-repository head
   location: https://github.com/atnnn/haskell-rethinkdb
 
 library
-  ghc-options: -Wall
+  ghc-options: -Wall -O2
   exposed-modules:     Database.RethinkDB
                        Database.RethinkDB.NoClash
                        Database.RethinkDB.Driver
