@@ -101,9 +101,9 @@ applyChain (MapReduce mrf) s = applyMRF mrf s
 applyChain (SingletonArray x) s = op FUNCALL (op MAKE_ARRAY [x], s)
 applyChain (AddBase b c) s = applyChain c s R.++ [b]
 
--- | Convert an MRF into a ReLQ function
+-- | Convert an MRF into a ReQL function
 applyMRF :: MRF -> ReQL -> ReQL
-applyMRF (MRF m r Nothing f) s = f . reduce1 r $ applyMapFun m s
+applyMRF (MRF m r Nothing f) s = f `apply` [reduce1 r (applyMapFun m s)]
 applyMRF (MRF m r (Just base) f) s =
   f $
   apply (\x -> if' (isEmpty x) base (x R.! 0)) . return $

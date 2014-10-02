@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings, DeriveDataTypeable, NamedFieldPuns, PatternGuards #-}
 
 -- TODO: the code sends an extra query after getting SUCCESS_ATOM when doing e.g. (expr 1)
 
@@ -56,7 +56,8 @@ import Database.RethinkDB.Wire.VersionDummy as Protocol
 import Database.RethinkDB.Objects
 import Database.RethinkDB.ReQL (
   Term, Backtrace, convertBacktrace, WireQuery(..),
-  WireBacktrace(..), Term(..))
+  WireBacktrace(..), Term(..), Frame(..),
+  TermAttribute(..))
 import Data.Foldable (toList)
 
 type Token = Word64
@@ -142,9 +143,25 @@ data RethinkDBError = RethinkDBError {
   errorTerm :: Term,
   errorMessage :: String,
   errorBacktrace :: Backtrace
-  } deriving (Typeable, Show)
+  } deriving (Typeable)
 
 instance Exception RethinkDBError
+
+instance Show RethinkDBError where
+  show (RethinkDBError code term message backtrace) =
+    show code ++ ": " ++ show message ++ "\n" ++
+    indent (unlines (map (("in " ++) . show) (reverse $ traceBT backtrace term)))
+    where
+      indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
+      traceBT :: Backtrace -> Term -> [Term]
+      traceBT [] t = [t]
+      traceBT (x : xs) t = t : maybe [] (traceBT xs) (enter x t)
+      enter :: Frame -> Term -> Maybe Term
+      enter (FramePos n) (Term _ args _)
+        | Just t <- listToMaybe (drop n args) = Just t
+      enter (FrameOpt k) (Term _ _ optargs)
+        | (TermAttribute _ t : _) <- filter (\(TermAttribute x _) -> x == k) optargs = Just t
+      enter _ _ = Nothing
 
 -- | The response to a query
 data Response =

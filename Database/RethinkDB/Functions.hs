@@ -493,7 +493,7 @@ s ! k = op GET_FIELD (s, k)
 -- >>> run h $ obj [] !? "foo"
 -- null
 (!?) :: (Expr s) => s -> ReQL -> ReQL
-s !? k = op DEFAULT (op GET_FIELD (s, k), ())
+s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op GET_FIELD (s', k'), ())
 
 -- | Keep only the given attributes
 --

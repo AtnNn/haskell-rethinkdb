@@ -9,7 +9,7 @@ module Database.RethinkDB.ReQL (
   TermAttribute(..),
   OptArg(..),
   buildQuery,
-  Backtrace, convertBacktrace,
+  Backtrace, convertBacktrace, Frame(..),
   Expr(..),
   QuerySettings(..),
   newVarId,
@@ -160,13 +160,13 @@ shortLines sep args =
   else intercalate (sep ++ " ") args
   where
     tooLong = any ('\n' `elem`) args || 80 < (length $ concat args)
-    indent = init . unlines . map ("  "++) . lines 
+    indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
 
 varName :: Int -> String
 varName n = replicate (q+1) (chr $ ord 'a' + r)
   where (q, r) = quotRem n 26
 
--- | Convert other types into ReqL expressions
+-- | Convert other types into ReQL expressions
 class Expr e where
   expr :: e -> ReQL
 
@@ -241,9 +241,8 @@ op' :: Arr a => TermType -> a -> [OptArg] -> ReQL
 op' t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseOptArgs b
-  case (t, a') of
-    -- TODO: make sure this does the right think before enabling it again
-    (FUNCALL, (Term FUNC [argsFunTerm, fun] [] : argsCall)) | False,
+  case (t, a', b') of
+    (FUNCALL, (Term FUNC [argsFunTerm, fun] [] : argsCall), []) |
       Just varsFun <- argList argsFunTerm,
       length varsFun == length argsCall,
       Just varsCall <- varsOf argsCall ->
@@ -419,7 +418,7 @@ reqlToJSON t = queryJSON $ fst $ buildQuery t 0 (Database "") []
 
 type Backtrace = [Frame]
 
-data Frame = FramePos Int64 | FrameOpt T.Text
+data Frame = FramePos Int | FrameOpt T.Text
 
 instance Show Frame where
     show (FramePos n) = show n
