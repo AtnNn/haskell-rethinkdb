@@ -160,6 +160,8 @@ collect = MRF (MapFun $ \x -> expr [x]) (R.++) (Just nil) id
 -- variable whose id is given in the first argument.
 toMapReduce :: Int -> Term -> Chain
 
+toMapReduce v (Note _ t) = toMapReduce v t -- TODO: keep notes
+
 -- Singletons are singled out
 toMapReduce _ (Datum (J.Array a))
   | [datum] <- toList a =
@@ -317,8 +319,8 @@ rewritex ttype args optargs = MRF maps reduces Nothing finallys where
   reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map getReduceFun mrs
   finallys = let fs = map getFinallyFun mrs in
        \x -> finally . expr . map (uncurry $ mkFinally x) $ index fs
-  mkReduce a b i f = f (op NTH (a, i)) (op NTH (b, i))
-  mkFinally x i f = f (op NTH (x, i))
+  mkReduce a b i f = note "rewritex reduce nth" $ f (op NTH (a, i)) (op NTH (b, i))
+  mkFinally x i f = f (note "rewritex mkFinally nth" $ op NTH (x, i))
   getMapFun (MRF (MapFun f) _ _ _) = f
   getMapFun (MRF (ConcatMapFun f) _ _ _) = f
   getReduceFun (MRF (MapFun _) f _ _) = f
@@ -350,4 +352,4 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
           Nothing -> return id
           Just n -> do
             put $ Just $ n + 1
-            return $ \v -> op NTH (v, n)
+            return $ \v -> note "extract" $ op NTH (v, n)

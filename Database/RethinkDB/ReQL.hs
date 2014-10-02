@@ -33,7 +33,8 @@ module Database.RethinkDB.ReQL (
   boolToTerm,
   nil,
   WireQuery(..),
-  WireBacktrace(..)
+  WireBacktrace(..),
+  note
   ) where
 
 import qualified Data.Vector as V
@@ -70,7 +71,10 @@ data Term = Term {
   termOptArgs :: [TermAttribute]
   } | Datum {
   termDatum :: Datum
-  } deriving Eq
+  } | Note {
+  termNote :: String,
+  termTerm :: Term
+  }deriving Eq
 
 newtype WireTerm = WireTerm { termJSON :: Value }
 
@@ -137,6 +141,7 @@ newVarId = do
 
 instance Show Term where
   show (Datum dat) = show (O.JSON dat)
+  show (Note n term) = shortLines "" ["{- " ++ n ++ " -}", show term]
   show (Term MAKE_ARRAY x []) = "[" ++ (shortLines "," $ map show x) ++ "]"
   show (Term MAKE_OBJ [] x) = "{" ++ (shortLines "," $ map show x) ++ "}"
   show (Term MAKE_OBJ args []) = "{" ++ (shortLines "," $ map (\(a,b) -> show a ++ ":" ++ show b) $ pairs args) ++ "}"
@@ -242,6 +247,7 @@ op' t a b = ReQL $ do
   a' <- baseArray (arr a)
   b' <- baseOptArgs b
   case (t, a', b') of
+    -- Inline function calls if all arguments are variables
     (FUNCALL, (Term FUNC [argsFunTerm, fun] [] : argsCall), []) |
       Just varsFun <- argList argsFunTerm,
       length varsFun == length argsCall,
@@ -284,6 +290,7 @@ alphaRename assoc = fix $ \f x ->
     _ -> updateChildren x f
 
 updateChildren :: Term -> (Term -> Term) -> Term
+updateChildren (Note _ t) f = updateChildren t f
 updateChildren d@Datum{} _ = d
 updateChildren (Term t a o) f = Term t (map f a) (map (mapTermAttribute f) o)
 
@@ -388,6 +395,7 @@ instance Expr Object where
           toOptArg (_ ::= _) = error "unreachable"
 
 buildTerm :: Term -> WireTerm
+buildTerm (Note _ t) = buildTerm t
 buildTerm (Datum a@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, a)
 buildTerm (Datum json) = WireTerm json
 buildTerm (Term type_ args optargs) =
@@ -477,3 +485,6 @@ instance (Expr a, Expr b, Expr c, Expr d) => Expr (a, b, c, d) where
 
 instance (Expr a, Expr b, Expr c, Expr d, Expr e) => Expr (a, b, c, d, e) where
   expr (a, b, c, d, e) = expr [expr a, expr b, expr c, expr d, expr e]
+
+note :: String -> ReQL -> ReQL
+note n (ReQL t) = ReQL $ return . Note n =<< t
