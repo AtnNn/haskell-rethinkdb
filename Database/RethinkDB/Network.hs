@@ -331,7 +331,8 @@ use db' h = h { rdbDatabase = db' }
 
 -- | Close an open connection
 close :: RethinkDBHandle -> IO ()
-close RethinkDBHandle{ rdbHandle, rdbThread } = do
+close h@RethinkDBHandle{ rdbHandle, rdbThread } = do
+  noReplyWait h
   killThread rdbThread
   hClose rdbHandle
 
@@ -400,6 +401,11 @@ collect' c = fix $ \loop -> do
       xs -> do
         ys <- loop
         return $ xs ++ ys
+
+-- | Wait for NoReply queries to complete on the server
+--
+-- >>> runOpts h [NoReply] $ table "users" # update (\row -> merge row (obj ["name" ==> ]))
+-- >>> noReplyWait h
 
 noReplyWait :: RethinkDBHandle -> IO ()
 noReplyWait h = do
