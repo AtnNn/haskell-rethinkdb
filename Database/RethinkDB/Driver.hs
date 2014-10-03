@@ -39,7 +39,7 @@ data Durability = Hard | Soft
 
 renderOption :: RunFlag -> (Text, Value)
 renderOption UseOutdated = "user_outdated" .= True
-renderOption NoReply = "noreply" .= True -- TODO: handle no-reply in Network.hs
+renderOption NoReply = "noreply" .= True
 renderOption (Durability Soft) = "durability" .= ("soft" :: String)
 renderOption (Durability Hard) = "durability" .= ("hard" :: String)
 renderOption Profile = "profile" .= True

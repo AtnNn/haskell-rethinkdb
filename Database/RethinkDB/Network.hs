@@ -19,7 +19,8 @@ module Database.RethinkDB.Network (
   ErrorCode(..),
   RethinkDBError(..),
   RethinkDBConnectionError(..),
-  More
+  More,
+  noReplyWait
   ) where
 
 import Control.Monad (when, forever)
@@ -173,7 +174,7 @@ data More = More {
   _moreFeed :: Bool,
   _moreHandle :: RethinkDBHandle, 
   _moreToken :: Token
-  } deriving Show
+  }
 
 data ErrorCode =
   ErrorBrokenClient |
@@ -193,7 +194,7 @@ instance Show Response where
     show errorMessage ++ " (" ++
     show errorBacktrace ++ ")"
   show (ResponseSingle datum) = show datum
-  show (ResponseBatch more batch) = show more ++ " " ++ show batch
+  show (ResponseBatch _more batch) = show batch
 
 newtype WireResponse = WireResponse { _responseJSON :: Value }
 
@@ -223,7 +224,7 @@ convertResponse h q t (WireResponse (J.Object o)) = let
   Just RUNTIME_ERROR -> ResponseError $ RethinkDBError ErrorRuntime q e bt
   Just WAIT_COMPLETE -> ResponseSingle (toJSON True)
   Nothing -> ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
-      -- TODO: nicer backtraces
+
 convertResponse _ q _ (WireResponse json) =
   ResponseError $
   RethinkDBError ErrorUnexpectedResponse q ("Response is not a JSON object: " ++ show json) []
@@ -231,9 +232,20 @@ convertResponse _ q _ (WireResponse json) =
 runQLQuery :: RethinkDBHandle -> WireQuery -> Term -> IO (MVar Response)
 runQLQuery h query term = do
   tok <- newToken h
-  mbox <- addMBox h tok term
+  let noReply = isNoReplyQuery query
+  mbox <- if noReply
+          then newEmptyMVar
+          else addMBox h tok term
   sendQLQuery h tok query
+  when noReply $ putMVar mbox $ ResponseSingle J.Null
   return mbox
+
+isNoReplyQuery :: WireQuery -> Bool
+isNoReplyQuery (WireQuery (J.Array v)) |
+  [_type, _term, (J.Object optargs)] <- toList v,
+  Just (J.Bool True) <- HM.lookup "noreply" optargs =
+    True
+isNoReplyQuery _ = False
 
 addMBox :: RethinkDBHandle -> Token -> Term -> IO (MVar Response)
 addMBox h tok term = do
@@ -388,3 +400,9 @@ collect' c = fix $ \loop -> do
       xs -> do
         ys <- loop
         return $ xs ++ ys
+
+noReplyWait :: RethinkDBHandle -> IO ()
+noReplyWait h = do
+  m <- runQLQuery h (WireQuery $ toJSON [toWire NOREPLY_WAIT]) (Datum J.Null)
+  _ <- takeMVar m
+  return ()
