@@ -13,3 +13,4 @@ RethinkDB Driver Development:
 * [driver specs](http://rethinkdb.com/docs/driver-spec/)
 * [rethinkdb-dev mailing list](https://groups.google.com/forum/#!forum/rethinkdb-dev)
 * [@neumino's tracing driver](https://github.com/neumino/rethinkdb-driver-development)
+* [release notes](https://github.com/rethinkdb/rethinkdb/blob/next/NOTES.md)
