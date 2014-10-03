@@ -11,31 +11,38 @@
 module Database.RethinkDB (
   -- * Accessing RethinkDB
 
-  RethinkDBHandle,
   connect,
+  RethinkDBHandle,
   close,
   use,
   run, run', runOpts,
-  next, collect,
+  ReQL,
   RunFlag(..),
-  Cursor,
-  Response,
-  Result(..),
+  JSON(..),
+  noReplyWait,
   RethinkDBError(..),
   ErrorCode(..),
-  ReQL,
-  JSON(..),
-
+  Response,
+  Result(..),
+  
+  -- * Cursors
+  
+  next, collect, each,
+  Cursor,
+  closeCursor,
+  
   -- * Manipulating databases
 
   Database(..),
-  db, dbCreate, dbDrop, dbList,
+  dbCreate, dbDrop, dbList,
 
   -- * Manipulating Tables
 
   Table(..), TableCreateOptions(..), IndexCreateOptions(..),
-  table, tableCreate, tableDrop, tableList,
+  tableCreate, tableDrop, tableList,
   indexCreate, indexDrop, indexList,
+  indexRename, indexStatus, indexWait,
+  changes,
 
   -- * Writing data
 
@@ -44,11 +51,14 @@ module Database.RethinkDB (
   insert, upsert,
   update, replace, delete,
   returnVals, nonAtomic,
+  sync,
 
   -- * Selecting data
 
+  db, table,
+  get, getAll,
+  filter, between,
   Bound(..),
-  get, filter, between, getAll,
 
   -- * Joins
 
@@ -56,14 +66,18 @@ module Database.RethinkDB (
 
   -- * Transformations
 
-  map, withFields, concatMap, drop, take,
-  slice,
+  map, withFields, concatMap,
   orderBy,  Order(..),
-  indexesOf, isEmpty, (++), sample,
+  skip, limit, slice, nth,
+  indexesOf, isEmpty, union, sample,
 
   -- * Aggregation
 
-  reduce, reduce1, mapReduce, nub, groupBy, elem,
+  group, ungroup,
+  reduce, reduceBase, count, sum, avg,
+  min, max, argmin, argmax,
+  distinct, contains,
+  mapReduce,
 
   -- * Aggregators
 
@@ -73,22 +87,27 @@ module Database.RethinkDB (
   -- * Document manipulation
 
   pluck, without,
-  merge, literal, remove,
-  append,
-  prepend, (\\),
+  merge,
+  append, prepend,
+  difference,
   setInsert, setUnion, setIntersection, setDifference,
-  (!), (!?), hasFields,
-  insertAt, spliceAt, deleteAt, changeAt, keys,
-
-  -- * Math and logic
-
-  (+), (-), (*), (/), mod, (&&), (||),
-  (==), (/=), (>), (<), (<=), (>=), not,
+  (!), (!?),
+  hasFields,
+  insertAt, spliceAt, deleteAt, changeAt, keys,  
+  literal, object,
 
   -- * String manipulation
   
-  (=~), toUpper, toLower,
+  match, upcase, downcase,
   split, splitOn, splitMax,
+  
+  -- * Math and logic
+
+  add, sub, mul, div, mod,
+  and, or,
+  eq, ne, gt, ge, lt, le,
+  not,
+  random,
   
   -- * Dates and times
   
@@ -99,15 +118,21 @@ module Database.RethinkDB (
   
   -- * Control structures
 
-  apply, js, if', forEach, error,
+  apply, js, branch, forEach, error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
-  typeOf, info, json,
+  typeOf, info, json, http, uuid,
+  
+  -- Geospatial commands
+  
+  circle, distance, fill, geojson,
+  toGeojson, getIntersecting,
+  getNearest, includes, intersects,
+  line, point, polygon, polygonSub,
   
   -- * Helpers
 
-  obj, Object, Attribute(..), str, num, (.), (#),
-  def
+  str, num, (#), def
 
   ) where
 
