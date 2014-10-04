@@ -411,8 +411,7 @@ group ::
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
 group g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
-  let group = op GROUP (expr s, expr . g)
-  runReQL $ op UNGROUP [mr group]
+  runReQL $ op UNGROUP [mr $ op GROUP (expr s, expr . g)]
 
 -- | TODO
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
@@ -583,12 +582,15 @@ indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
 --
 -- > run' h $ table "users" # indexStatus []
 indexStatus :: Expr table => [ReQL] -> table -> ReQL
-indexStatus indexes table = op INDEX_STATUS (table, indexes)
+indexStatus ixes tbl = op INDEX_STATUS (tbl, ixes)
 
+indexWait :: ()
 indexWait = P.undefined
 
+indexRename :: ()
 indexRename = P.undefined
 
+sync :: ()
 sync = P.undefined
 
 -- | List the indexes on the table
@@ -862,10 +864,14 @@ splitOn sep s = op SPLIT [expr s, sep]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
 splitMax sep n s = op SPLIT [expr s, sep, n]
 
+changes :: ()
 changes = P.undefined
 
+random :: ()
 random = P.undefined
 
+http :: ()
 http = P.undefined
 
+uuid :: ()
 uuid = P.undefined

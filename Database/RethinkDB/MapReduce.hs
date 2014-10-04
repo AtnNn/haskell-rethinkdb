@@ -181,14 +181,14 @@ toMapReduce v t@(Term type' args optargs) = let
   optargs' = map (\(TermAttribute k vv) -> (k, toMapReduce v vv)) optargs
   
   -- Count how many of the arguments have been rewritten
-  count = length $ filter notConst $ args' ++ map snd optargs'
+  nb = length $ filter notConst $ args' ++ map snd optargs'
   
   -- Rewrite the current term. rewrite1 is optimised for
   -- the single count case
   rewrite = MapReduce $
-            (if count == 1 then rewrite1 else rewritex) type' args' optargs'
+            (if nb == 1 then rewrite1 else rewritex) type' args' optargs'
   
-  in case count of
+  in case nb of
     -- Special case for singleton arrays
     0 | Just sing <- singleton type' args' optargs -> SingletonArray sing
     

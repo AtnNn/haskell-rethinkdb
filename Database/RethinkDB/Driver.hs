@@ -25,7 +25,7 @@ import Data.Map (Map)
 
 import Database.RethinkDB.Network
 import Database.RethinkDB.Objects
-import Database.RethinkDB.ReQL hiding (Object)
+import Database.RethinkDB.ReQL
 
 -- | Per-query settings
 data RunFlag =

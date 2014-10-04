@@ -75,8 +75,7 @@ module Database.RethinkDB (
   -- * Aggregation
 
   group,
-  reduce, reduce0, count, sum, avg,
-  min, max, argmin, argmax,
+  reduce, reduce0,
   distinct, contains,
   mapReduce,
 

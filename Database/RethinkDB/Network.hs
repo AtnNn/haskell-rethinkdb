@@ -25,7 +25,7 @@ module Database.RethinkDB.Network (
   closeCursor
   ) where
 
-import Control.Monad (when, forever)
+import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName, connectTo, PortID(PortNumber))
 import System.IO (Handle, hClose, hIsEOF)
@@ -415,6 +415,14 @@ noReplyWait h = do
   _ <- takeMVar m
   return ()
 
-each = undefined
+each :: Cursor a -> (a -> IO b) -> IO ()
+each cursor f = do
+  batch <- nextBatch cursor
+  if null batch
+    then return ()
+    else do
+      forM_ batch f
+      each cursor f
 
+closeCursor :: Cursor a -> IO ()
 closeCursor = undefined

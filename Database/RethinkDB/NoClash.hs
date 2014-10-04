@@ -12,6 +12,6 @@ module Database.RethinkDB.NoClash (
 import Database.RethinkDB hiding (
   UTCTime, ZonedTime,
   (*), (+), (-), (/),
-  sum, (++), map, mod, concatMap, (&&),
+  sum, map, mod, concatMap, (&&),
   not, (||), (/=), (<), (<=), (>), (>=), error, (==), filter,
   max, min)
