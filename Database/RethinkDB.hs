@@ -9,6 +9,7 @@
 -- > import qualified Database.RethinkDB.NoClash
 
 module Database.RethinkDB (
+  
   -- * Accessing RethinkDB
 
   connect,
