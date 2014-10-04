@@ -26,6 +26,7 @@ import qualified Prelude as P
 --
 -- >>> :load Database.RethinkDB.NoClash
 -- >>> import qualified Database.RethinkDB as R
+-- >>> import qualified Database.RethinkDB.Operators as R
 -- >>> default (JSON, ReQL, String, Int, Double)
 -- >>> import Prelude
 -- >>> import Data.Text (Text)
@@ -112,7 +113,7 @@ delete s = canReturnVals $ op DELETE [s]
 -- | Like map but for write queries
 --
 -- >>> _ <- run' h $ table "users" # replace (without ["post_count"])
--- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # update (const $ obj ["post_count" := R.length (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) # nonAtomic :: IO WriteResponse
+-- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # update (const $ obj ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) # nonAtomic :: IO WriteResponse
 -- {replaced:2}
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
 forEach s f = op FOREACH (s, expr P.. f)
@@ -149,9 +150,7 @@ infixl 7 *, /
 --
 -- >>> run h $ 2 + 5
 -- 7
--- >>> run h $ 2 R.+ 5
--- 7
--- >>> run h $ (str "foo") + (str "bar")
+-- >>> run h $ str "foo" R.+ str "bar"
 -- "foobar"
 (+) :: (Expr a, Expr b) => a -> b -> ReQL
 (+) a b = op ADD (a, b)
@@ -260,23 +259,17 @@ not a = op NOT [a]
 
 -- | The size of a sequence or an array.
 --
--- Called /count/ in the official drivers
---
--- >>> run h $ R.length (table "users")
+-- >>> run h $ count (table "users")
 -- 2
-length :: (Expr a) => a -> ReQL
-length e = op COUNT [e]
-
-infixr 5 ++
+count :: (Expr a) => a -> ReQL
+count e = op COUNT [e]
 
 -- | Join two sequences.
 --
--- Called /union/ in the official drivers
---
--- >>> run h $ [1,2,3] R.++ ["a", "b", "c" :: Text]
+-- >>> run h $ [1,2,3] `union` ["a", "b", "c" :: Text]
 -- [1,2,3,"a","b","c"]
-(++) :: (Expr a, Expr b) => a -> b -> ReQL
-a ++ b = op UNION (a, b)
+union :: (Expr a, Expr b) => a -> b -> ReQL
+union a b = op UNION (a, b)
 
 -- | Map a function over a sequence
 --
@@ -338,21 +331,17 @@ eqJoin key right index left = op' EQ_JOIN (left, key, right) ["index" :== index]
 
 -- | Drop elements from the head of a sequence.
 --
--- Called /skip/ in the official drivers
---
--- >>> run h $ R.drop 2 [1, 2, 3, 4]
+-- >>> run h $ skip 2 [1, 2, 3, 4]
 -- [3,4]
-drop :: (Expr a, Expr b) => a -> b -> ReQL
-drop a b = op SKIP (b, a)
+skip :: (Expr n, Expr seq) => n -> seq -> ReQL
+skip a b = op SKIP (b, a)
 
 -- | Limit the size of a sequence.
 --
--- Called /limit/ in the official drivers
---
--- >>> run h $ R.take 2 [1, 2, 3, 4]
+-- >>> run h $ limit 2 [1, 2, 3, 4]
 -- [1,2]
-take :: (Expr n, Expr seq) => n -> seq -> ReQL
-take n s = op LIMIT (s, n)
+limit :: (Expr n, Expr seq) => n -> seq -> ReQL
+limit n s = op LIMIT (s, n)
 
 -- | Cut out part of a sequence
 --
@@ -363,26 +352,24 @@ slice n m s = op SLICE (s, n, m)
 
 -- | Reduce a sequence to a single value
 --
--- >>> run h $ reduce (+) 0 [1, 2, 3]
+-- >>> run h $ reduce0 (+) 0 [1, 2, 3]
 -- 6
-reduce :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
-reduce f b s = op REDUCE (s ++ [b], fmap expr P.. f)
+reduce0 :: (Expr base, Expr seq, Expr a) => (ReQL -> ReQL -> a) -> base -> seq -> ReQL
+reduce0 f b s = op REDUCE (s `union` [b], fmap expr P.. f)
 
 -- | Reduce a non-empty sequence to a single value
 --
--- >>> run h $ reduce1 (+) [1, 2, 3]
+-- >>> run h $ reduce (+) [1, 2, 3]
 -- 6
-reduce1 :: (Expr a, Expr s) => (ReQL -> ReQL -> a) -> s -> ReQL
-reduce1 f s = op REDUCE (s, fmap expr P.. f)
+reduce :: (Expr a, Expr s) => (ReQL -> ReQL -> a) -> s -> ReQL
+reduce f s = op REDUCE (s, fmap expr P.. f)
 
 -- | Filter out identical elements of the sequence
 --
--- Called /distint/ in the official drivers
---
--- >>> fmap sort $ run h $ nub (table "posts" ! "flag") :: IO [String]
+-- >>> fmap sort $ run h $ distinct (table "posts" ! "flag") :: IO [String]
 -- ["deleted","pinned"]
-nub :: (Expr s) => s -> ReQL
-nub s = op DISTINCT [s]
+distinct :: (Expr s) => s -> ReQL
+distinct s = op DISTINCT [s]
 
 -- | Merge the "left" and "right" attributes of the objects in a sequence.
 --
@@ -415,14 +402,14 @@ orderBy o s = ReQL $ do
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
--- > >>> run' h $ table "posts" # groupBy (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
+-- > >>> run' h $ table "posts" # group (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
 -- > [["hello\nhi","lorem ipsum"]]
--- >>> run' h $ table "users" # groupBy (!"level") (\users -> let pc = users!"post_count" in [average pc, R.sum pc])
+-- >>> run' h $ table "users" # group (!"level") (\users -> let pc = users!"post_count" in [average pc, R.sum pc])
 -- [{"group":1,"reduction":[1.5,3]},{"group":2,"reduction":[0,0]}]
-groupBy ::
+group ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
-groupBy g f s = ReQL $ do
+group g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
   let group = op GROUP (expr s, expr . g)
   runReQL $ op UNGROUP [mr group]
@@ -442,10 +429,10 @@ sum s = op SUM [s]
 
 -- | The average of a sequence
 --
--- >>> run h $ average [1, 2, 3, 4]
+-- >>> run h $ avg [1, 2, 3, 4]
 -- 2.5
-average :: (Expr s) => s -> ReQL
-average s = op AVG [s]
+avg :: (Expr s) => s -> ReQL
+avg s = op AVG [s]
 
 -- | Minimum value
 min :: Expr s => s -> ReQL
@@ -472,7 +459,7 @@ infixl 9 !
 -- >>> run h $ (obj ["foo" := True]) ! "foo"
 -- true
 --
--- >>> run h $ [1, 2, 3] !! 0
+-- >>> run h $ [1, 2, 3] ! 0
 -- 1
 --
 -- Or a single field from each object in a sequence
@@ -505,10 +492,10 @@ without ks e = op WITHOUT (cons e $ arr (P.map expr ks))
 
 -- | Test if a sequence contains a given element
 --
--- >>> run' h $ 1 `R.elem` [1,2,3]
+-- >>> run' h $ contains 1 # [1,2,3]
 -- true
-elem :: (Expr x, Expr seq) => x -> seq -> ReQL
-elem x s = op CONTAINS (s, x)
+contains :: (Expr x, Expr seq) => x -> seq -> ReQL
+contains x s = op CONTAINS (s, x)
 
 -- | Merge two objects together
 --
@@ -539,12 +526,12 @@ remove = op LITERAL ()
 js :: ReQL -> ReQL
 js s = op JAVASCRIPT [s]
 
--- | Called /branch/ in the official drivers
+-- | Server-side if
 --
--- >>> run h $ if' (1 R.< 2) 3 4
+-- >>> run h $ branch (1 R.< 2) 3 4
 -- 3
-if' :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
-if' a b c = op BRANCH (a, b, c)
+branch :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
+branch a b c = op BRANCH (a, b, c)
 
 -- | Abort the query with an error
 --
@@ -590,6 +577,19 @@ dbList = op DB_LIST ()
 indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> ReQL
 indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
   ("multi" :==) <$> indexMulti opts]
+
+-- TODO: test
+-- | Get the status of the given indexes
+--
+-- > run' h $ table "users" # indexStatus []
+indexStatus :: Expr table => [ReQL] -> table -> ReQL
+indexStatus indexes table = op INDEX_STATUS (table, indexes)
+
+indexWait = P.undefined
+
+indexRename = P.undefined
+
+sync = P.undefined
 
 -- | List the indexes on the table
 --
@@ -692,14 +692,12 @@ sample n s = op SAMPLE (s, n)
 prepend :: (Expr datum, Expr array) => datum -> array -> ReQL
 prepend d a = op PREPEND (a, d)
 
-infixl 9 \\ --
-
--- | Called /difference/ in the official drivers
+-- | The different of two lists
 --
--- >>> run h $ [1,2,3,4,5] \\ [2,5]
+-- >>> run h $ [1,2,3,4,5] `difference` [2,5]
 -- [1,3,4]
-(\\) :: (Expr a, Expr b) => a -> b -> ReQL
-a \\ b = op DIFFERENCE (a, b)
+difference :: (Expr a, Expr b) => a -> b -> ReQL
+difference a b = op DIFFERENCE (b, a)
 
 -- | Insert a datum into an array if it is not yet present
 --
@@ -773,12 +771,10 @@ keys o = op KEYS [o]
 
 -- | Match a string to a regular expression.
 --
--- Called /match/ in the official drivers
---
 -- >>> run' h $ str "foobar" =~ "f(.)+[bc](.+)"
 -- {"groups":[{"start":2,"end":3,"str":"o"},{"start":4,"end":6,"str":"ar"}],"start":0,"end":6,"str":"foobar"}
-(=~) :: (Expr string) => string -> ReQL -> ReQL
-s =~ r = op MATCH (s, r)
+match :: (Expr string) => ReQL -> string -> ReQL
+match r s = op MATCH (s, r)
 
 -- | Apply a function to a list of arguments.
 --
@@ -833,17 +829,17 @@ infixr 9 .
 
 -- | Convert to upper case
 --
--- >>> run h $ toUpper (str "Foo")
+-- >>> run h $ upcase (str "Foo")
 -- "FOO"
-toUpper :: Expr str => str -> ReQL
-toUpper s = op UPCASE [s]
+upcase :: Expr str => str -> ReQL
+upcase s = op UPCASE [s]
 
 -- | Convert to lower case
 --
--- >>> run h $ toLower (str "Foo")
+-- >>> run h $ downcase (str "Foo")
 -- "foo"
-toLower :: Expr str => str -> ReQL
-toLower s = op DOWNCASE [s]
+downcase :: Expr str => str -> ReQL
+downcase s = op DOWNCASE [s]
 
 -- | Split a string on whitespace characters
 --
@@ -866,4 +862,10 @@ splitOn sep s = op SPLIT [expr s, sep]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
 splitMax sep n s = op SPLIT [expr s, sep, n]
 
--- TODO: index_status, index_wait, sync
+changes = P.undefined
+
+random = P.undefined
+
+http = P.undefined
+
+uuid = P.undefined

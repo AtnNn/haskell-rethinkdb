@@ -20,8 +20,7 @@ module Database.RethinkDB.ReQL (
   arr,
   baseArray,
   withQuerySettings,
-  Object(..),
-  obj,
+  object,
   returnVals,
   nonAtomic,
   canReturnVals,
@@ -209,18 +208,16 @@ instance (Expr a, Expr b, Expr c, Expr d) => Arr (a, b, c, d) where
 instance Arr Array where
   arr = id
 
--- | A list of key/value pairs
-data Object = Object { objectAttributes :: [Attribute] }
-
-instance Show Object where
-  show = show . expr
-
 infix 0 :=
 
 -- | A key/value pair used for building objects
 data Attribute where 
   (:=) :: Expr e => T.Text -> e -> Attribute
   (::=) :: (Expr k, Expr v) => k -> v -> Attribute
+
+instance Expr Attribute where
+  expr (k := v) = expr (k, v)
+  expr (k ::= v) = expr (k, v)
 
 data TermAttribute = TermAttribute T.Text Term deriving Eq
 
@@ -232,9 +229,10 @@ mapTermAttribute f (TermAttribute k v) = TermAttribute k (f v)
 instance Show TermAttribute where
   show (TermAttribute a b) = T.unpack a ++ ": " ++ show b
 
+-- TODO: test this
 -- | Convert a list of attributes into a ReQL object
-obj :: [Attribute] -> Object
-obj = Object
+object :: Expr pair => [pair] -> ReQL
+object kvs = op OBJECT [op ARGS [kvs]]
 
 baseOptArgs :: [OptArg] -> State QuerySettings [TermAttribute]
 baseOptArgs = sequence . map toBase
@@ -379,19 +377,7 @@ instance Expr Array where
   expr a = op MAKE_ARRAY a
 
 instance Expr e => Expr (M.HashMap T.Text e) where
-  expr m = expr $ obj $ map (uncurry (:=)) $ M.toList m
-
-instance Expr Object where
-  expr (Object attrs) =
-    if all knownKey attrs
-    then op' MAKE_OBJ () $ map toOptArg attrs
-    else op OBJECT $ concatMap pairs attrs
-    where pairs (k := v) = [expr k, expr v]
-          pairs (k ::= v) = [expr k, expr v]
-          knownKey (_ := _) = True
-          knownKey (_ ::= _) = False
-          toOptArg (k := v) = k :== v
-          toOptArg (_ ::= _) = error "unreachable"
+  expr m = expr $ object $ map (uncurry (:=)) $ M.toList m
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t

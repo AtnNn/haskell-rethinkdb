@@ -99,15 +99,15 @@ applyChain (MapReduceChain maps red) s =
   applyReduce red $ applyMaps maps s
 applyChain (MapReduce mrf) s = applyMRF mrf s
 applyChain (SingletonArray x) s = op FUNCALL (op MAKE_ARRAY [x], s)
-applyChain (AddBase b c) s = applyChain c s R.++ [b]
+applyChain (AddBase b c) s = applyChain c s `union` [b]
 
 -- | Convert an MRF into a ReQL function
 applyMRF :: MRF -> ReQL -> ReQL
-applyMRF (MRF m r Nothing f) s = f `apply` [reduce1 r (applyMapFun m s)]
+applyMRF (MRF m r Nothing f) s = f `apply` [reduce r (applyMapFun m s)]
 applyMRF (MRF m r (Just base) f) s =
   f $
-  apply (\x -> if' (isEmpty x) base (x R.! 0)) . return $
-  reduce1 (\a b -> [a R.! 0 `r` b R.! 0]) $
+  apply (\x -> branch (isEmpty x) base (x R.! 0)) . return $
+  reduce (\a b -> [a R.! 0 `r` b R.! 0]) $
   R.map (\x -> [x]) $
   applyMapFun m s
 
@@ -154,7 +154,7 @@ thenReduce :: [Map] -> Reduce -> MRF
 thenReduce maps (BuiltInReduce _ _ _ mrf) = maps `thenMRF` mrf
 
 collect :: MRF
-collect = MRF (MapFun $ \x -> expr [x]) (R.++) (Just nil) id
+collect = MRF (MapFun $ \x -> expr [x]) union (Just nil) id
 
 -- | Rewrites the term in the second argument to merge all uses of the
 -- variable whose id is given in the first argument.
@@ -245,19 +245,19 @@ mapMRF MERGE [b] [] =
   Just . MapFun $ \s -> op' MERGE [s,  wrap b] [noRecurse]
 mapMRF CONCATMAP [f] [] = Just . ConcatMapFun $ toFun1 f
 mapMRF FILTER [f] [] =
-  Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const False)) x nil
+  Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const False)) x nil
 mapMRF FILTER [f] [TermAttribute "default" defval] =
-    Just . ConcatMapFun $ \x -> if' (toFun1 f x # handle (const defval)) x nil
+    Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const defval)) x nil
 mapMRF GET_FIELD [attr] [] =
   Just . ConcatMapFun $ \x ->
-  if' (op' HAS_FIELDS (x, wrap attr) [noRecurse])
+  branch (op' HAS_FIELDS (x, wrap attr) [noRecurse])
   [op' GET_FIELD (x, attr) [noRecurse]] nil
 mapMRF HAS_FIELDS sel [] =
   Just . ConcatMapFun $ \x ->
-  if' (op' HAS_FIELDS (x : map wrap sel) [noRecurse]) [x] nil
+  branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse]) [x] nil
 mapMRF WITH_FIELDS sel [] =
   Just . ConcatMapFun $ \x ->
-  if' (op' HAS_FIELDS (x : map wrap sel) [noRecurse])
+  branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse])
   [op' PLUCK (x : map wrap sel) [noRecurse]] nil
 mapMRF _ _ _ = Nothing
 
@@ -275,19 +275,19 @@ reduceMRF AVG [] [] =
              (\x -> x R.! 0 R./ x R.! 1)
 reduceMRF SUM [] [] = Just $ MRF (MapFun id) (R.+) (Just 0) id
 reduceMRF SUM [sel] [] = Just $ MRF (MapFun $ toFun1 sel) (R.+) (Just 0) id
-reduceMRF MIN [] [] = Just $ MRF (MapFun id) (\a b -> if' (a R.< b) a b) Nothing id
+reduceMRF MIN [] [] = Just $ MRF (MapFun id) (\a b -> branch (a R.< b) a b) Nothing id
 reduceMRF MIN [sel] [] =
     Just $ MRF (MapFun $ \x -> expr [x, toFun1 sel x])
-             (\a b -> if' (a R.! 1 R.< b R.! 1) a b)
+             (\a b -> branch (a R.! 1 R.< b R.! 1) a b)
              Nothing
              (R.! 0)
-reduceMRF MAX [] [] = Just $ MRF (MapFun id) (\a b -> if' (a R.> b) a b) Nothing id
+reduceMRF MAX [] [] = Just $ MRF (MapFun id) (\a b -> branch (a R.> b) a b) Nothing id
 reduceMRF MAX [sel] [] =
     Just $ MRF (MapFun $ \x -> expr [x, toFun1 sel x])
-             (\a b -> if' (a R.! 1 R.> b R.! 1) a b)
+             (\a b -> branch (a R.! 1 R.> b R.! 1) a b)
              Nothing
              (R.! 0)
-reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> nub (a R.++ b)) (Just nil) id
+reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> distinct (a `union` b)) (Just nil) id
 reduceMRF _ _ _ = Nothing
 
 -- | Convert from one representation to the other
@@ -325,8 +325,8 @@ rewritex ttype args optargs = MRF maps reduces Nothing finallys where
   getMapFun (MRF (ConcatMapFun f) _ _ _) = f
   getReduceFun (MRF (MapFun _) f _ _) = f
   getReduceFun (MRF (ConcatMapFun _) f _ _) =
-    \a b -> flip apply [a R.++ b] $ \l ->
-      if' (isEmpty l) ([] :: [()]) [reduce1 f l]
+    \a b -> flip apply [a `union` b] $ \l ->
+      branch (isEmpty l) ([] :: [()]) [reduce f l]
   getFinallyFun (MRF (MapFun _) _ _ f) = f
   getFinallyFun (MRF (ConcatMapFun _) _ mbase f) =
     f . maybe (R.! 0) (\base s ->

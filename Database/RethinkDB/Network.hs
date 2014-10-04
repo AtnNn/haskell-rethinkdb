@@ -20,7 +20,9 @@ module Database.RethinkDB.Network (
   RethinkDBError(..),
   RethinkDBConnectionError(..),
   More,
-  noReplyWait
+  noReplyWait,
+  each,
+  closeCursor
   ) where
 
 import Control.Monad (when, forever)
@@ -402,13 +404,17 @@ collect' c = fix $ \loop -> do
         ys <- loop
         return $ xs ++ ys
 
+-- TODO: test
 -- | Wait for NoReply queries to complete on the server
 --
 -- >>> runOpts h [NoReply] $ table "users" # update (\row -> merge row (obj ["name" ==> ]))
 -- >>> noReplyWait h
-
 noReplyWait :: RethinkDBHandle -> IO ()
 noReplyWait h = do
   m <- runQLQuery h (WireQuery $ toJSON [toWire NOREPLY_WAIT]) (Datum J.Null)
   _ <- takeMVar m
   return ()
+
+each = undefined
+
+closeCursor = undefined

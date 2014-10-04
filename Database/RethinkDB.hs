@@ -68,20 +68,20 @@ module Database.RethinkDB (
 
   map, withFields, concatMap,
   orderBy,  Order(..),
-  skip, limit, slice, nth,
+  skip, limit, slice,
   indexesOf, isEmpty, union, sample,
 
   -- * Aggregation
 
-  group, ungroup,
-  reduce, reduceBase, count, sum, avg,
+  group,
+  reduce, reduce0, count, sum, avg,
   min, max, argmin, argmax,
   distinct, contains,
   mapReduce,
 
   -- * Aggregators
 
-  length, sum, average,
+  count, sum, avg,
   min, max, argmin, argmax,
 
   -- * Document manipulation
@@ -103,9 +103,9 @@ module Database.RethinkDB (
   
   -- * Math and logic
 
-  add, sub, mul, div, mod,
-  and, or,
-  eq, ne, gt, ge, lt, le,
+  (+), (-), (*), (/), mod,
+  (&&), (||),
+  (==), (/=), (>), (>=), (<), (<=),
   not,
   random,
   
@@ -144,4 +144,5 @@ import Database.RethinkDB.Objects
 import Database.RethinkDB.Driver
 import Database.RethinkDB.Functions
 import Database.RethinkDB.Time
+import Database.RethinkDB.Geospatial
 import Data.Default
