@@ -65,8 +65,8 @@ tableCreate :: Table -> TableCreateOptions -> ReQL
 tableCreate (O.Table mdb table_name pkey) opts =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
     op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
-      ("datacenter" :==) <$> tableDataCenter opts,
-      ("primary_key" :==) <$> pkey ]
+      ("datacenter" :=) <$> tableDataCenter opts,
+      ("primary_key" :=) <$> pkey ]
 
 -- | Insert a document or a list of documents into a table
 --
@@ -79,36 +79,28 @@ tableCreate (O.Table mdb table_name pkey) opts =
 -- >>> run h $ table "posts" # insert (obj ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3, "flag" := str "pinned"]) :: IO WriteResponse
 -- {inserted:1}
 insert :: (Expr object) => object -> Table -> ReQL
-insert a tb = canReturnVals $ op INSERT (tb, a)
-
--- | Like insert, but replace existing documents with the same primary key
---
--- >>> run h $ table "users" # upsert (obj ["name" := str "bill", "occupation" := str "pianist"]) :: IO WriteResponse
--- {replaced:1}
-upsert :: (Expr table, Expr object) => object -> table -> ReQL
-upsert a tb = canReturnVals $ op' INSERT (tb, a) ["conflict" :== str "update"]
--- TODO: support conflict: replace
+insert a tb = op INSERT (tb, a)
 
 -- | Add to or modify the contents of a document
 --
 -- >>> run h $ table "users" # getAll "name" [str "bob"] # update (const $ obj ["occupation" := str "tailor"]) :: IO WriteResponse
 -- {replaced:1}
 update :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
-update f s = canNonAtomic $ canReturnVals $ op UPDATE (s, expr . f)
+update f s = op UPDATE (s, expr . f)
 
 -- | Replace a document with another
 --
 -- >>> run h $ replace (\user -> obj ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!?"occupation")) $ table "users" :: IO WriteResponse
 -- {replaced:1}
 replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
-replace f s = canNonAtomic $ canReturnVals $ op REPLACE (s, expr . f)
+replace f s = op REPLACE (s, expr . f)
 
 -- | Delete the documents
 --
 -- >>> run h $ delete . getAll "name" [str "bob"] $ table "users" :: IO WriteResponse
 -- {deleted:1}
 delete :: (Expr selection) => selection -> ReQL
-delete s = canReturnVals $ op DELETE [s]
+delete s = op DELETE [s]
 
 -- | Like map but for write queries
 --
@@ -283,7 +275,7 @@ map f a = op MAP (a, expr P.. f)
 -- >>> run h $ R.filter (R.< 4) [3, 1, 4, 1, 5, 9, 2, 6]
 -- [3,1,1,2]
 filter :: (Expr predicate, Expr seq) => predicate -> seq -> ReQL
-filter f a = op' FILTER (a, f) ["default" :== op ERROR ()]
+filter f a = op' FILTER (a, f) ["default" := op ERROR ()]
 
 -- | Query all the documents whose value for the given index is in a given range
 --
@@ -292,7 +284,7 @@ filter f a = op' FILTER (a, f) ["default" :== op ERROR ()]
 between :: (Expr left, Expr right, Expr seq) => Key -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
   op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b]
-         ["left_bound" :== closedOrOpen a, "right_bound" :== closedOrOpen b, "index" :== i]
+         ["left_bound" := closedOrOpen a, "right_bound" := closedOrOpen b, "index" := i]
 
 -- | Append a datum to a sequence
 --
@@ -327,7 +319,7 @@ outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 -- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 eqJoin :: (Expr right, Expr left) => Key -> right -> Key -> left -> ReQL
-eqJoin key right index left = op' EQ_JOIN (left, key, right) ["index" :== index]
+eqJoin key right index left = op' EQ_JOIN (left, key, right) ["index" := index]
 
 -- | Drop elements from the head of a sequence.
 --
@@ -575,7 +567,7 @@ dbList = op DB_LIST ()
 -- {"created":1}
 indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> ReQL
 indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
-  ("multi" :==) <$> indexMulti opts]
+  ("multi" :=) <$> indexMulti opts]
 
 -- TODO: test
 -- | Get the status of the given indexes
@@ -584,8 +576,12 @@ indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
 indexStatus :: Expr table => [ReQL] -> table -> ReQL
 indexStatus ixes tbl = op INDEX_STATUS (tbl, ixes)
 
-indexWait :: ()
-indexWait = P.undefined
+-- TODO: test
+-- | Wait for an index to be built
+--
+-- > run' h $ table "users" # indexWait []
+indexWait :: Expr table => [ReQL] -> table -> ReQL
+indexWait ixes tbl = op INDEX_STATUS (tbl, ixes)
 
 indexRename :: ()
 indexRename = P.undefined
@@ -612,7 +608,7 @@ indexDrop name tbl = op INDEX_DROP (tbl, name)
 -- >>> run' h $ table "users" # getAll "name" [str "bill"]
 -- [{"post_count":2,"name":"bill","occupation":"pianist"}]
 getAll :: (Expr value) => Key -> [value] -> Table -> ReQL
-getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" :== idx]
+getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" := idx]
 
 -- | Get a document by primary key
 --

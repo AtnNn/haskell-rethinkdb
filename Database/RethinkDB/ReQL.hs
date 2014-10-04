@@ -1,5 +1,7 @@
-{-# LANGUAGE ExistentialQuantification, RecordWildCards, ScopedTypeVariables,
-             FlexibleInstances, OverloadedStrings, PatternGuards, GADTs #-}
+{-# LANGUAGE ExistentialQuantification, RecordWildCards,
+             ScopedTypeVariables, FlexibleInstances,
+             OverloadedStrings, PatternGuards, GADTs, 
+             EmptyDataDecls #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
@@ -7,7 +9,6 @@ module Database.RethinkDB.ReQL (
   op, op',
   Term(..),
   TermAttribute(..),
-  OptArg(..),
   buildQuery,
   Backtrace, convertBacktrace, Frame(..),
   Expr(..),
@@ -16,15 +17,13 @@ module Database.RethinkDB.ReQL (
   str,
   num,
   Attribute(..),
+  Static, Dynamic, OptArg,
+  OptArgs(..),
   cons,
   arr,
   baseArray,
   withQuerySettings,
   object,
-  returnVals,
-  nonAtomic,
-  canReturnVals,
-  canNonAtomic,
   reqlToJSON,
   Bound(..),
   closedOrOpen,
@@ -81,52 +80,28 @@ data QuerySettings = QuerySettings {
   queryToken :: Int64,
   queryDefaultDatabase :: Database,
   queryVarIndex :: Int,
-  queryUseOutdated :: Maybe Bool,
-  queryReturnVals :: Maybe Bool,
-  queryAtomic :: Maybe Bool
+  queryUseOutdated :: Maybe Bool
   }
 
 instance Default QuerySettings where
-  def = QuerySettings 0 (Database "") 0 Nothing Nothing Nothing
+  def = QuerySettings 0 (Database "") 0 Nothing
 
 withQuerySettings :: (QuerySettings -> ReQL) -> ReQL
 withQuerySettings f = ReQL $ (runReQL . f) =<< get
 
--- | Include the value of single write operations in the returned object
-returnVals :: ReQL -> ReQL
-returnVals (ReQL t) = ReQL $ do
-  state <- get
-  put state{ queryReturnVals = Just True }
-  ret <- t
-  state' <- get
-  put state'{ queryReturnVals = queryReturnVals state }
-  return ret
+class OptArgs a where
+  ex :: a -> [Attribute Static] -> a
 
--- | Allow non-atomic replace
-nonAtomic :: ReQL -> ReQL
-nonAtomic (ReQL t) = ReQL $ do
-  state <- get
-  put state{ queryAtomic = Just False }
-  ret <- t
-  state' <- get
-  put state'{ queryAtomic = queryAtomic state }
-  return ret
-
-canReturnVals :: ReQL -> ReQL
-canReturnVals (ReQL t) = ReQL $ t >>= \ret -> do
-  qs <- get
-  case queryReturnVals qs of
-    Nothing -> return ret
-    Just rv -> return ret{
-      termOptArgs = TermAttribute "return_vals" (boolToTerm rv) : termOptArgs ret }
-
-canNonAtomic :: ReQL -> ReQL
-canNonAtomic (ReQL t) = ReQL $ t >>= \ret -> do
-  qs <- get
-  case queryAtomic qs of
-    Nothing -> return ret
-    Just atomic -> return ret{
-      termOptArgs = TermAttribute "non_atomic" (boolToTerm $ not atomic) : termOptArgs ret }
+instance OptArgs ReQL where
+  ex (ReQL m) attrs = ReQL $ do
+    e <- m
+    case e of
+      Datum _ -> return e
+      Term t a oa -> Term t a . (oa ++) <$> baseAttributes attrs
+      Note n t -> Note n <$> runReQL (ex (ReQL $ return t) attrs)
+      
+instance OptArgs b => OptArgs (a -> b) where
+  ex f a = flip ex a . f
 
 boolToTerm :: Bool -> Term
 boolToTerm b = Datum $ J.Bool b
@@ -152,9 +127,9 @@ instance Show Term where
     ++ " -> " ++ show body ++ ")"
   show (Term BRACKET [o, k] []) = show o ++ "[" ++ show k ++ "]"
   show (Term FUNCALL (f : as) []) = "(" ++ show f ++ ")(" ++ shortLines "," (map show as) ++ ")"
-  show (Term fun args optargs) =
+  show (Term fun args oargs) =
     map toLower (show fun) ++ "(" ++
-    shortLines "," (map show args ++ map show optargs) ++ ")"
+    shortLines "," (map show args ++ map show oargs) ++ ")"
 
 shortLines :: String -> [String] -> String
 shortLines sep args =
@@ -211,17 +186,20 @@ instance Arr Array where
 infix 0 :=
 
 -- | A key/value pair used for building objects
-data Attribute where 
-  (:=) :: Expr e => T.Text -> e -> Attribute
-  (::=) :: (Expr k, Expr v) => k -> v -> Attribute
+data Attribute a where 
+  (:=) :: Expr e => T.Text -> e -> Attribute a
+  (::=) :: (Expr k, Expr v) => k -> v -> Attribute Dynamic
 
-instance Expr Attribute where
+type OptArg = Attribute Static
+
+data Static
+data Dynamic
+
+instance Expr (Attribute a) where
   expr (k := v) = expr (k, v)
   expr (k ::= v) = expr (k, v)
 
 data TermAttribute = TermAttribute T.Text Term deriving Eq
-
-data OptArg = forall e . Expr e => T.Text :== e
 
 mapTermAttribute :: (Term -> Term) -> TermAttribute -> TermAttribute
 mapTermAttribute f (TermAttribute k v) = TermAttribute k (f v)
@@ -234,15 +212,17 @@ instance Show TermAttribute where
 object :: Expr pair => [pair] -> ReQL
 object kvs = op OBJECT [op ARGS [kvs]]
 
-baseOptArgs :: [OptArg] -> State QuerySettings [TermAttribute]
-baseOptArgs = sequence . map toBase
-  where toBase (k :== v) = TermAttribute k <$> runReQL (expr v)
+baseAttributes :: [Attribute Static] -> State QuerySettings [TermAttribute]
+baseAttributes = mapM toBase
+  where
+    toBase :: Attribute Static -> State QuerySettings TermAttribute
+    toBase (k := v) = TermAttribute k <$> runReQL (expr v)
 
 -- | Build a term
-op' :: Arr a => TermType -> a -> [OptArg] -> ReQL
+op' :: Arr a => TermType -> a -> [Attribute Static] -> ReQL
 op' t a b = ReQL $ do
   a' <- baseArray (arr a)
-  b' <- baseOptArgs b
+  b' <- baseAttributes b
   case (t, a', b') of
     -- Inline function calls if all arguments are variables
     (FUNCALL, (Term FUNC [argsFunTerm, fun] [] : argsCall), []) |
@@ -348,7 +328,7 @@ instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
     op' TABLE (fromMaybe queryDefaultDatabase mdb, name) $ catMaybes [
-      fmap ("use_outdated" :==) queryUseOutdated ]
+      fmap ("use_outdated" :=) queryUseOutdated ]
 
 instance Expr Database where
   expr (Database name) = op DB [name]
@@ -383,11 +363,11 @@ buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
 buildTerm (Datum a@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, a)
 buildTerm (Datum json) = WireTerm json
-buildTerm (Term type_ args optargs) =
+buildTerm (Term type_ args oargs) =
   WireTerm $ toJSON (
     toWire type_,
     map (termJSON . buildTerm) args,
-    buildAttributes optargs)
+    buildAttributes oargs)
 
 buildAttributes :: [TermAttribute] -> J.Value
 buildAttributes ts = toJSON $ M.fromList $ map toPair ts

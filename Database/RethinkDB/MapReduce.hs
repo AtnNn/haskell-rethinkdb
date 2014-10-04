@@ -292,12 +292,12 @@ reduceMRF _ _ _ = Nothing
 
 -- | Convert from one representation to the other
 baseAttrToOptArg :: TermAttribute -> OptArg
-baseAttrToOptArg (TermAttribute k v) = k :== v
+baseAttrToOptArg (TermAttribute k v) = k := v
 
 -- | This undocumented optional argument circumvents stream
 -- polymorphism on some operations
 noRecurse :: OptArg
-noRecurse = "_NO_RECURSE_" :== True
+noRecurse = "_NO_RECURSE_" := True
 
 -- | Rewrite a command into a map/reduce.
 --
@@ -342,7 +342,7 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   args' <- sequence $ map extractOne args
   optargvs' <- sequence $ map extractOne (map snd optargs)
   let optargks = map fst optargs
-  return $ \v -> op' tt (map ($ v) args') (zipWith (:==) optargks $ map ($ v) optargvs')
+  return $ \v -> op' tt (map ($ v) args') (zipWith (:=) optargks $ map ($ v) optargvs')
     where
       extractOne chain = either (return . const) go $ chainToMRF chain
       go mrf = do

@@ -60,7 +60,7 @@ inTimezone tz t = op IN_TIMEZONE (t, tz)
 -- Just False
 during :: (Expr left, Expr right, Expr time) => Bound left -> Bound right -> time -> ReQL
 during l r t = op' DURING (t, getBound l, getBound r) [
-  "left_bound" :== closedOrOpen l, "right_bound" :== closedOrOpen r]
+  "left_bound" := closedOrOpen l, "right_bound" := closedOrOpen r]
 
 -- | Extract part of a time value
 timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds ::

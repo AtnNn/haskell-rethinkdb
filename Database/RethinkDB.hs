@@ -49,9 +49,8 @@ module Database.RethinkDB (
 
   WriteResponse(..),
   Change(..),
-  insert, upsert,
+  insert,
   update, replace, delete,
-  returnVals, nonAtomic,
   sync,
 
   -- * Selecting data
@@ -132,7 +131,7 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  str, num, (#), def
+  ex, str, num, (#), def
 
   ) where
 
