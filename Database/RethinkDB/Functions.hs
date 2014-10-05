@@ -21,6 +21,8 @@ import Data.Text (Text)
 import Control.Monad.State
 import Control.Applicative
 import Data.Maybe
+import Data.Default
+import Data.Monoid
 
 import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.ReQL
@@ -28,7 +30,7 @@ import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import qualified Database.RethinkDB.Objects as O
 import Database.RethinkDB.Objects
 
-import Prelude (($), return, Double, Bool, String)
+import Prelude (($), return, Double, Bool, String, (.))
 import qualified Prelude as P
 
 -- $setup
@@ -111,7 +113,7 @@ replace f s = op REPLACE (s, expr . f)
 -- >>> run h $ delete . getAll "name" [str "bob"] $ table "users" :: IO WriteResponse
 -- {deleted:1}
 delete :: (Expr selection) => selection -> ReQL
-delete s = op DELETE [s]
+delete s = op Term.DELETE [s]
 
 -- | Like map but for write queries
 --
@@ -631,7 +633,7 @@ getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" := idx]
 -- >>> run' h $ table "users" # get "nancy"
 -- {"post_count":0,"name":"nancy"}
 get :: Expr s => ReQL -> s -> ReQL
-get k e = op GET (e, k)
+get k e = op Term.GET (e, k)
 
 -- | Convert a value to a different type
 --
@@ -836,11 +838,6 @@ infixl 8 #
 (#) :: (Expr a, Expr b) =>  a -> (a -> b) -> ReQL
 x # f = expr (f x)
 
-infixr 9 .
--- | Specialised function composition
-(.) :: (Expr a, Expr b, Expr c) =>  (ReQL -> b) -> (ReQL -> a) -> c -> ReQL
-(f . g) x = expr (f (expr (g (expr x))))
-
 -- | Convert to upper case
 --
 -- >>> run h $ upcase (str "Foo")
@@ -900,8 +897,87 @@ randomTo n = op RANDOM [n]
 randomFromTo :: ReQL -> ReQL -> ReQL
 randomFromTo n m = op RANDOM [n, m]
 
-http :: ()
-http = P.undefined
+data HttpOptions = HttpOptions {
+  httpTimeout :: Maybe P.Int,
+  httpReattempts :: Maybe P.Int,
+  httpRedirects :: Maybe P.Int,
+  httpVerify :: Maybe P.Bool,
+  httpResultFormat :: Maybe HttpResultFormat,
+  httpMethod :: Maybe HttpMethod,
+  httpAuth :: Maybe [Attribute Dynamic],
+  httpParams :: Maybe [Attribute Dynamic],
+  httpHeader :: Maybe [Attribute Dynamic],
+  httpData :: Maybe ReQL,
+  httpPage :: Maybe PaginationStrategy,
+  httpPageLimit :: Maybe P.Int
+  }
+
+data HttpResultFormat =
+  FormatAuto | FormatJSON | FormatJSONP | FormatBinary
+
+instance Expr HttpResultFormat where
+  expr FormatAuto = "auto"
+  expr FormatJSON = "json"
+  expr FormatJSONP = "jsonp"
+  expr FormatBinary = "binary"
+
+data HttpMethod = GET | POST | PUT | PATCH | DELETE | HEAD
+                deriving P.Show
+
+instance Expr HttpMethod where
+  expr = str P.. P.show
+
+data PaginationStrategy =
+  LinkNext |
+  PaginationFunction (ReQL -> ReQL)
+
+instance Expr PaginationStrategy where
+  expr LinkNext = "link-next"
+  expr (PaginationFunction f) = expr f
+
+instance Default HttpOptions where
+  def = HttpOptions {
+    httpTimeout = Nothing,
+    httpReattempts  = Nothing,
+    httpRedirects = Nothing,
+    httpVerify = Nothing,
+    httpResultFormat = Nothing,
+    httpMethod = Nothing,
+    httpAuth = Nothing,
+    httpParams = Nothing,
+    httpHeader = Nothing,
+    httpData = Nothing,
+    httpPage = Nothing,
+    httpPageLimit = Nothing
+    }
+
+-- | Retrieve data from the specified URL over HTTP
+--
+-- >>> run' h $ http "http://httpbin.org/get" def{ httpParams = Just $ object $ ["foo" := 1] }
+-- TODO
+-- >>> run' h $ http "http://httpbin.org/put" def{ httpMethod = Just PUT, httpData = Just $ object ["foo" := "bar"] }
+-- TODO
+http :: Expr url => url -> HttpOptions -> ReQL
+http url opts = op' HTTP [url] $ render opts
+  where
+    render ho = 
+      let
+        go :: Expr x => (HttpOptions -> Maybe x) -> Text -> [Attribute Static]
+        go f s = maybe [] (\x -> [s := x]) (f ho)
+      in mconcat [
+        go httpTimeout "timeout",
+        go httpReattempts "reattempts",
+        go httpRedirects "redirects",
+        go httpVerify "verify",
+        go httpResultFormat "result_format",
+        go httpMethod "method",
+        go httpAuth "auth",
+        go httpParams "params",
+        go httpHeader "header",
+        go httpData "data",
+        go httpPage "page",
+        go httpPageLimit "page_limit"
+        ]
 
 uuid :: ()
 uuid = P.undefined

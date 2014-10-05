@@ -54,7 +54,7 @@ import Data.Int
 import Data.Monoid
 import Data.Scientific
 import Data.Char
-import {-# SOURCE #-} Database.RethinkDB.Functions
+import {-# SOURCE #-} Database.RethinkDB.Functions as R
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query

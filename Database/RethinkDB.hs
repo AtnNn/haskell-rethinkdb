@@ -121,7 +121,10 @@ module Database.RethinkDB (
   args, apply, js, branch, forEach, error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
-  typeOf, info, json, http, uuid,
+  typeOf, info, json, uuid,
+  http,
+  HttpOptions(..), HttpResultFormat(..),
+  HttpMethod(..), PaginationStrategy(..),
   
   -- Geospatial commands
   
