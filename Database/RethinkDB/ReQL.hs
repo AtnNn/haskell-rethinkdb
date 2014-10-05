@@ -81,7 +81,7 @@ data Term = Term {
   } | Note {
   termNote :: String,
   termTerm :: Term
-  }deriving Eq
+  } deriving Eq
 
 newtype WireTerm = WireTerm { termJSON :: Value }
 
@@ -113,7 +113,7 @@ instance OptArgs b => OptArgs (a -> b) where
   ex f a = flip ex a . f
 
 boolToTerm :: Bool -> Term
-boolToTerm b = Datum $ J.Bool b
+boolToTerm b = Datum $ Value $ J.Bool b
 
 newVarId :: State QuerySettings Int
 newVarId = do
@@ -123,7 +123,7 @@ newVarId = do
   return $ n
 
 instance Show Term where
-  show (Datum dat) = show (O.JSON dat)
+  show (Datum dat) = show dat
   show (Note n term) = shortLines "" ["{- " ++ n ++ " -}", show term]
   show (Term MAKE_ARRAY x []) = "[" ++ (shortLines "," $ map show x) ++ "]"
   show (Term MAKE_OBJ [] x) = "{" ++ (shortLines "," $ map show x) ++ "}"
@@ -262,11 +262,11 @@ argList (Term MAKE_ARRAY a []) = mapM toInt =<< datums a
 argList _ = Nothing
 
 toInts :: Datum -> Maybe [Int]
-toInts (J.Array xs) = mapM toInt $ toList xs
+toInts (Value (J.Array xs)) = mapM (toInt . Value) $ toList xs
 toInts _ = Nothing
 
 toInt :: Datum -> Maybe Int
-toInt (J.Number n) = toBoundedInteger n
+toInt (Value (J.Number n)) = toBoundedInteger n
 toInt _ = Nothing
 
 varsOf :: [Term] -> Maybe [Int]
@@ -281,7 +281,7 @@ alphaRename assoc = fix $ \f x ->
   case varOf x of
     Just n
       | Just n' <- lookup n assoc ->
-      Term VAR [Datum (toJSON n')] []
+      Term VAR [Datum $ Value $ (toJSON n')] []
       | otherwise -> x
     _ -> updateChildren x f
 
@@ -291,7 +291,7 @@ updateChildren d@Datum{} _ = d
 updateChildren (Term t a o) f = Term t (map f a) (map (mapTermAttribute f) o)
 
 datumTerm :: J.ToJSON a => a -> ReQL
-datumTerm = ReQL . return . Datum . toJSON
+datumTerm = ReQL . return . Datum . Value . toJSON
 
 -- | A shortcut for inserting strings into ReQL expressions
 -- Useful when OverloadedStrings makes the type ambiguous
@@ -328,7 +328,7 @@ instance Expr Bool where
   expr = datumTerm
 
 instance Expr () where
-  expr _ = ReQL $ return $ Datum J.Null
+  expr _ = ReQL $ return $ Datum $ Value J.Null
 
 instance IsString ReQL where
   fromString = datumTerm
@@ -380,8 +380,7 @@ instance Expr e => Expr (M.HashMap T.Text e) where
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
-buildTerm (Datum a@J.Array{}) = WireTerm $ toJSON (toWire MAKE_ARRAY, a)
-buildTerm (Datum json) = WireTerm json
+buildTerm (Datum (Value json)) = WireTerm json
 buildTerm (Term type_ args oargs) =
   WireTerm $ toJSON (
     toWire type_,
@@ -450,10 +449,34 @@ instance Expr Term where
 data Bound a =
   Open { getBound :: a } -- ^ An inclusive bound
   | Closed { getBound :: a } -- ^ An exclusive bound
+  | DefaultBound { getBound :: a }
 
-closedOrOpen :: Bound a -> T.Text
-closedOrOpen Open{} = "open"
-closedOrOpen Closed{} = "closed"
+instance Functor Bound where
+  fmap f (Open a) = Open (f a)
+  fmap f (Closed a) = Closed (f a)
+  fmap f (DefaultBound a) = DefaultBound (f a)
+
+closedOrOpen :: Bound a -> T.Text -> T.Text
+closedOrOpen Open{} _ = "open"
+closedOrOpen Closed{} _ = "closed"
+closedOrOpen DefaultBound{} d = d
+
+boundOp :: (a -> a -> a) -> Bound a -> Bound a -> Bound a
+boundOp f (Closed a) (Closed b) = Closed $ f a b
+boundOp f (Closed a) (Open b) = Open $ f a b
+boundOp f (Open a) (Closed b) = Open $ f a b
+boundOp f (Open a) (Open b) = Open $ f a b
+boundOp f (DefaultBound a) b = fmap (f a) b
+boundOp f a (DefaultBound b) = fmap (flip f b) a
+
+instance Num a => Num (Bound a) where
+  (+) = boundOp (+)
+  (-) = boundOp (-)
+  (*) = boundOp (*)
+  negate = fmap negate
+  abs = fmap abs
+  signum = fmap signum
+  fromInteger = DefaultBound . fromInteger
 
 -- | An empty list
 nil :: ReQL

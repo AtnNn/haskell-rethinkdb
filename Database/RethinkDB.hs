@@ -116,7 +116,8 @@ module Database.RethinkDB (
   
   UTCTime(..), ZonedTime(..),
   now, time, epochTime, iso8601, inTimezone, during,
-  timezone, date, timeOfDay, year, month, day, dayOfWeek, dayOfYear, hours, minutes, seconds,
+  timezone, date, timeOfDay, year, month, day, dayOfWeek,
+  dayOfYear, hours, minutes, seconds,
   toIso8601, toEpochTime,
   
   -- * Control structures

@@ -415,7 +415,7 @@ group g f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
   runReQL $ op UNGROUP [mr $ op GROUP (expr s, expr . g)]
 
--- | TODO
+-- | Rewrite multiple reductions into a single map/reduce operation
 mapReduce :: (Expr reduction, Expr seq) => (ReQL -> reduction) -> seq -> ReQL
 mapReduce f s = ReQL $ do
   mr <- termToMapReduce (expr . f)
@@ -579,14 +579,12 @@ indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> R
 indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
   ("multi" :=) <$> indexMulti opts]
 
--- TODO: test
 -- | Get the status of the given indexes
 --
 -- > run' h $ table "users" # indexStatus []
 indexStatus :: Expr table => [ReQL] -> table -> ReQL
 indexStatus ixes tbl = op INDEX_STATUS (tbl, ixes)
 
--- TODO: test
 -- | Wait for an index to be built
 --
 -- > run' h $ table "users" # indexWait []
@@ -596,7 +594,6 @@ indexWait ixes tbl = op INDEX_STATUS (tbl, ixes)
 indexRename :: Expr table => ReQL -> ReQL -> table -> ReQL
 indexRename from to tbl = op INDEX_RENAME (tbl, from, to)
 
--- TODO: test
 -- | Ensures that writes on a given table are written to permanent storage
 --
 -- >>> run' h $ sync (table "users")

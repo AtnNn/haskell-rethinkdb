@@ -21,8 +21,7 @@ module Database.RethinkDB.Network (
   RethinkDBConnectionError(..),
   More,
   noReplyWait,
-  each,
-  closeCursor
+  each
   ) where
 
 import Control.Monad (when, forever, forM_)
@@ -228,7 +227,7 @@ convertResponse h q t (WireResponse (J.Object o)) = let
   resultToMaybe (J.Success a) = Just a
   resultToMaybe (J.Error _) = Nothing
   (-->) = flip ($)
-  e = fromMaybe "" $ resultToMaybe . J.fromJSON =<< listToMaybe =<< results
+  e = fromMaybe "" $ resultToMaybe . fromDatum =<< listToMaybe =<< results
   _ <!< Nothing = ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
   f <!< (Just a) = f a
   in case type_ of
@@ -239,7 +238,7 @@ convertResponse h q t (WireResponse (J.Object o)) = let
   Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
   Just COMPILE_ERROR -> ResponseError $ RethinkDBError ErrorBadQuery q e bt
   Just RUNTIME_ERROR -> ResponseError $ RethinkDBError ErrorRuntime q e bt
-  Just WAIT_COMPLETE -> ResponseSingle (toJSON True)
+  Just WAIT_COMPLETE -> ResponseSingle (toDatum True)
   Nothing -> ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
 
 convertResponse _ q _ (WireResponse json) =
