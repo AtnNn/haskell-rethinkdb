@@ -623,10 +623,14 @@ indexDrop name tbl = op INDEX_DROP (tbl, name)
 
 -- | Retreive documents by their indexed value
 --
--- >>> run' h $ table "users" # getAll "name" [str "bill"]
+-- >>> run' h $ table "users" # getAll PrimaryKey [str "bill"]
 -- [{"post_count":2,"name":"bill","occupation":"pianist"}]
-getAll :: (Expr value) => Key -> [value] -> Table -> ReQL
-getAll idx xs tbl = op' GET_ALL (expr tbl : P.map expr xs) ["index" := idx]
+getAll :: (Expr values) => Index -> values -> Table -> ReQL
+getAll idx xs tbl =
+  op' GET_ALL (tbl, op ARGS [xs]) $
+  case idx of
+    Index i -> ["index" := i]
+    PrimaryKey -> []
 
 -- | Get a document by primary key
 --
@@ -979,11 +983,14 @@ http url opts = op' HTTP [url] $ render opts
         go httpPageLimit "page_limit"
         ]
 
-uuid :: ()
-uuid = P.undefined
-
+-- | Splice a list of values into an argument list
+args :: Expr array => array -> ReQL
+args a = op ARGS [a]
+       
 changes :: ()
 changes = P.undefined
 
-args :: ()
-args = P.undefined
+uuid :: ()
+uuid = P.undefined
+
+
