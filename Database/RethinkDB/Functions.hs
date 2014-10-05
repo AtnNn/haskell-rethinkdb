@@ -13,8 +13,6 @@
 -- example `argmax` for `max` and `splitOn` for `split` but `skip`
 -- instead of `sliceFrom` and `avg . (!k)` instead of `avgOf k`.
 
--- TODO: go through rethinkdb-dev archives and make sure everything is implemented
-
 module Database.RethinkDB.Functions where
 
 import Data.Text (Text)

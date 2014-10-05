@@ -138,7 +138,10 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  ex, str, num, (#), def
+  ex, str, num, (#), note,
+  
+  -- | Re-exported from Data.Default
+  def
 
   ) where
 

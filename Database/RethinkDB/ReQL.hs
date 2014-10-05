@@ -452,6 +452,10 @@ instance (Expr a, Expr b, Expr c, Expr d) => Expr (a, b, c, d) where
 instance (Expr a, Expr b, Expr c, Expr d, Expr e) => Expr (a, b, c, d, e) where
   expr (a, b, c, d, e) = expr [expr a, expr b, expr c, expr d, expr e]
 
+-- | Add a note a a ReQL Term
+--
+-- This note does not get sent to the server. It is used to annotate
+-- backtraces and help debugging.
 note :: String -> ReQL -> ReQL
 note n (ReQL t) = ReQL $ return . Note n =<< t
 
