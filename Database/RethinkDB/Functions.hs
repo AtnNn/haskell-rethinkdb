@@ -1033,7 +1033,7 @@ instance Expr ConflictResolution where
 conflict :: ConflictResolution -> Attribute a
 conflict cr = "conflict" := cr
 
-uuid :: ()
-uuid = P.undefined
+uuid :: ReQL
+uuid = op UUID ()
 
 -- TODO: binary

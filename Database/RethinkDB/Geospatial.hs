@@ -1,6 +1,12 @@
 
 module Database.RethinkDB.Geospatial where
 
+data Point = Point
+
+data Line = Line
+
+data Polygon = Polygon
+
 fill :: ()
 fill = undefined
 

@@ -54,7 +54,7 @@ module Database.RethinkDB (
   sync,
   returnChanges, nonAtomic,
   durability, Durability,
-  conflict, Conflict,
+  conflict, ConflictResolution(..),
 
   -- * Selecting data
 
