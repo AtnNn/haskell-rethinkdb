@@ -20,7 +20,7 @@ import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
 import Data.List
 import Data.Maybe
-import Control.Exception (throw, throwIO)
+import Control.Exception (throwIO)
 import Data.Map (Map)
 
 import Database.RethinkDB.Network
@@ -68,12 +68,14 @@ instance Result Response where
   convertResult = takeMVar
 
 instance FromJSON a => Result (Cursor a) where
-  convertResult r = fmap (fmap unsafeFromJSON) $ makeCursor r
+  convertResult r = do
+    c <- makeCursor r 
+    return c { cursorMap = unsafeFromJSON }
 
-unsafeFromJSON :: FromJSON a => Data.Aeson.Value -> a
+unsafeFromJSON :: FromJSON a => Data.Aeson.Value -> IO a
 unsafeFromJSON val = case fromJSON val of
-  Data.Aeson.Error e -> throw (RethinkDBError ErrorUnexpectedResponse (Datum Null) e [])
-  Data.Aeson.Success a -> a
+  Data.Aeson.Error e -> throwIO (RethinkDBError ErrorUnexpectedResponse (Datum Null) e [])
+  Data.Aeson.Success a -> return a
 
 instance FromJSON a => Result [a] where
   convertResult = collect <=< convertResult
@@ -83,30 +85,30 @@ instance FromJSON a => Result (Maybe a) where
     r <- takeMVar v
     case r of
       ResponseSingle Data.Aeson.Null -> return Nothing
-      ResponseSingle a -> return $ Just $ unsafeFromJSON a
+      ResponseSingle a -> fmap Just $ unsafeFromJSON a
       ResponseError e -> throwIO e
-      ResponseBatch Nothing batch -> return . Just . unsafeFromJSON $ toJSON batch
+      ResponseBatch Nothing batch -> fmap Just $ unsafeFromJSON $ toJSON batch
       ResponseBatch (Just _more) batch -> do
         rest <- collect' =<< convertResult v
-        return . Just . unsafeFromJSON . toJSON $ batch ++ rest
+        fmap Just $ unsafeFromJSON $ toJSON $ batch ++ rest
 
 instance Result Int where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance Result Double where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance Result Bool where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance FromJSON a => Result (Map String a) where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance Result String where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance Result Text where
-  convertResult = fmap unsafeFromJSON . getSingle
+  convertResult = unsafeFromJSON <=< getSingle
 
 instance Result () where
   convertResult _ = return ()
@@ -137,7 +139,7 @@ instance Result JSON where
   convertResult = fmap JSON . convertResult
 
 instance Result WriteResponse where
-  convertResult = fmap unsafeFromJSON . convertResult
+  convertResult = unsafeFromJSON <=< convertResult
 
 data WriteResponse = WriteResponse {
   writeResponseInserted :: Int,

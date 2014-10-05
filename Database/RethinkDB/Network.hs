@@ -8,7 +8,7 @@ module Database.RethinkDB.Network (
   close,
   use,
   runQLQuery,
-  Cursor,
+  Cursor(..),
   makeCursor,
   next,
   nextBatch,
@@ -87,10 +87,10 @@ data RethinkDBHandle = RethinkDBHandle {
 data Cursor a = Cursor {
   cursorMBox :: MVar Response,
   cursorBuffer :: MVar (Either RethinkDBError ([Datum], Bool)),
-  cursorMap :: Datum -> a }
+  cursorMap :: Datum -> IO a }
 
 instance Functor Cursor where
-  fmap f Cursor{ .. } = Cursor { cursorMap = f . cursorMap, .. }
+  fmap f Cursor{ .. } = Cursor { cursorMap = fmap f . cursorMap, .. }
 
 instance Show RethinkDBHandle where
   show RethinkDBHandle{ rdbHandle } = "RethinkDB Connection " ++ show rdbHandle
@@ -159,22 +159,27 @@ data RethinkDBError = RethinkDBError {
 
 instance Exception RethinkDBError
 
--- TODO: use notes to display backtrace
 instance Show RethinkDBError where
   show (RethinkDBError code term message backtrace) =
     show code ++ ": " ++ show message ++ "\n" ++
-    indent (unlines (map (("in " ++) . show) (reverse $ traceBT backtrace term)))
+    indent ("in " ++ show (annotate backtrace term))
     where
       indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
-      traceBT :: Backtrace -> Term -> [Term]
-      traceBT [] t = [t]
-      traceBT (x : xs) t = t : maybe [] (traceBT xs) (enter x t)
-      enter :: Frame -> Term -> Maybe Term
-      enter (FramePos n) (Term _ args _)
-        | Just t <- listToMaybe (drop n args) = Just t
-      enter (FrameOpt k) (Term _ _ optargs)
-        | (TermAttribute _ t : _) <- filter (\(TermAttribute x _) -> x == k) optargs = Just t
-      enter _ _ = Nothing
+      annotate :: Backtrace -> Term -> Term
+      annotate (x : xs) t | Just new <- inside x t (annotate xs) = new
+      annotate _ t = Note "HERE" t
+      inside (FramePos n) (Term tt a oa) f
+        | n < length a = Just $ Term tt (take n a ++ [f (a!!n)] ++ drop (n+1) a) oa
+      inside (FrameOpt k) (Term tt a oa) f
+        | Just (before, v, after) <- extract k oa =
+          Just $ Term tt a $ before ++ [TermAttribute k (f v)] ++ after
+      inside _ _ _ = Nothing
+      extract _ [] = Nothing
+      extract k (TermAttribute kk v : xs) | k == kk = Just ([], v, xs)
+      extract k (x:xs) =
+        case extract k xs of
+          Nothing -> Nothing
+          Just (a,b,c) -> Just (x:a,b,c)
 
 -- | The response to a query
 data Response =
@@ -301,7 +306,6 @@ readResponses h' = do
         writeIORef (rdbWait h) M.empty
   flip catch handler $ forever $ readSingleResponse h
 
--- TODO: maybe invalidate the connection object if an error happens here
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
   tokenString <- hGet (rdbHandle h) 8
@@ -363,7 +367,7 @@ makeCursor :: MVar Response -> IO (Cursor Datum)
 makeCursor cursorMBox = do
   cursorBuffer <- newMVar (Right ([], False))
   return Cursor{..}
-  where cursorMap = id
+  where cursorMap = return . id
 
 -- | Get the next value from a cursor
 next :: Cursor a -> IO (Maybe a)
@@ -371,7 +375,7 @@ next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
   case mbuffer of
     Left err -> throwIO err
     Right ([], True) -> return (Right ([], True), Nothing)
-    Right (x:xs, end) -> return $ (Right (xs, end), Just (cursorMap x))
+    Right (x:xs, end) -> do x' <- cursorMap x; return $ (Right (xs, end), Just x')
     Right ([], False) -> cursorFetchBatch c >>= loop
 
 -- | Get the next batch from a cursor
@@ -380,7 +384,9 @@ nextBatch c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
   case mbuffer of
     Left err -> throwIO err
     Right ([], True) -> return (Right ([], True), [])
-    Right (xs@(_:_), end) -> return $ (Right ([], end), map cursorMap xs)
+    Right (xs@(_:_), end) -> do
+      xs' <- mapM cursorMap xs
+      return $ (Right ([], end), xs')
     Right ([], False) -> cursorFetchBatch c >>= loop
 
 cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([Datum], Bool))
@@ -414,7 +420,6 @@ collect' c = fix $ \loop -> do
         ys <- loop
         return $ xs ++ ys
 
--- TODO: test
 -- | Wait for NoReply queries to complete on the server
 --
 -- >>> () <- runOpts h [NoReply] $ table "users" # get "bob" # update (\row -> merge row ["occupation" := "teacher"])

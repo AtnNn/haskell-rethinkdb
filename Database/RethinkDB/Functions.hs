@@ -540,9 +540,7 @@ branch a b c = op BRANCH (a, b, c)
 --
 -- >>> run' h $ R.error (str "haha") R./ 2 + 1
 -- *** Exception: runtime error: "haha"
---   in error("haha")
---   in div(error("haha"), 2)
---   in add(div(error("haha"), 2), 1)
+--   in add(div({- HERE -} error("haha"), 2), 1)
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m]
 
@@ -1015,9 +1013,11 @@ durability d = "durability" := d
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
 -- *** Exception: runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
---   in update(
---     get(table(db("doctests"), "users"), "sabrina"),
---     (\b -> merge(b, {lucky_number: random()})))
+--  in
+--    {- HERE -}
+--    update(
+--      get(table(db("doctests"), "users"), "sabrina"),
+--      (\b -> merge(b, {lucky_number: random()})))
 -- >>> run h $ table "users" # get "sabrina" # ex update [nonAtomic] (merge ["lucky_number" := random]) :: IO WriteResponse
 -- {replaced:1}
 nonAtomic :: Attribute a
