@@ -63,11 +63,12 @@ module Database.RethinkDB (
   -- * Joins
 
   innerJoin, outerJoin, eqJoin, mergeLeftRight,
+  Index(..),
 
   -- * Transformations
 
   map, withFields, concatMap,
-  orderBy,  Order(..),
+  orderBy, asc, desc,
   skip, limit, slice,
   indexesOf, isEmpty, union, sample,
 
@@ -117,7 +118,7 @@ module Database.RethinkDB (
   
   -- * Control structures
 
-  apply, js, branch, forEach, error,
+  args, apply, js, branch, forEach, error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
   typeOf, info, json, http, uuid,

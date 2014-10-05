@@ -5,7 +5,8 @@ module Database.RethinkDB.Objects (
   Table(..),
   JSON(..),
   Datum,
-  Key
+  Key,
+  Index(..)
   ) where
 
 import Data.Default (def, Default)
@@ -94,3 +95,7 @@ instance Ord JSON where
       Bool _ <=> _ = LT
       _ <=> Bool _ = GT
       Null <=> Null = EQ
+
+data Index =
+  PrimaryKey |
+  Index Key

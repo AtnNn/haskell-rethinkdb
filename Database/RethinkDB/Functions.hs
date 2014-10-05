@@ -1,6 +1,17 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, GADTs #-}
 
--- | Functions from the ReQL (RethinkDB Query Language)
+-- | ReQL Functions
+--
+-- ReQL was designed for dynamic languages. Many operations take
+-- optional positional and named arguments.
+--
+-- Optional named arguments can be added using `ex`, for example
+-- `upsert = ex insert ["conflict" := "update"]`
+--
+-- For optional positional arguments this module defines an extra
+-- function if the functionality is not available otherwise. For
+-- example `argmax` for `max` and `splitOn` for `split` but `skip`
+-- instead of `sliceFrom` and `avg . (!k)` instead of `avgOf k`.
 
 -- TODO: go through rethinkdb-dev archives and make sure everything is implemented
 
@@ -11,11 +22,11 @@ import Control.Monad.State
 import Control.Applicative
 import Data.Maybe
 
-import Database.RethinkDB.Wire.Term
+import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import qualified Database.RethinkDB.Objects as O
-import Database.RethinkDB.Objects (Key, Table, Database, IndexCreateOptions(..), TableCreateOptions(..))
+import Database.RethinkDB.Objects
 
 import Prelude (($), return, Double, Bool, String)
 import qualified Prelude as P
@@ -281,10 +292,11 @@ filter f a = op' FILTER (a, f) ["default" := op ERROR ()]
 --
 -- >>> run h $ table "users" # between "name" (Closed $ str "a") (Open $ str "c")
 -- [{"post_count":2,"name":"bill","occupation":"pianist"}]
-between :: (Expr left, Expr right, Expr seq) => Key -> Bound left -> Bound right -> seq -> ReQL
+between :: (Expr left, Expr right, Expr seq) => Index -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
-  op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b]
-         ["left_bound" := closedOrOpen a, "right_bound" := closedOrOpen b, "index" := i]
+  op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b] $
+  idx P.++ ["left_bound" := closedOrOpen a, "right_bound" := closedOrOpen b]
+  where idx = case i of PrimaryKey -> []; Index name -> ["index" := name]
 
 -- | Append a datum to a sequence
 --
@@ -318,8 +330,9 @@ outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 --
 -- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
-eqJoin :: (Expr right, Expr left) => Key -> right -> Key -> left -> ReQL
-eqJoin key right index left = op' EQ_JOIN (left, key, right) ["index" := index]
+eqJoin :: (Expr fun, Expr right, Expr left) => fun -> right -> Index -> left -> ReQL
+eqJoin key right (Index idx) left = op' EQ_JOIN (left, key, right) ["index" := idx]
+eqJoin key right PrimaryKey left = op EQ_JOIN (left, key, right)
 
 -- | Drop elements from the head of a sequence.
 --
@@ -371,26 +384,23 @@ distinct s = op DISTINCT [s]
 mergeLeftRight :: (Expr a) => a -> ReQL
 mergeLeftRight a = op ZIP [a]
 
--- | Ordering specification for orderBy
-data Order =
-  Asc { orderAttr :: Key } -- ^ Ascending order
-  | Desc { orderAttr :: Key } -- ^ Descending order
-
 -- | Order a sequence by the given keys
 --
--- >>> run' h $ table "users" # orderBy [Desc "post_count", Asc "name"] # pluck ["name", "post_count"]
+-- >>> run' h $ table "users" # orderBy [desc "post_count", asc "name"] # pluck ["name", "post_count"]
 -- [{"post_count":2,"name":"bill"},{"post_count":0,"name":"nancy"}]
-orderBy :: (Expr s) => [Order] -> s -> ReQL
-orderBy o s = ReQL $ do
-  s' <- runReQL (expr s)
-  o' <- baseArray $ arr $ P.map buildOrder o
-  return $ Term ORDERBY (s' : o') []
-  where
-    buildOrder (Asc k) = op ASC [k]
-    buildOrder (Desc k) = op DESC [k]
+--
+-- >>> run' h $ table "users" # ex orderBy ["index":="name"] [] # pluck ["name"]
+-- TODO
+orderBy :: (Expr order, Expr s) => [order] -> s -> ReQL
+orderBy o s = op ORDERBY (expr s : P.map expr o)
 
--- TODO: orderBy index
--- TODO: orderBy function
+-- | Ascending order
+asc :: ReQL -> ReQL
+asc f = op ASC [f]
+
+-- | Descending order
+desc :: ReQL -> ReQL
+desc f = op DESC [f]
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
@@ -511,8 +521,10 @@ remove = op LITERAL ()
 
 -- | Evaluate a JavaScript expression
 --
--- >>> _ <- run' h $ js "Math.random()"
--- >>> run h $ R.map (\x -> js "Math.sin" `apply` [x]) [pi, pi/2]
+-- >>> run' h $ js "Math.PI"
+-- TODO
+-- >>> let r_sin x = js "Math.sin" `apply` [x]
+-- >>> run h $ R.map r_sin [pi, pi/2]
 -- [1.2246063538223772582e-16,1]
 js :: ReQL -> ReQL
 js s = op JAVASCRIPT [s]
@@ -583,11 +595,15 @@ indexStatus ixes tbl = op INDEX_STATUS (tbl, ixes)
 indexWait :: Expr table => [ReQL] -> table -> ReQL
 indexWait ixes tbl = op INDEX_STATUS (tbl, ixes)
 
-indexRename :: ()
-indexRename = P.undefined
+indexRename :: Expr table => ReQL -> ReQL -> table -> ReQL
+indexRename from to tbl = op INDEX_RENAME (tbl, from, to)
 
-sync :: ()
-sync = P.undefined
+-- TODO: test
+-- | Ensures that writes on a given table are written to permanent storage
+--
+-- >>> run' h $ sync (table "users")
+sync :: Expr table => table -> ReQL
+sync tbl = op SYNC [tbl]
 
 -- | List the indexes on the table
 --
@@ -813,7 +829,7 @@ info a = op INFO [a]
 -- >>> run' h $ json "{\"a\":1}"
 -- {"a":1}
 json :: ReQL -> ReQL
-json s = op JSON [s]
+json s = op Term.JSON [s]
 
 -- | Flipped function application
 infixl 8 #
@@ -850,6 +866,9 @@ split s = op SPLIT [s]
 --
 -- >>> run' h $ str "foo, bar" # splitOn ","
 -- ["foo"," bar"]
+--
+-- >>> run' h $ str "foo" # splitOn ""
+-- ["f","o","o"]
 splitOn :: Expr str => ReQL -> str -> ReQL
 splitOn sep s = op SPLIT [expr s, sep]
 
@@ -860,14 +879,35 @@ splitOn sep s = op SPLIT [expr s, sep]
 splitMax :: Expr str => ReQL -> ReQL -> str -> ReQL
 splitMax sep n s = op SPLIT [expr s, sep, n]
 
-changes :: ()
-changes = P.undefined
+-- | A random float between 0 and 1
+--
+-- >>> run' h $ (\x -> x R.< 1 R.&& x R.>= 0) `apply` [random]
+-- True
+random :: ReQL
+random = op RANDOM ()
 
-random :: ()
-random = P.undefined
+-- | A random number between 0 and n
+--
+-- >>> run' h $ (\x -> x R.< 10 R.&& x R.>= 0) `apply` [randomTo 10]
+-- True
+randomTo :: ReQL -> ReQL
+randomTo n = op RANDOM [n]
+
+-- | A random number between 0 and n
+--
+-- >>> run' h $ (\x -> x R.< 10 R.&& x R.>= 5) `apply` [randomFromTo 5 10]
+-- True
+randomFromTo :: ReQL -> ReQL -> ReQL
+randomFromTo n m = op RANDOM [n, m]
 
 http :: ()
 http = P.undefined
 
 uuid :: ()
 uuid = P.undefined
+
+changes :: ()
+changes = P.undefined
+
+args :: ()
+args = P.undefined

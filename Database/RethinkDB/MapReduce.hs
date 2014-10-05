@@ -14,7 +14,7 @@ import Database.RethinkDB.ReQL
 import Database.RethinkDB.Objects
 
 import qualified Database.RethinkDB.Functions as R
-import Database.RethinkDB.NoClash hiding (get, collect)
+import Database.RethinkDB.NoClash hiding (get, collect, args)
 
 -- | Takes a function that takes a sequence as an argument, and
 -- returns a function that only uses that sequence once, by merging

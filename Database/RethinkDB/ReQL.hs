@@ -54,6 +54,7 @@ import Data.Int
 import Data.Monoid
 import Data.Scientific
 import Data.Char
+import {-# SOURCE #-} Database.RethinkDB.Functions
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
@@ -453,3 +454,28 @@ instance (Expr a, Expr b, Expr c, Expr d, Expr e) => Expr (a, b, c, d, e) where
 
 note :: String -> ReQL -> ReQL
 note n (ReQL t) = ReQL $ return . Note n =<< t
+
+instance Fractional ReQL where
+  a / b = op DIV [a, b]
+  recip a = op DIV [num 1, a]
+  fromRational = expr
+
+instance Floating ReQL where
+  pi = js "Math.PI"
+  exp x = js "(function(x){return Math.pow(Math.E,x)})" `apply` [x]
+  sqrt x = js "Math.sqrt" `apply` [x]
+  log x = js "Math.log" `apply` [x]
+  (**) x y = js "Math.pow" `apply` [x, y]
+  logBase x y = js "(function(x, y){return Math.log(x)/Math.log(y)})" `apply` [x, y]
+  sin x = js "Math.sin" `apply` [x]
+  tan x = js "Math.tan" `apply` [x]
+  cos x = js "Math.cos" `apply` [x]
+  asin x = js "Math.asin" `apply` [x]
+  atan x = js "Math.atan" `apply` [x]
+  acos x = js "Math.acos" `apply` [x]
+  sinh = error "hyberbolic math is not supported"
+  tanh = error "hyberbolic math is not supported"
+  cosh = error "hyberbolic math is not supported"
+  asinh = error "hyberbolic math is not supported"
+  atanh = error "hyberbolic math is not supported"
+  acosh = error "hyberbolic math is not supported"
