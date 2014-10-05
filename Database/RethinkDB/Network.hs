@@ -63,6 +63,15 @@ import Database.RethinkDB.ReQL (
   TermAttribute(..))
 import Data.Foldable (toList)
 
+-- $setup
+--
+-- Get the doctests ready
+--
+-- >>> import qualified Database.RethinkDB as R
+-- >>> import Database.RethinkDB.NoClash
+-- >>> h' <- unsafeInterleaveIO $ connect "localhost" 28015 def
+-- >>> let h = use "doctests" h'
+
 type Token = Word64
 
 -- | A connection to the database server
@@ -150,6 +159,7 @@ data RethinkDBError = RethinkDBError {
 
 instance Exception RethinkDBError
 
+-- TODO: use notes to display backtrace
 instance Show RethinkDBError where
   show (RethinkDBError code term message backtrace) =
     show code ++ ": " ++ show message ++ "\n" ++
@@ -407,7 +417,7 @@ collect' c = fix $ \loop -> do
 -- TODO: test
 -- | Wait for NoReply queries to complete on the server
 --
--- >>> runOpts h [NoReply] $ table "users" # update (\row -> merge row (obj ["name" ==> ]))
+-- >>> () <- runOpts h [NoReply] $ table "users" # get "bob" # update (\row -> merge row ["occupation" := "teacher"])
 -- >>> noReplyWait h
 noReplyWait :: RethinkDBHandle -> IO ()
 noReplyWait h = do

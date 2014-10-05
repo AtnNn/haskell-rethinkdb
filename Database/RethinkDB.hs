@@ -97,7 +97,8 @@ module Database.RethinkDB (
   (!), (!?),
   hasFields,
   insertAt, spliceAt, deleteAt, changeAt, keys,  
-  literal, object,
+  literal, remove,
+  Attribute(..),
 
   -- * String manipulation
   
@@ -110,7 +111,7 @@ module Database.RethinkDB (
   (&&), (||),
   (==), (/=), (>), (>=), (<), (<=),
   not,
-  random,
+  random, randomTo, randomFromTo,
   
   -- * Dates and times
   
@@ -138,7 +139,7 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  ex, str, num, (#), note,
+  ex, str, num, (#), note, nil, empty,
   
   -- | Re-exported from Data.Default
   def

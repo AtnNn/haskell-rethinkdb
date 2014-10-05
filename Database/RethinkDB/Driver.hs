@@ -108,6 +108,9 @@ instance Result String where
 instance Result Text where
   convertResult = fmap unsafeFromJSON . getSingle
 
+instance Result () where
+  convertResult _ = return ()
+
 getSingle :: MVar Response -> IO Value
 getSingle v = do
     r <- takeMVar v
@@ -148,12 +151,14 @@ data WriteResponse = WriteResponse {
   writeResponseChanges :: Maybe [Change]
   }
 
-data Change = Change { newVal, oldVal :: Value }
-            deriving Show
+data Change = Change { oldVal, newVal :: Value }
+
+instance Show Change where
+  show (Change old new) = "{\"old_val\":" ++ show (JSON old) ++ ",\"new_val\":" ++ show (JSON new) ++ "}"
 
 instance FromJSON Change where
   parseJSON (Object o) =
-    Change <$> o .: "new_val" <*> o .: "old_val"
+    Change <$> o .: "old_val" <*> o .: "new_val"
   parseJSON _ = mzero
 
 instance FromJSON WriteResponse where

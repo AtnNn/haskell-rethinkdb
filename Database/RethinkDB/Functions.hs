@@ -37,7 +37,6 @@ import qualified Prelude as P
 --
 -- >>> :load Database.RethinkDB.NoClash
 -- >>> import qualified Database.RethinkDB as R
--- >>> import qualified Database.RethinkDB.Operators as R
 -- >>> default (JSON, ReQL, String, Int, Double)
 -- >>> import Prelude
 -- >>> import Data.Text (Text)
@@ -81,27 +80,27 @@ tableCreate (O.Table mdb table_name pkey) opts =
 
 -- | Insert a document or a list of documents into a table
 --
--- >>> run h $ table "users" # insert (map (\x -> obj ["name":=x]) ["bill", "bob", "nancy" :: Text]) :: IO WriteResponse
+-- >>> run h $ table "users" # insert (map (\x -> ["name":=x]) ["bill", "bob", "nancy" :: Text]) :: IO WriteResponse
 -- {inserted:3}
--- >>> run h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hi", "id" := 1]) :: IO WriteResponse
+-- >>> run h $ table "posts" # insert ["author" := str "bill", "message" := str "hi", "id" := 1] :: IO WriteResponse
 -- {inserted:1}
--- >>> run h $ table "posts" # insert (obj ["author" := str "bill", "message" := str "hello", "id" := 2, "flag" := str "deleted"]) :: IO WriteResponse
+-- >>> run h $ table "posts" # insert ["author" := str "bill", "message" := str "hello", "id" := 2, "flag" := str "deleted"] :: IO WriteResponse
 -- {inserted:1}
--- >>> run h $ table "posts" # insert (obj ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3, "flag" := str "pinned"]) :: IO WriteResponse
+-- >>> run h $ table "posts" # insert ["author" := str "bob", "message" := str "lorem ipsum", "id" := 3, "flag" := str "pinned"] :: IO WriteResponse
 -- {inserted:1}
 insert :: (Expr object) => object -> Table -> ReQL
 insert a tb = op INSERT (tb, a)
 
 -- | Add to or modify the contents of a document
 --
--- >>> run h $ table "users" # getAll "name" [str "bob"] # update (const $ obj ["occupation" := str "tailor"]) :: IO WriteResponse
+-- >>> run h $ table "users" # getAll "name" [str "bob"] # update (const ["occupation" := str "tailor"]) :: IO WriteResponse
 -- {replaced:1}
 update :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
 update f s = op UPDATE (s, expr . f)
 
 -- | Replace a document with another
 --
--- >>> run h $ replace (\user -> obj ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!?"occupation")) $ table "users" :: IO WriteResponse
+-- >>> run h $ replace (\user -> ["name" := user!"name", "occupation" := str "clothier"]) . R.filter ((R.== str "tailor") . (!?"occupation")) $ table "users" :: IO WriteResponse
 -- {replaced:1}
 replace :: (Expr selection, Expr a) => (ReQL -> a) -> selection -> ReQL
 replace f s = op REPLACE (s, expr . f)
@@ -116,7 +115,7 @@ delete s = op Term.DELETE [s]
 -- | Like map but for write queries
 --
 -- >>> _ <- run' h $ table "users" # replace (without ["post_count"])
--- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # update (const $ obj ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) # nonAtomic :: IO WriteResponse
+-- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # ex update [nonAtomic] (const ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) :: IO WriteResponse
 -- {replaced:2}
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
 forEach s f = op FOREACH (s, expr P.. f)
@@ -124,7 +123,7 @@ forEach s f = op FOREACH (s, expr P.. f)
 -- | A table
 --
 -- >>> fmap sort $ run h $ table "users" :: IO [JSON]
--- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill","occupation":"pianist"}]
+-- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill"}]
 table :: Text -> Table
 table n = O.Table Nothing n Nothing
 
@@ -207,7 +206,7 @@ infix 4 ==, /=
 
 -- | Test for equality
 --
--- >>> run h $ obj ["a" := 1] R.== obj ["a" := 1]
+-- >>> run h $ ["a" := 1] R.== ["a" := 1]
 -- true
 (==) :: (Expr a, Expr b) => a -> b -> ReQL
 a == b = op EQ (a, b)
@@ -276,7 +275,7 @@ union a b = op UNION (a, b)
 
 -- | Map a function over a sequence
 --
--- >>> run h $ R.map (!"a") [obj ["a" := 1], obj ["a" := 2]]
+-- >>> run h $ R.map (!"a") [["a" := 1], ["a" := 2]]
 -- [1,2]
 map :: (Expr a, Expr b) => (ReQL -> b) -> a -> ReQL
 map f a = op MAP (a, expr P.. f)
@@ -291,7 +290,7 @@ filter f a = op' FILTER (a, f) ["default" := op ERROR ()]
 -- | Query all the documents whose value for the given index is in a given range
 --
 -- >>> run h $ table "users" # between "name" (Closed $ str "a") (Open $ str "c")
--- [{"post_count":2,"name":"bill","occupation":"pianist"}]
+-- [{"post_count":2,"name":"bill"}]
 between :: (Expr left, Expr right, Expr seq) => Index -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
   op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b] $
@@ -314,21 +313,21 @@ concatMap f e = op CONCATMAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
--- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
+-- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f)
 
 -- | SQL-like outer join of two sequences
 --
--- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [Asc "id", Asc "name"] # pluck ["name", "message"]
+-- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [asc "id", asc "name"] # pluck ["name", "message"]
 -- [{"name":"nancy"},{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 
 -- | An efficient inner_join that uses a key for the left table and an index for the right table.
 --
--- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [Asc "id"] # pluck ["name", "message"]
+-- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 eqJoin :: (Expr fun, Expr right, Expr left) => fun -> right -> Index -> left -> ReQL
 eqJoin key right (Index idx) left = op' EQ_JOIN (left, key, right) ["index" := idx]
@@ -380,7 +379,8 @@ distinct s = op DISTINCT [s]
 --
 -- Called /zip/ in the official drivers
 --
--- >>> _ <- run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight
+-- >>> fmap sort $ run h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight :: IO [JSON]
+-- [{"post_count":2,"flag":"deleted","name":"bill","author":"bill","id":2,"message":"hello"},{"post_count":2,"name":"bill","author":"bill","id":1,"message":"hi"}]
 mergeLeftRight :: (Expr a) => a -> ReQL
 mergeLeftRight a = op ZIP [a]
 
@@ -390,8 +390,8 @@ mergeLeftRight a = op ZIP [a]
 -- [{"post_count":2,"name":"bill"},{"post_count":0,"name":"nancy"}]
 --
 -- >>> run' h $ table "users" # ex orderBy ["index":="name"] [] # pluck ["name"]
--- TODO
-orderBy :: (Expr order, Expr s) => [order] -> s -> ReQL
+-- [{"name":"bill"},{"name":"nancy"}]
+orderBy :: (Expr s) => [ReQL] -> s -> ReQL
 orderBy o s = op ORDERBY (expr s : P.map expr o)
 
 -- | Ascending order
@@ -406,8 +406,8 @@ desc f = op DESC [f]
 --
 -- > >>> run' h $ table "posts" # group (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
 -- > [["hello\nhi","lorem ipsum"]]
--- >>> run' h $ table "users" # group (!"level") (\users -> let pc = users!"post_count" in [average pc, R.sum pc])
--- [{"group":1,"reduction":[1.5,3]},{"group":2,"reduction":[0,0]}]
+-- >>> run' h $ table "users" # group ((!0) . splitOn "" . (!"name")) (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
+-- [{"group":"b","reduction":[2,2]},{"group":"n","reduction":[0,0]}]
 group ::
   (Expr group, Expr reduction, Expr seq)
   => (ReQL -> group) -> (ReQL -> reduction) -> seq -> ReQL
@@ -457,7 +457,7 @@ infixl 9 !
 
 -- | Get a single field from an object or an element of an array
 --
--- >>> run h $ (obj ["foo" := True]) ! "foo"
+-- >>> run h $ ["foo" := True] ! "foo"
 -- true
 --
 -- >>> run h $ [1, 2, 3] ! 0
@@ -465,56 +465,56 @@ infixl 9 !
 --
 -- Or a single field from each object in a sequence
 --
--- >>> run h $ [obj ["foo" := True], obj ["foo" := False]] ! "foo"
+-- >>> run h $ [["foo" := True], ["foo" := False]] ! "foo"
 -- [true,false]
 (!) :: (Expr s) => s -> ReQL -> ReQL
 s ! k = op BRACKET (s, k)
 
 -- | Get a single field, or null if not present
 --
--- >>> run h $ obj [] !? "foo"
+-- >>> run' h $ empty !? "foo"
 -- null
 (!?) :: (Expr s) => s -> ReQL -> ReQL
 s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op BRACKET (s', k'), ())
 
 -- | Keep only the given attributes
 --
--- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # pluck ["a"]
+-- >>> run' h $ [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # pluck ["a"]
 -- [{"a":1},{"a":2},{}]
 pluck :: (Expr o) => [ReQL] -> o -> ReQL
 pluck ks e = op PLUCK (cons e $ arr (P.map expr ks))
 
 -- | Remove the given attributes from an object
 --
--- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # without ["a"]
+-- >>> run' h $ [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # without ["a"]
 -- [{"b":2},{"c":7},{"b":4}]
 without :: (Expr o) => [ReQL] -> o -> ReQL
 without ks e = op WITHOUT (cons e $ arr (P.map expr ks))
 
 -- | Test if a sequence contains a given element
 --
--- >>> run' h $ contains 1 # [1,2,3]
+-- >>> run' h $ [1,2,3] # contains 1
 -- true
 contains :: (Expr x, Expr seq) => x -> seq -> ReQL
 contains x s = op CONTAINS (s, x)
 
 -- | Merge two objects together
 --
--- >>> run' h $ merge (obj ["a" := 1, "b" := 1]) (obj ["b" := 1, "c" := 2])
+-- >>> run' h $ merge ["a" := 1, "b" := 1] ["b" := 1, "c" := 2]
 -- {"a":1,"b":1,"c":2}
 merge :: (Expr a, Expr b) => a -> b -> ReQL
 merge a b = op MERGE (b, a)
 
 -- | Literal objects, in a merge or update, are not processed recursively.
 --
--- >>> run' h $ (obj ["a" := obj ["b" := 1]]) # merge (obj ["a" := literal (obj ["c" := 2])])
+-- >>> run' h $ ["a" := ["b" := 1]] # merge ["a" := literal ["c" := 2]]
 -- {"a":{"c":2}}
 literal :: Expr a => a -> ReQL
 literal a = op LITERAL [a]
 
 -- | Remove fields when doing a merge or update
 --
--- >>> run' h $ obj ["a" := obj ["b" := 1]] # merge (obj ["a" := remove])
+-- >>> run' h $ ["a" := ["b" := 1]] # merge ["a" := remove]
 -- {}
 remove :: ReQL
 remove = op LITERAL ()
@@ -522,7 +522,7 @@ remove = op LITERAL ()
 -- | Evaluate a JavaScript expression
 --
 -- >>> run' h $ js "Math.PI"
--- TODO
+-- 3.141592653589793116
 -- >>> let r_sin x = js "Math.sin" `apply` [x]
 -- >>> run h $ R.map r_sin [pi, pi/2]
 -- [1.2246063538223772582e-16,1]
@@ -540,9 +540,9 @@ branch a b c = op BRANCH (a, b, c)
 --
 -- >>> run' h $ R.error (str "haha") R./ 2 + 1
 -- *** Exception: runtime error: "haha"
---             in error("haha")
---             in div(error("haha"), 2)
---             in add(div(error("haha"), 2), 1)
+--   in error("haha")
+--   in div(error("haha"), 2)
+--   in add(div(error("haha"), 2), 1)
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m]
 
@@ -602,6 +602,7 @@ indexRename from to tbl = op INDEX_RENAME (tbl, from, to)
 -- | Ensures that writes on a given table are written to permanent storage
 --
 -- >>> run' h $ sync (table "users")
+-- {"synced":1}
 sync :: Expr table => table -> ReQL
 sync tbl = op SYNC [tbl]
 
@@ -622,7 +623,7 @@ indexDrop name tbl = op INDEX_DROP (tbl, name)
 -- | Retreive documents by their indexed value
 --
 -- >>> run' h $ table "users" # getAll PrimaryKey [str "bill"]
--- [{"post_count":2,"name":"bill","occupation":"pianist"}]
+-- [{"post_count":2,"name":"bill"}]
 getAll :: (Expr values) => Index -> values -> Table -> ReQL
 getAll idx xs tbl =
   op' GET_ALL (tbl, op ARGS [xs]) $
@@ -646,14 +647,14 @@ coerceTo t a = op COERCE_TO (a, t)
 
 -- | Convert a value to an array
 --
--- >>> run h $ asArray $ obj ["a" := 1, "b" := 2] :: IO [(String, Int)]
+-- >>> run h $ asArray $ ["a" := 1, "b" := 2] :: IO [(String, Int)]
 -- [("a",1),("b",2)]
 asArray :: Expr x => x -> ReQL
 asArray = coerceTo "ARRAY"
 
 -- | Convert a value to a string
 --
--- >>> run h $ asString $ obj ["a" := 1, "b" := 2]
+-- >>> run h $ asString $ ["a" := 1, "b" := 2]
 -- "{\n\t\"a\":\t1,\n\t\"b\":\t2\n}"
 asString :: Expr x => x -> ReQL
 asString = coerceTo "STRING"
@@ -678,14 +679,14 @@ asBool = coerceTo "BOOL"
 
 -- | Like hasFields followed by pluck
 --
--- >>> run' h $ map obj [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # withFields ["a"]
+-- >>> run' h $ [["a" := 1, "b" := 2], ["a" := 2, "c" := 7], ["b" := 4]] # withFields ["a"]
 -- [{"a":1},{"a":2}]
 withFields :: Expr seq => [ReQL] -> seq -> ReQL
 withFields p s = op WITH_FIELDS (s, p)
 
 -- | The position in the sequence of the elements that match the predicate
 --
--- >>> run h $ indexesOf (=~ "ba.") [str "foo", "bar", "baz"]
+-- >>> run h $ indexesOf (match "ba.") [str "foo", "bar", "baz"]
 -- [1,2]
 indexesOf :: (Expr fun, Expr seq) => fun -> seq -> ReQL
 indexesOf f s = op INDEXES_OF (s, f)
@@ -712,7 +713,7 @@ prepend d a = op PREPEND (a, d)
 
 -- | The different of two lists
 --
--- >>> run h $ [1,2,3,4,5] `difference` [2,5]
+-- >>> run h $ [1,2,3,4,5] # difference [2,5] 
 -- [1,3,4]
 difference :: (Expr a, Expr b) => a -> b -> ReQL
 difference a b = op DIFFERENCE (b, a)
@@ -747,7 +748,7 @@ setDifference r s = op SET_DIFFERENCE (s, r)
 
 -- | Test if an object has the given fields
 --
--- >>> run h $ hasFields "a" $ obj ["a" := 1]
+-- >>> run h $ hasFields "a" $ ["a" := 1]
 -- true
 hasFields :: (Expr obj) => ReQL -> obj -> ReQL
 hasFields p o = op HAS_FIELDS (o, expr p)
@@ -782,14 +783,14 @@ changeAt n d a = op CHANGE_AT (a, n, d)
 
 -- | The list of keys of the given object
 --
--- >>> run h $ keys (obj ["a" := 1, "b" := 2])
+-- >>> run h $ keys ["a" := 1, "b" := 2]
 -- ["a","b"]
-keys :: Expr obj => obj -> ReQL
+keys :: Expr object => object -> ReQL
 keys o = op KEYS [o]
 
 -- | Match a string to a regular expression.
 --
--- >>> run' h $ str "foobar" =~ "f(.)+[bc](.+)"
+-- >>> run' h $ str "foobar" # match "f(.)+[bc](.+)"
 -- {"groups":[{"start":2,"end":3,"str":"o"},{"start":4,"end":6,"str":"ar"}],"start":0,"end":6,"str":"foobar"}
 match :: (Expr string) => ReQL -> string -> ReQL
 match r s = op MATCH (s, r)
@@ -807,9 +808,9 @@ f `apply` as = op FUNCALL (expr f : P.map expr as)
 --
 -- Called /default/ in the official drivers
 --
--- >>> run h $ R.handle (const 0) $ obj ["a" := 1] ! "b"
+-- >>> run h $ R.handle (const 0) $ ["a" := 1] ! "b"
 -- 0
--- >>> run h $ R.handle (expr . id) $ obj ["a" := 1] ! "b"
+-- >>> run h $ R.handle (expr . id) $ ["a" := 1] ! "b"
 -- "No attribute `b` in object:\n{\n\t\"a\":\t1\n}"
 handle :: (Expr instead, Expr reql) => (ReQL -> instead) -> reql -> ReQL
 handle h r = op DEFAULT (r, expr . h)
@@ -881,21 +882,21 @@ splitMax sep n s = op SPLIT [expr s, sep, n]
 -- | A random float between 0 and 1
 --
 -- >>> run' h $ (\x -> x R.< 1 R.&& x R.>= 0) `apply` [random]
--- True
+-- true
 random :: ReQL
 random = op RANDOM ()
 
 -- | A random number between 0 and n
 --
 -- >>> run' h $ (\x -> x R.< 10 R.&& x R.>= 0) `apply` [randomTo 10]
--- True
+-- true
 randomTo :: ReQL -> ReQL
 randomTo n = op RANDOM [n]
 
 -- | A random number between 0 and n
 --
 -- >>> run' h $ (\x -> x R.< 10 R.&& x R.>= 5) `apply` [randomFromTo 5 10]
--- True
+-- true
 randomFromTo :: ReQL -> ReQL -> ReQL
 randomFromTo n m = op RANDOM [n, m]
 
@@ -955,10 +956,8 @@ instance Default HttpOptions where
 
 -- | Retrieve data from the specified URL over HTTP
 --
--- >>> run' h $ http "http://httpbin.org/get" def{ httpParams = Just $ object $ ["foo" := 1] }
--- TODO
--- >>> run' h $ http "http://httpbin.org/put" def{ httpMethod = Just PUT, httpData = Just $ object ["foo" := "bar"] }
--- TODO
+-- >>> _ <- run' h $ http "http://httpbin.org/get" def{ httpParams = Just ["foo" := 1] }
+-- >>> _ <- run' h $ http "http://httpbin.org/put" def{ httpMethod = Just PUT, httpData = Just $ expr ["foo" := "bar"] }
 http :: Expr url => url -> HttpOptions -> ReQL
 http url opts = op' HTTP [url] $ render opts
   where
@@ -987,18 +986,18 @@ args a = op ARGS [a]
 
 -- | Return an infinite stream of objects representing changes to a table
 --
--- >>> cursor@Cursor{} <- run h $ table "posts" # changes
--- >>> run h $ table "posts" # insert (object ["author" := "bill", "message" := "bye", "id" := 4]) :: IO WriteResponse
--- TODO
+-- >>> cursor <- run h $ table "posts" # changes :: IO (Cursor JSON)
+-- >>> run h $ table "posts" # insert ["author" := "bill", "message" := "bye", "id" := 4] :: IO WriteResponse
+-- {inserted:1}
 -- >>> next cursor
--- TODO
+-- Just {"new_val":{"author":"bill","id":4,"message":"bye"},"old_val":null}
 changes :: Expr seq => seq -> ReQL
 changes s = op CHANGES [s]
 
 -- | Optional argument for returning an array of objects describing the changes made
 --
--- >>> run' h $ table "users" # ex insert [returnChanges] (object ["name" := "sabrina"])
--- TODO
+-- >>> run h $ table "users" # ex insert [returnChanges] ["name" := "sabrina"] :: IO WriteResponse
+-- {inserted:1,changes:[{"old_val":null,"new_val":{"name":"sabrina"}}]}
 returnChanges :: Attribute a
 returnChanges = "return_changes" := P.True
 
@@ -1014,10 +1013,13 @@ durability d = "durability" := d
 
 -- | Optional argument for non-atomic writes
 --
--- >>> run' h $ table "users" # get "sabrina" # update (object ["lucky_number" := random])
--- TODO
--- >>> run' h $ table "users" # get "sabrina" # ex update [nonAtomic] (object ["lucky_number" := random]) :: IO WriteResponse
--- TODO
+-- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
+-- *** Exception: runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
+--   in update(
+--     get(table(db("doctests"), "users"), "sabrina"),
+--     (\b -> merge(b, {lucky_number: random()})))
+-- >>> run h $ table "users" # get "sabrina" # ex update [nonAtomic] (merge ["lucky_number" := random]) :: IO WriteResponse
+-- {replaced:1}
 nonAtomic :: Attribute a
 nonAtomic = "non_atomic" := P.True
 

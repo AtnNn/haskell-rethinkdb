@@ -12,7 +12,7 @@ module Database.RethinkDB.Objects (
 import Data.Default (def, Default)
 import qualified Data.Text as Text
 import Data.Text.Lazy (unpack)
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.Aeson (Value(..), FromJSON(..))
 import Data.Aeson.Encode (encodeToTextBuilder)
 import Data.Text.Lazy.Builder (toLazyText)
@@ -99,3 +99,6 @@ instance Ord JSON where
 data Index =
   PrimaryKey |
   Index Key
+
+instance IsString Index where
+  fromString = Index . pack

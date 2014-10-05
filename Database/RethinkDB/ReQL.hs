@@ -23,13 +23,12 @@ module Database.RethinkDB.ReQL (
   arr,
   baseArray,
   withQuerySettings,
-  object,
   reqlToJSON,
   Bound(..),
   closedOrOpen,
   datumTerm,
   boolToTerm,
-  nil,
+  nil, empty,
   WireQuery(..),
   WireBacktrace(..),
   note
@@ -60,6 +59,15 @@ import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.Objects as O
+
+-- $setup
+--
+-- Get the doctests ready
+--
+-- >>> import qualified Database.RethinkDB as R
+-- >>> import Database.RethinkDB.NoClash
+-- >>> h' <- connect "localhost" 28015 def
+-- >>> let h = use "doctests" h'
 
 -- | A ReQL term
 data ReQL = ReQL { runReQL :: State QuerySettings Term }
@@ -148,9 +156,15 @@ varName n = replicate (q+1) (chr $ ord 'a' + r)
 -- | Convert other types into ReQL expressions
 class Expr e where
   expr :: e -> ReQL
+  exprList :: [e] -> ReQL
+  exprList = expr . arr
 
 instance Expr ReQL where
   expr t = t
+
+instance Expr Char where
+  expr = datumTerm
+  exprList = datumTerm
 
 -- | A list of terms
 data Array = Array { baseArray :: State QuerySettings [Term] }
@@ -199,6 +213,15 @@ data Dynamic
 instance Expr (Attribute a) where
   expr (k := v) = expr (k, v)
   expr (k ::= v) = expr (k, v)
+  exprList kvs = maybe (object kvs) (op' MAKE_OBJ ()) $ mapM staticPair kvs
+    where staticPair :: Attribute a -> Maybe (Attribute Static)
+          staticPair (k := v) = Just (k := v)
+          staticPair _ = Nothing
+          object :: [Attribute a] -> ReQL
+          object = op OBJECT . concatMap unpair
+          unpair :: Attribute a -> [ReQL]
+          unpair (k := v) = [expr k, expr v]
+          unpair (k ::= v) = [expr k, expr v]
 
 data TermAttribute = TermAttribute T.Text Term deriving Eq
 
@@ -207,11 +230,6 @@ mapTermAttribute f (TermAttribute k v) = TermAttribute k (f v)
 
 instance Show TermAttribute where
   show (TermAttribute a b) = T.unpack a ++ ": " ++ show b
-
--- TODO: test this
--- | Convert a list of attributes into a ReQL object
-object :: Expr pair => [pair] -> ReQL
-object kvs = op OBJECT [op ARGS [kvs]]
 
 baseAttributes :: [Attribute Static] -> State QuerySettings [TermAttribute]
 baseAttributes = mapM toBase
@@ -352,13 +370,13 @@ instance Expr x => Expr (V.Vector x) where
   expr v = expr (V.toList v)
 
 instance Expr a => Expr [a] where
-  expr a = expr $ arr a
+  expr = exprList
 
 instance Expr Array where
   expr a = op MAKE_ARRAY a
 
 instance Expr e => Expr (M.HashMap T.Text e) where
-  expr m = expr $ object $ map (uncurry (:=)) $ M.toList m
+  expr m = expr $ map (uncurry (:=)) $ M.toList m
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
@@ -437,8 +455,13 @@ closedOrOpen :: Bound a -> T.Text
 closedOrOpen Open{} = "open"
 closedOrOpen Closed{} = "closed"
 
+-- | An empty list
 nil :: ReQL
 nil = expr ([] :: [()])
+
+-- | An empty object
+empty :: ReQL
+empty = expr ([] :: [Attribute Static])
 
 instance (Expr a, Expr b) => Expr (a, b) where
   expr (a, b) = expr [expr a, expr b]
