@@ -438,6 +438,3 @@ each cursor f = do
     else do
       forM_ batch f
       each cursor f
-
-closeCursor :: Cursor a -> IO ()
-closeCursor = undefined

@@ -30,7 +30,6 @@ module Database.RethinkDB (
   
   next, collect, each,
   Cursor,
-  closeCursor,
   
   -- * Manipulating databases
 
