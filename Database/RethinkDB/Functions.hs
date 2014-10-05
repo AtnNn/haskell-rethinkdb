@@ -986,11 +986,54 @@ http url opts = op' HTTP [url] $ render opts
 -- | Splice a list of values into an argument list
 args :: Expr array => array -> ReQL
 args a = op ARGS [a]
-       
-changes :: ()
-changes = P.undefined
+
+-- | Return an infinite stream of objects representing changes to a table
+--
+-- >>> cursor@Cursor{} <- run h $ table "posts" # changes
+-- >>> run h $ table "posts" # insert (object ["author" := "bill", "message" := "bye", "id" := 4]) :: IO WriteResponse
+-- TODO
+-- >>> next cursor
+-- TODO
+changes :: Expr seq => seq -> ReQL
+changes s = op CHANGES [s]
+
+-- | Optional argument for returning an array of objects describing the changes made
+--
+-- >>> run' h $ table "users" # ex insert [returnChanges] (object ["name" := "sabrina"])
+-- TODO
+returnChanges :: Attribute a
+returnChanges = "return_changes" := P.True
+
+data Durability = Hard | Soft
+
+instance Expr Durability where
+  expr Hard = "hard"
+  expr Soft = "soft"
+
+-- | Optional argument for soft durability writes
+durability :: Durability => Attribute a
+durability d = "durability" := d
+
+-- | Optional argument for non-atomic writes
+--
+-- >>> run' h $ table "users" # get "sabrina" # update (object ["lucky_number" := random])
+-- TODO
+-- >>> run' h $ table "users" # get "sabrina" # ex update [nonAtomic] (object ["lucky_number" := random]) :: IO WriteResponse
+-- TODO
+nonAtomic :: Attribute a
+nonAtomic = "non_atomic" := P.True
+
+data ConflictResolution = Error | Replace | Update
+
+instance Expr ConflictResolution where
+  expr Error = "error"
+  expr Replace = "replace"
+  expr Update = "update"
+
+conflict :: ConflictResolution -> Attribute a
+conflict cr = "conflict" := cr
 
 uuid :: ()
 uuid = P.undefined
 
-
+-- TODO: binary
