@@ -3,7 +3,7 @@
 
 module Database.RethinkDB.NoClash (
   module Database.RethinkDB,
-  -- module Prelude -- Uncomment to let GHC detect clashes
+  -- bmodule Prelude -- Uncomment to let GHC detect clashes
   ) where
 
 import Database.RethinkDB hiding (

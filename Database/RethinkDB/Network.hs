@@ -24,6 +24,8 @@ module Database.RethinkDB.Network (
   each
   ) where
 
+import Debug
+
 import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName, connectTo, PortID(PortNumber))
@@ -281,7 +283,9 @@ addMBox h tok term = do
 sendQLQuery :: RethinkDBHandle -> Token -> WireQuery -> IO ()
 sendQLQuery h tok query = do
   let queryS = encode $ queryJSON query
-  withHandle h $ \s ->
+  tracePrint ("acquiring write handle for", query)
+  withHandle h $ \s -> do
+    tracePrint ("sending", tok, query)
     hPut s $ runPut $ do
       putWord64le tok
       putWord32le (fromIntegral $ B.length queryS)
@@ -297,6 +301,7 @@ readResponses h' = do
   tid <- myThreadId
   let h = h' tid
   let handler e@SomeException{} = do
+        tracePrint ("reading failed", e)
         hClose $ rdbHandle h
         modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
         writeIORef (rdbWait h) M.empty
@@ -304,19 +309,24 @@ readResponses h' = do
 
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
+  tracePrint "waiting for response"
   tokenString <- hGet (rdbHandle h) 8
   when (B.length tokenString /= 8) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let token = runGet getWord64le tokenString
+  tracePrint ("token", token)
   header <- hGet (rdbHandle h) 4
   when (B.length header /= 4) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let replyLength = runGet getWord32le header
   rawResponse <- hGet (rdbHandle h) (fromIntegral replyLength)
+  tracePrint ("raw response", rawResponse)
   let parsedResponse = eitherDecode rawResponse
   case parsedResponse of
     Left errMsg -> fail errMsg
-    Right response -> dispatch token $ WireResponse response
+    Right response -> do
+      tracePrint ("response", parsedResponse)
+      dispatch token $ WireResponse response
 
   where
   dispatch tok response = do
@@ -325,6 +335,7 @@ readSingleResponse h = do
       Nothing -> return ()
       Just (mbox, term, closetok) -> do
         let convertedResponse = convertResponse h term tok response
+        tracePrint "writing response to channel"
         writeChan mbox convertedResponse
         when (isLastResponse convertedResponse) $ closetok
 
@@ -391,7 +402,7 @@ cursorFetchBatch c = do
   case response of
     ResponseError e -> return $ Left e
     ResponseBatch more datums -> return $ Right (datums, isNothing more)
-    ResponseSingle (Array a) -> return $ Right (map toDatum $ toList a, True)
+    ResponseSingle (Array a) -> return $ Right (toList a, True)
     ResponseSingle _ ->
       return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
       "Expected a stream or an array but got a datum" []

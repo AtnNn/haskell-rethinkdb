@@ -390,6 +390,7 @@ buildAttributes ts = toDatum $ M.fromList $ map toPair ts
  where toPair (TermAttribute a b) = (a, termJSON $ buildTerm b)
 
 newtype WireQuery = WireQuery { queryJSON :: Datum }
+                  deriving Show
 
 buildQuery :: ReQL -> Int64 -> Database -> [(T.Text, Datum)] -> (WireQuery, Term)
 buildQuery reql token db opts =

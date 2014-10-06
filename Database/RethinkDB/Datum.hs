@@ -114,7 +114,7 @@ instance Show Datum where
   show (Number d) = show d
   show (String t) = show t
   show (Array v) = "[" ++ intercalate "," (map show $ V.toList v) ++ "]"
-  show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show v ++ ":" ++ show k) $ HM.toList o) ++ "]"
+  show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show v ++ ":" ++ show k) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
   show (Point p) = "Point<" ++ show p ++ ">"
   show (Line l) = "Line<" ++ show l ++ ">"
