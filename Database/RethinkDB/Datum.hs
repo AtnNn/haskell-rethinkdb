@@ -285,7 +285,7 @@ decode :: FromDatum a => LB.ByteString -> Maybe a
 decode = resultToMaybe . fromDatum <=< J.decode
 
 eitherDecode :: FromDatum a => LB.ByteString -> Either String a
-eitherDecode = either Left (resultToEither . fromDatum) <=< J.eitherDecode
+eitherDecode b = resultToEither . fromDatum =<< J.eitherDecode b
 
 resultToMaybe :: Result a -> Maybe a
 resultToMaybe (Success a) = Just a

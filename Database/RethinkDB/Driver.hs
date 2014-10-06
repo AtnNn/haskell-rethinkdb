@@ -11,8 +11,6 @@ module Database.RethinkDB.Driver (
   getSingle
   ) where
 
-import Debug
-
 import qualified Data.Aeson as J
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
@@ -49,12 +47,8 @@ renderOption (ArrayLimit n) = "array_limit" .= n
 runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunFlag] -> query -> IO r
 runOpts h opts t = do
   let (q, bt) = buildQuery (expr t) 0 (rdbDatabase h) (map renderOption opts)
-  tracePrint "sending query"
   r <- runQLQuery h q bt
-  tracePrint "converting mvar to result"
-  x <- convertResult r
-  tracePrint "all done"
-  return x
+  convertResult r
 
 -- | Run a given query and return a Result
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
@@ -123,9 +117,7 @@ instance Result J.Value where
 
 getSingle :: MVar Response -> IO Datum
 getSingle v = do
-    tracePrint "watigin for response on mvar"
     r <- takeMVar v
-    tracePrint ("got response", r)
     case r of
       ResponseSingle datum -> return datum
       ResponseError e -> throwIO e
