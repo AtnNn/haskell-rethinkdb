@@ -18,8 +18,9 @@ module Database.RethinkDB (
   use,
   run, run', runOpts,
   ReQL,
+  Datum(..),
+  ToDatum(..), FromDatum(..), fromDatum,
   RunFlag(..),
-  JSON(..),
   noReplyWait,
   RethinkDBError(..),
   ErrorCode(..),
@@ -114,7 +115,6 @@ module Database.RethinkDB (
   
   -- * Dates and times
   
-  UTCTime(..), ZonedTime(..),
   now, time, epochTime, iso8601, inTimezone, during,
   timezone, date, timeOfDay, year, month, day, dayOfWeek,
   dayOfYear, hours, minutes, seconds,
@@ -136,6 +136,7 @@ module Database.RethinkDB (
   toGeojson, getIntersecting,
   getNearest, includes, intersects,
   line, point, polygon, polygonSub,
+  LonLat(..), Line, Polygon,
   
   -- * Helpers
 
@@ -143,16 +144,17 @@ module Database.RethinkDB (
   
   -- | Re-exported from Data.Default
   def
-
+  
   ) where
 
 import Prelude ()
 
 import Database.RethinkDB.ReQL
 import Database.RethinkDB.Network
-import Database.RethinkDB.Objects
+import Database.RethinkDB.Types
 import Database.RethinkDB.Driver
 import Database.RethinkDB.Functions
 import Database.RethinkDB.Time
 import Database.RethinkDB.Geospatial
+import Database.RethinkDB.Datum hiding (Result)
 import Data.Default

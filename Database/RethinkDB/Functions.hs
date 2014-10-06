@@ -25,8 +25,7 @@ import Data.Monoid
 import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
-import qualified Database.RethinkDB.Objects as O
-import Database.RethinkDB.Objects
+import Database.RethinkDB.Types
 
 import Prelude (($), return, Double, Bool, String, (.))
 import qualified Prelude as P
@@ -37,7 +36,7 @@ import qualified Prelude as P
 --
 -- >>> :load Database.RethinkDB.NoClash
 -- >>> import qualified Database.RethinkDB as R
--- >>> default (JSON, ReQL, String, Int, Double)
+-- >>> default (Datum, ReQL, String, Int, Double)
 -- >>> import Prelude
 -- >>> import Data.Text (Text)
 -- >>> import Data.Maybe
@@ -72,7 +71,7 @@ import qualified Prelude as P
 -- > >>> run' h $ tableCreate (Table (Just "doctests") "bar" (Just "name")) def
 -- > [{"created":1}]
 tableCreate :: Table -> TableCreateOptions -> ReQL
-tableCreate (O.Table mdb table_name pkey) opts =
+tableCreate (Table mdb table_name pkey) opts =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
     op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
       ("datacenter" :=) <$> tableDataCenter opts,
@@ -125,14 +124,14 @@ forEach s f = op FOREACH (s, expr P.. f)
 -- >>> fmap sort $ run h $ table "users" :: IO [JSON]
 -- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill"}]
 table :: Text -> Table
-table n = O.Table Nothing n Nothing
+table n = Table Nothing n Nothing
 
 -- | Drop a table
 --
 -- >>> run' h $ tableDrop (table "foo")
 -- {"dropped":1}
 tableDrop :: Table -> ReQL
-tableDrop (O.Table mdb table_name _) =
+tableDrop (Table mdb table_name _) =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
     op TABLE_DROP (fromMaybe ddb mdb, table_name)
 
@@ -294,7 +293,7 @@ filter f a = op' FILTER (a, f) ["default" := op ERROR ()]
 between :: (Expr left, Expr right, Expr seq) => Index -> Bound left -> Bound right -> seq -> ReQL
 between i a b e =
   op' BETWEEN [expr e, expr $ getBound a, expr $ getBound b] $
-  idx P.++ ["left_bound" := closedOrOpen a, "right_bound" := closedOrOpen b]
+  idx P.++ ["left_bound" ?:= closedOrOpen a, "right_bound" ?:= closedOrOpen b]
   where idx = case i of PrimaryKey -> []; Index name -> ["index" := name]
 
 -- | Append a datum to a sequence
@@ -548,8 +547,8 @@ error m = op ERROR [m]
 --
 -- >>> run' h $ db "test" # info
 -- {"name":"test","type":"DB"}
-db :: Text -> O.Database
-db s = O.Database s
+db :: Text -> Database
+db s = Database s
 
 -- | Create a database on the server
 --
@@ -563,7 +562,7 @@ dbCreate db_name = op DB_CREATE [str db_name]
 -- >>> run' h $ dbDrop (db "dev")
 -- {"dropped":1}
 dbDrop :: Database -> ReQL
-dbDrop (O.Database name) = op DB_DROP [name]
+dbDrop (Database name) = op DB_DROP [name]
 
 -- | List the databases on the server
 --

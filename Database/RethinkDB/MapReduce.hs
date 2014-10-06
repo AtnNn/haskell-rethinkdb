@@ -7,14 +7,14 @@ import Control.Monad.Writer
 import qualified Data.Text as T
 import Data.Maybe
 import Data.Foldable (toList)
-import qualified Data.Aeson as J
 
 import Database.RethinkDB.Wire.Term
 import Database.RethinkDB.ReQL
-import Database.RethinkDB.Objects
+import Database.RethinkDB.Types
 
 import qualified Database.RethinkDB.Functions as R
 import Database.RethinkDB.NoClash hiding (get, collect, args)
+import Database.RethinkDB.Datum
 
 -- | Takes a function that takes a sequence as an argument, and
 -- returns a function that only uses that sequence once, by merging
@@ -32,7 +32,7 @@ termToMapReduce f = do
 
 -- | Compares the two representations of a variable
 sameVar :: Int -> [Term] -> Bool
-sameVar x [Datum d] | J.Success y <- J.fromJSON d = x == y
+sameVar x [Datum d] | Success y <- fromDatum d = x == y
 sameVar _ _ = False
 
 -- | notNone checks that it is a map/reduce and not a constant
@@ -163,7 +163,7 @@ toMapReduce :: Int -> Term -> Chain
 toMapReduce v (Note _ t) = toMapReduce v t -- TODO: keep notes
 
 -- Singletons are singled out
-toMapReduce _ (Datum (J.Array a))
+toMapReduce _ (Datum (Array a))
   | [datum] <- toList a =
     SingletonArray . wrap $ Datum datum
 

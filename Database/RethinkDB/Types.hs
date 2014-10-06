@@ -1,26 +1,16 @@
-module Database.RethinkDB.Objects (
+module Database.RethinkDB.Types (
   Database(..),
   TableCreateOptions(..),
   IndexCreateOptions(..),
   Table(..),
-  JSON(..),
-  Datum(..),
   Key,
-  Index(..),
-  FromDatum(..),
-  fromDatum
+  Index(..)
   ) where
 
 import Data.Default (def, Default)
 import qualified Data.Text as Text
-import Data.Text.Lazy (unpack)
 import Data.Text (Text, pack)
-import Data.Aeson.Encode (encodeToTextBuilder)
-import Data.Aeson.Types
-import Data.Text.Lazy.Builder (toLazyText)
-import qualified Data.HashMap.Strict as HM
 import Data.String
-import Data.Monoid (mconcat, (<>))
 
 type Key = Text
 

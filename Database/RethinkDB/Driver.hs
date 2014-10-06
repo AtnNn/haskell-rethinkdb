@@ -7,13 +7,11 @@ module Database.RethinkDB.Driver (
   runOpts,
   RunFlag(..),
   WriteResponse(..),
-  JSON(..),
   Change(..),
   getSingle
   ) where
 
-import Data.Aeson (Value(..), FromJSON(..), fromJSON, (.:), (.:?), (.=), toJSON)
-import qualified Data.Aeson (Result(Error, Success))
+import qualified Data.Aeson as J
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Text (Text)
@@ -23,8 +21,8 @@ import Data.Maybe
 import Control.Exception (throwIO)
 import Data.Map (Map)
 
+import Database.RethinkDB.Datum hiding (Result)
 import Database.RethinkDB.Network
-import Database.RethinkDB.Objects
 import Database.RethinkDB.ReQL
 
 -- | Per-query settings
@@ -37,7 +35,7 @@ data RunFlag =
 
 data Durability = Hard | Soft
 
-renderOption :: RunFlag -> (Text, Value)
+renderOption :: RunFlag -> (Text, Datum)
 renderOption UseOutdated = "user_outdated" .= True
 renderOption NoReply = "noreply" .= True
 renderOption (Durability Soft) = "durability" .= ("soft" :: String)
@@ -56,8 +54,8 @@ runOpts h opts t = do
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
--- | Run a given query and return a JSON
-run' :: Expr query => RethinkDBHandle -> query -> IO JSON
+-- | Run a given query and return a Datum
+run' :: Expr query => RethinkDBHandle -> query -> IO Datum
 run' h t = run h t
 
 -- | Convert the raw query response into useful values
@@ -67,53 +65,57 @@ class Result r where
 instance Result Response where
   convertResult = takeMVar
 
-instance FromJSON a => Result (Cursor a) where
+instance FromDatum a => Result (Cursor a) where
   convertResult r = do
     c <- makeCursor r 
-    return c { cursorMap = unsafeFromJSON }
+    return c { cursorMap = unsafeFromDatum }
 
-unsafeFromJSON :: FromJSON a => Data.Aeson.Value -> IO a
-unsafeFromJSON val = case fromJSON val of
-  Data.Aeson.Error e -> throwIO (RethinkDBError ErrorUnexpectedResponse (Datum Null) e [])
-  Data.Aeson.Success a -> return a
+unsafeFromDatum :: FromDatum a => Datum -> IO a
+unsafeFromDatum val = case fromDatum val of
+  Error e -> throwIO (RethinkDBError ErrorUnexpectedResponse (Datum Null) e [])
+  Success a -> return a
 
-instance FromJSON a => Result [a] where
+instance FromDatum a => Result [a] where
   convertResult = collect <=< convertResult
 
-instance FromJSON a => Result (Maybe a) where
+instance FromDatum a => Result (Maybe a) where
   convertResult v = do
     r <- takeMVar v
     case r of
-      ResponseSingle Data.Aeson.Null -> return Nothing
-      ResponseSingle a -> fmap Just $ unsafeFromJSON a
+      ResponseSingle Null -> return Nothing
+      ResponseSingle a -> fmap Just $ unsafeFromDatum a
       ResponseError e -> throwIO e
-      ResponseBatch Nothing batch -> fmap Just $ unsafeFromJSON $ toJSON batch
+      ResponseBatch Nothing batch -> fmap Just $ unsafeFromDatum $ toDatum batch
       ResponseBatch (Just _more) batch -> do
         rest <- collect' =<< convertResult v
-        fmap Just $ unsafeFromJSON $ toJSON $ batch ++ rest
+        fmap Just $ unsafeFromDatum $ toDatum $ batch ++ rest
 
 instance Result Int where
-  convertResult = unsafeFromJSON <=< getSingle
+  convertResult = unsafeFromDatum <=< getSingle
 
 instance Result Double where
-  convertResult = unsafeFromJSON <=< getSingle
+  convertResult = unsafeFromDatum <=< getSingle
 
 instance Result Bool where
-  convertResult = unsafeFromJSON <=< getSingle
-
-instance FromJSON a => Result (Map String a) where
-  convertResult = unsafeFromJSON <=< getSingle
+  convertResult = unsafeFromDatum <=< getSingle
 
 instance Result String where
-  convertResult = unsafeFromJSON <=< getSingle
+  convertResult = unsafeFromDatum <=< getSingle
 
 instance Result Text where
-  convertResult = unsafeFromJSON <=< getSingle
+  convertResult = unsafeFromDatum <=< getSingle
+
+instance FromDatum a => Result (Map String a) where
+  convertResult = unsafeFromDatum <=< getSingle
+
 
 instance Result () where
   convertResult _ = return ()
 
-getSingle :: MVar Response -> IO Value
+instance Result J.Value where
+  convertResult = unsafeFromDatum <=< getSingle
+
+getSingle :: MVar Response -> IO Datum
 getSingle v = do
     r <- takeMVar v
     case r of
@@ -124,22 +126,19 @@ getSingle v = do
         throwIO $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
         ("Expected a single datum but got: " ++ show batch) []
 
-instance Result Value where
+instance Result Datum where
   convertResult v = do
     r <- takeMVar v
     case r of
       ResponseSingle datum -> return datum
       ResponseError e -> throwIO e
-      ResponseBatch Nothing batch -> return $ toJSON batch
+      ResponseBatch Nothing batch -> return $ toDatum batch
       ResponseBatch (Just _more) batch -> do
         rest <- collect' =<< convertResult v
-        return . toJSON $ batch ++ rest
-
-instance Result JSON where
-  convertResult = fmap JSON . convertResult
+        return . toDatum $ batch ++ rest
 
 instance Result WriteResponse where
-  convertResult = unsafeFromJSON <=< convertResult
+  convertResult = unsafeFromDatum <=< convertResult
 
 data WriteResponse = WriteResponse {
   writeResponseInserted :: Int,
@@ -153,18 +152,18 @@ data WriteResponse = WriteResponse {
   writeResponseChanges :: Maybe [Change]
   }
 
-data Change = Change { oldVal, newVal :: Value }
+data Change = Change { oldVal, newVal :: Datum }
 
 instance Show Change where
-  show (Change old new) = "{\"old_val\":" ++ show (JSON old) ++ ",\"new_val\":" ++ show (JSON new) ++ "}"
+  show (Change old new) = "{\"old_val\":" ++ show old ++ ",\"new_val\":" ++ show new ++ "}"
 
-instance FromJSON Change where
-  parseJSON (Object o) =
+instance FromDatum Change where
+  parseDatum (Object o) =
     Change <$> o .: "old_val" <*> o .: "new_val"
-  parseJSON _ = mzero
+  parseDatum _ = mzero
 
-instance FromJSON WriteResponse where
-  parseJSON (Object o) =
+instance FromDatum WriteResponse where
+  parseDatum (Object o) =
     WriteResponse
     <$> o .: "inserted"
     <*> o .: "deleted"
@@ -175,7 +174,7 @@ instance FromJSON WriteResponse where
     <*> o .:? "first_error"
     <*> o .:? "generated_keys"
     <*> o .:? "changes"
-  parseJSON _ = mzero
+  parseDatum _ = mzero
 
 instance Show WriteResponse where
   show wr = "{" ++

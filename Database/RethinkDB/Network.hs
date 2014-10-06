@@ -37,8 +37,6 @@ import Control.Concurrent (
   newEmptyMVar, putMVar, mkWeakMVar)
 import Data.Monoid((<>))
 import Control.Exception (catch, Exception, throwIO, SomeException(..))
-import Data.Aeson (toJSON, Value)
-import qualified Data.Aeson as J
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -55,7 +53,8 @@ import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Response
 import Database.RethinkDB.Wire.Query
 import Database.RethinkDB.Wire.VersionDummy as Protocol
-import Database.RethinkDB.Objects
+import Database.RethinkDB.Types
+import Database.RethinkDB.Datum
 import Database.RethinkDB.ReQL (
   Term, Backtrace, convertBacktrace, WireQuery(..),
   WireBacktrace(..), Term(..), Frame(..),
@@ -212,10 +211,10 @@ instance Show Response where
   show (ResponseSingle datum) = show datum
   show (ResponseBatch _more batch) = show batch
 
-newtype WireResponse = WireResponse { _responseJSON :: Value }
+newtype WireResponse = WireResponse { _responseDatum :: Datum }
 
 convertResponse :: RethinkDBHandle -> Term -> Token -> WireResponse -> Response
-convertResponse h q t (WireResponse (J.Object o)) = let
+convertResponse h q t (WireResponse (Object o)) = let
   type_    = o .? "t" >>= fromWire
   results :: Maybe [Datum]
   results  = o .? "r"
@@ -223,9 +222,7 @@ convertResponse h q t (WireResponse (J.Object o)) = let
   -- _profile = o .? "p" -- TODO
   atom :: Maybe Datum
   atom     = case results of Just [single] -> Just single; _ -> Nothing
-  m .? k   = HM.lookup k m >>= resultToMaybe . J.fromJSON
-  resultToMaybe (J.Success a) = Just a
-  resultToMaybe (J.Error _) = Nothing
+  m .? k   = HM.lookup k m >>= resultToMaybe . fromDatum
   (-->) = flip ($)
   e = fromMaybe "" $ resultToMaybe . fromDatum =<< listToMaybe =<< results
   _ <!< Nothing = ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
@@ -253,13 +250,13 @@ runQLQuery h query term = do
           then newEmptyMVar
           else addMBox h tok term
   sendQLQuery h tok query
-  when noReply $ putMVar mbox $ ResponseSingle J.Null
+  when noReply $ putMVar mbox $ ResponseSingle $ Null
   return mbox
 
 isNoReplyQuery :: WireQuery -> Bool
-isNoReplyQuery (WireQuery (J.Array v)) |
-  [_type, _term, (J.Object optargs)] <- toList v,
-  Just (J.Bool True) <- HM.lookup "noreply" optargs =
+isNoReplyQuery (WireQuery (Array v)) |
+  [_type, _term, (Object optargs)] <- toList v,
+  Just (Bool True) <- HM.lookup "noreply" optargs =
     True
 isNoReplyQuery _ = False
 
@@ -283,7 +280,7 @@ addMBox h tok term = do
 
 sendQLQuery :: RethinkDBHandle -> Token -> WireQuery -> IO ()
 sendQLQuery h tok query = do
-  let queryS = J.encode $ queryJSON query
+  let queryS = encode $ queryJSON query
   withHandle h $ \s ->
     hPut s $ runPut $ do
       putWord64le tok
@@ -316,7 +313,7 @@ readSingleResponse h = do
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let replyLength = runGet getWord32le header
   rawResponse <- hGet (rdbHandle h) (fromIntegral replyLength)
-  let parsedResponse = J.eitherDecode rawResponse
+  let parsedResponse = eitherDecode rawResponse
   case parsedResponse of
     Left errMsg -> fail errMsg
     Right response -> dispatch token $ WireResponse response
@@ -353,12 +350,12 @@ close h@RethinkDBHandle{ rdbHandle, rdbThread } = do
 
 closeToken :: RethinkDBHandle -> Token -> IO ()
 closeToken h tok = do
-  let query = WireQuery $ toJSON [toWire STOP]
+  let query = WireQuery $ toDatum [toWire STOP]
   sendQLQuery h tok query
 
 nextResponse :: Response -> IO ()
 nextResponse (ResponseBatch (Just (More _ h tok)) _) = do
-  let query = WireQuery $ toJSON [toWire CONTINUE]
+  let query = WireQuery $ toDatum [toWire CONTINUE]
   sendQLQuery h tok query
 nextResponse _ = return ()
 
@@ -394,9 +391,9 @@ cursorFetchBatch c = do
   case response of
     ResponseError e -> return $ Left e
     ResponseBatch more datums -> return $ Right (datums, isNothing more)
-    ResponseSingle (J.Array a) -> return $ Right (toList a, True)
+    ResponseSingle (Array a) -> return $ Right (map toDatum $ toList a, True)
     ResponseSingle _ ->
-      return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum J.Null)
+      return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
       "Expected a stream or an array but got a datum" []
 
 -- | A lazy stream of all the elements in the cursor
@@ -425,7 +422,7 @@ collect' c = fix $ \loop -> do
 -- >>> noReplyWait h
 noReplyWait :: RethinkDBHandle -> IO ()
 noReplyWait h = do
-  m <- runQLQuery h (WireQuery $ toJSON [toWire NOREPLY_WAIT]) (Datum J.Null)
+  m <- runQLQuery h (WireQuery $ toDatum [toWire NOREPLY_WAIT]) (Datum Null)
   _ <- takeMVar m
   return ()
 

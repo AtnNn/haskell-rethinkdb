@@ -4,15 +4,9 @@ module Database.RethinkDB.Geospatial where
 import Database.RethinkDB.ReQL
 import Database.RethinkDB.Wire.Term
 
-data Point = Point
-
-data Line = Line
-
-data Polygon = Polygon
-
 -- | Convert a line object into a polygon
 --
--- >>> line [
+-- > line [
 --        [-122.423246,37.779388],
 --        [-122.423246,37.329898],
 --        [-121.886420,37.329898],
