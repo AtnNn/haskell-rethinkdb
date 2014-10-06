@@ -341,13 +341,13 @@ instance IsString ReQL where
 instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
     v <- newVarId
-    runReQL $ op FUNC (toDatum [v], expr $ f (op VAR [v]))
+    runReQL $ op FUNC ([v], expr $ f (op VAR [v]))
 
 instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
   expr f = ReQL $ do
     a <- newVarId
     b <- newVarId
-    runReQL $ op FUNC (toDatum [a, b], expr $ f (op VAR [a]) (op VAR [b]))
+    runReQL $ op FUNC ([a, b], expr $ f (op VAR [a]) (op VAR [b]))
 
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
@@ -389,7 +389,7 @@ buildAttributes :: [TermAttribute] -> Datum
 buildAttributes ts = toDatum $ M.fromList $ map toPair ts
  where toPair (TermAttribute a b) = (a, termJSON $ buildTerm b)
 
-newtype WireQuery = WireQuery { queryJSON :: Datum }
+newtype WireQuery = WireQuery { queryJSON :: Datum } -- TODO: rename
                   deriving Show
 
 buildQuery :: ReQL -> Int64 -> Database -> [(T.Text, Datum)] -> (WireQuery, Term)

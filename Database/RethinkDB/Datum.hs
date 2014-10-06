@@ -111,10 +111,10 @@ instance Show Datum where
   show Null = "null"
   show (Bool True) = "true"
   show (Bool False) = "false"
-  show (Number d) = show d
+  show (Number d) = let s = show d in if ".0" `isSuffixOf` s then init (init s) else s
   show (String t) = show t
   show (Array v) = "[" ++ intercalate "," (map show $ V.toList v) ++ "]"
-  show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show v ++ ":" ++ show k) $ HM.toList o) ++ "}"
+  show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show k ++ ":" ++ show v) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
   show (Point p) = "Point<" ++ show p ++ ">"
   show (Line l) = "Line<" ++ show l ++ ">"
