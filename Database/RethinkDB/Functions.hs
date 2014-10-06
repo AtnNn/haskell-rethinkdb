@@ -121,7 +121,7 @@ forEach s f = op FOREACH (s, expr P.. f)
 
 -- | A table
 --
--- >>> fmap sort $ run h $ table "users" :: IO [JSON]
+-- >>> fmap sort $ run h $ table "users" :: IO [Datum]
 -- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill"}]
 table :: Text -> Table
 table n = Table Nothing n Nothing
@@ -173,7 +173,7 @@ infixl 7 *, /
 -- | Division
 --
 -- >>> run h $ 2 R./ 5
--- 0.4000000000000000222
+-- 0.4
 (/) :: (Expr a, Expr b) => a -> b -> ReQL
 (/) a b = op DIV (a, b)
 
@@ -378,7 +378,7 @@ distinct s = op DISTINCT [s]
 --
 -- Called /zip/ in the official drivers
 --
--- >>> fmap sort $ run h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight :: IO [JSON]
+-- >>> fmap sort $ run h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight :: IO [Datum]
 -- [{"post_count":2,"flag":"deleted","name":"bill","author":"bill","id":2,"message":"hello"},{"post_count":2,"name":"bill","author":"bill","id":1,"message":"hi"}]
 mergeLeftRight :: (Expr a) => a -> ReQL
 mergeLeftRight a = op ZIP [a]
@@ -521,7 +521,7 @@ remove = op LITERAL ()
 -- | Evaluate a JavaScript expression
 --
 -- >>> run' h $ js "Math.PI"
--- 3.141592653589793116
+-- 3.141592653589793
 -- >>> let r_sin x = js "Math.sin" `apply` [x]
 -- >>> run h $ R.map r_sin [pi, pi/2]
 -- [1.2246063538223772582e-16,1]
@@ -980,7 +980,7 @@ args a = op ARGS [a]
 
 -- | Return an infinite stream of objects representing changes to a table
 --
--- >>> cursor <- run h $ table "posts" # changes :: IO (Cursor JSON)
+-- >>> cursor <- run h $ table "posts" # changes :: IO (Cursor Datum)
 -- >>> run h $ table "posts" # insert ["author" := "bill", "message" := "bye", "id" := 4] :: IO WriteResponse
 -- {inserted:1}
 -- >>> next cursor
@@ -1009,11 +1009,11 @@ durability d = "durability" := d
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
 -- *** Exception: runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
---  in
---    {- HERE -}
---    update(
---      get(table(db("doctests"), "users"), "sabrina"),
---      (\b -> merge(b, {lucky_number: random()})))
+--   in
+--     {- HERE -}
+--     update(
+--       get(table(db("doctests"), "users"), "sabrina"),
+--       (\b -> merge(b, {lucky_number: random()})))
 -- >>> run h $ table "users" # get "sabrina" # ex update [nonAtomic] (merge ["lucky_number" := random]) :: IO WriteResponse
 -- {replaced:1}
 nonAtomic :: Attribute a
