@@ -315,21 +315,21 @@ concatMap f e = op CONCATMAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
--- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [asc "id"] # pluck ["name", "message"]
+-- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f)
 
 -- | SQL-like outer join of two sequences
 --
--- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # mergeLeftRight # orderBy [asc "id", asc "name"] # pluck ["name", "message"]
+-- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id", asc "name"] # pluck ["name", "message"]
 -- [{"name":"nancy"},{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 
 -- | An efficient inner_join that uses a key for the left table and an index for the right table.
 --
--- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight # orderBy [asc "id"] # pluck ["name", "message"]
+-- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
 -- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
 eqJoin :: (Expr fun, Expr right, Expr left) => fun -> right -> Index -> left -> ReQL
 eqJoin key right (Index idx) left = op' EQ_JOIN (left, key, right) ["index" := idx]
@@ -379,12 +379,10 @@ distinct s = op DISTINCT [s]
 
 -- | Merge the "left" and "right" attributes of the objects in a sequence.
 --
--- Called /zip/ in the official drivers
---
--- >>> fmap sort $ run h $ table "posts" # eqJoin "author" (table "users") "name" # mergeLeftRight :: IO [Datum]
+-- >>> fmap sort $ run h $ table "posts" # eqJoin "author" (table "users") "name" # R.zip :: IO [Datum]
 -- [{"post_count":2,"flag":"deleted","name":"bill","author":"bill","id":2,"message":"hello"},{"post_count":2,"name":"bill","author":"bill","id":1,"message":"hi"}]
-mergeLeftRight :: (Expr a) => a -> ReQL
-mergeLeftRight a = op ZIP [a]
+zip :: (Expr a) => a -> ReQL
+zip a = op ZIP [a]
 
 -- | Order a sequence by the given keys
 --

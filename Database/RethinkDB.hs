@@ -29,7 +29,7 @@ module Database.RethinkDB (
   
   -- * Cursors
   
-  next, collect, each,
+  next, collect, collect', each,
   Cursor,
   
   -- * Manipulating databases
@@ -65,7 +65,7 @@ module Database.RethinkDB (
 
   -- * Joins
 
-  innerJoin, outerJoin, eqJoin, mergeLeftRight,
+  innerJoin, outerJoin, eqJoin, zip,
   Index(..),
 
   -- * Transformations

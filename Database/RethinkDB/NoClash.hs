@@ -3,11 +3,12 @@
 
 module Database.RethinkDB.NoClash (
   module Database.RethinkDB,
-  -- bmodule Prelude -- Uncomment to let GHC detect clashes
+  -- module Prelude -- Uncomment to let GHC detect clashes
   ) where
 
 import Database.RethinkDB hiding (
   (*), (+), (-), (/),
   sum, map, mod, concatMap, (&&),
   not, (||), (/=), (<), (<=), (>), (>=), error, (==), filter,
-  max, min)
+  max, min,
+  zip)
