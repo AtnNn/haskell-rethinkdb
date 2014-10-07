@@ -35,6 +35,10 @@ module Database.RethinkDB.ReQL (
   (?:=)
   ) where
 
+import qualified Data.Aeson as J
+import qualified Data.Aeson.Encode as J
+import qualified Data.Text.Lazy as LT
+import qualified Data.Text.Lazy.Builder as LT
 import Data.Aeson (Value)
 import qualified Data.Vector as V
 import qualified Data.HashMap.Lazy as M
@@ -378,13 +382,24 @@ instance Expr e => Expr (M.HashMap T.Text e) where
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
-buildTerm (Datum (Array v)) = WireTerm $ toDatum (toWire MAKE_ARRAY, v, object [])
-buildTerm (Datum d) = WireTerm (toDatum d)
+buildTerm (Datum d)
+  | complexDatum d = buildTerm $ Term Term.JSON [Datum $ toDatum $ encodeTextJSON d] []
+  | otherwise = WireTerm $ d
 buildTerm (Term type_ args oargs) =
   WireTerm $ toDatum (
     toWire type_,
     map (termJSON . buildTerm) args,
     buildAttributes oargs)
+
+complexDatum :: Datum -> Bool
+complexDatum Null = False
+complexDatum Bool{} = False
+complexDatum Number{} = False
+complexDatum String{} = False
+complexDatum _ = True
+
+encodeTextJSON :: Datum -> T.Text
+encodeTextJSON = LT.toStrict . LT.toLazyText . J.encodeToTextBuilder . J.toJSON
 
 buildAttributes :: [TermAttribute] -> Datum
 buildAttributes ts = toDatum $ M.fromList $ map toPair ts
