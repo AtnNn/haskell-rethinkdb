@@ -198,10 +198,10 @@ data ErrorCode =
   ErrorUnexpectedResponse
 
 instance Show ErrorCode where
-  show ErrorBrokenClient = "broken client error"
-  show ErrorBadQuery = "malformed query error"
-  show ErrorRuntime = "runtime error"
-  show ErrorUnexpectedResponse = "unexpected response"
+  show ErrorBrokenClient = "RethinkDB: Broken client error"
+  show ErrorBadQuery = "RethinkDB: Malformed query error"
+  show ErrorRuntime = "RethinkDB: Runtime error"
+  show ErrorUnexpectedResponse = "RethinkDB: Unexpected response"
 
 instance Show Response where
   show (ResponseError RethinkDBError {..}) =
