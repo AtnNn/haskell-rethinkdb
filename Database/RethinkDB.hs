@@ -130,7 +130,7 @@ module Database.RethinkDB (
   HttpOptions(..), HttpResultFormat(..),
   HttpMethod(..), PaginationStrategy(..),
   
-  -- Geospatial commands
+  -- * Geospatial commands
   
   circle, distance, fill, geoJSON,
   toGeoJSON, getIntersecting,
@@ -142,8 +142,7 @@ module Database.RethinkDB (
 
   ex, str, num, (#), note, nil, empty,
   
-  -- | Re-exported from Data.Default
-  def
+  def -- ^ Re-exported from Data.Default
   
   ) where
 

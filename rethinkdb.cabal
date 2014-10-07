@@ -1,5 +1,5 @@
 name:                rethinkdb
-version:             1.13.0
+version:             1.15.0
 description:         A driver for the RethinkDB database server
 synopsis:            A driver for the RethinkDB database server
 homepage:            http://github.com/atnnn/haskell-rethinkdb
@@ -15,8 +15,12 @@ source-repository head
   type: git
   location: https://github.com/atnnn/haskell-rethinkdb
 
+flag dev
+  default: False
+  manual: True
+
 library
-  ghc-options: -Wall -O2
+  ghc-options: -O2 -Wall
   exposed-modules:     Database.RethinkDB
                        Database.RethinkDB.NoClash
                        Database.RethinkDB.Driver
@@ -28,8 +32,10 @@ library
                        Database.RethinkDB.ReQL
                        Database.RethinkDB.Network
                        Database.RethinkDB.MapReduce
-                       Debug
-  -- TODO: remove Debug before release
+  if flag(dev)
+    exposed-modules: Debug
+    ghc-options: -Werror
+
   build-depends:       base >= 4 && < 5,
                        unordered-containers >= 0.2 && < 0.3,
                        text >= 0.11 && < 0.12,

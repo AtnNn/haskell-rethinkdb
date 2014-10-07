@@ -404,8 +404,8 @@ desc f = op DESC [f]
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
--- > >>> run' h $ table "posts" # group (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
--- > [["hello\nhi","lorem ipsum"]]
+-- >>> run' h $ table "posts" # group (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
+-- [["hello\nhi","lorem ipsum"]]
 -- >>> run' h $ table "users" # group ((!0) . splitOn "" . (!"name")) (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 -- [{"group":"b","reduction":[2,2]},{"group":"n","reduction":[0,0]}]
 group ::
