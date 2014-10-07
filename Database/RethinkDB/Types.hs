@@ -1,7 +1,5 @@
 module Database.RethinkDB.Types (
   Database(..),
-  TableCreateOptions(..),
-  IndexCreateOptions(..),
   Table(..),
   Key,
   Index(..)
@@ -24,22 +22,6 @@ instance Show Database where
 
 instance IsString Database where
   fromString name = Database $ fromString name
-
--- | Options used to create a table
-data TableCreateOptions = TableCreateOptions {
-  tableDataCenter :: Maybe Text
-  }
-
-instance Default TableCreateOptions where
-  def = TableCreateOptions Nothing
-
--- | Options used to create an index
-data IndexCreateOptions = IndexCreateOptions {
-  indexMulti :: Maybe Bool
-  }
-
-instance Default IndexCreateOptions where
-  def = IndexCreateOptions Nothing
 
 -- | A table description
 data Table = Table {

@@ -72,11 +72,12 @@ import qualified Prelude as P
 -- > [{"created":1}]
 -- > >>> run' h $ tableCreate (Table (Just "doctests") "bar" (Just "name")) def
 -- > [{"created":1}]
-tableCreate :: Table -> TableCreateOptions -> ReQL
-tableCreate (Table mdb table_name pkey) opts =
+-- > >>> run' h $ ex tableCreate ["datacenter":="orion"] (Table (Just "doctests") "bar" (Just "name")) def
+-- > [{"created":1}]
+tableCreate :: Table -> ReQL
+tableCreate (Table mdb table_name pkey) =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
     op' TABLE_CREATE (fromMaybe ddb mdb, table_name) $ catMaybes [
-      ("datacenter" :=) <$> tableDataCenter opts,
       ("primary_key" :=) <$> pkey ]
 
 -- | Insert a document or a list of documents into a table
@@ -574,11 +575,14 @@ dbList = op DB_LIST ()
 
 -- | Create an index on the table from the given function
 --
--- >>> run' h $ table "users" # indexCreate "occupation" (!"occupation") def
+-- >>> run' h $ table "users" # indexCreate "occupation" (!"occupation")
 -- {"created":1}
-indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> ReQL
-indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
-  ("multi" :=) <$> indexMulti opts]
+-- >>> run' h $ table "users" # ex indexCreate ["multi":=True] "friends" (!"friends")
+-- {"created":1}
+-- >>> run' h $ table "users" # ex indexCreate ["geo":=True] "location" (!"location")
+-- {"created":1}
+indexCreate :: (Expr fun) => P.String -> fun -> Table -> ReQL
+indexCreate name f tbl = op INDEX_CREATE (tbl, str name, f)
 
 -- | Get the status of the given indexes
 --

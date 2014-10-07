@@ -39,7 +39,7 @@ module Database.RethinkDB (
 
   -- * Manipulating Tables
 
-  Table(..), TableCreateOptions(..), IndexCreateOptions(..),
+  Table(..),
   tableCreate, tableDrop, tableList,
   indexCreate, indexDrop, indexList,
   indexRename, indexStatus, indexWait,

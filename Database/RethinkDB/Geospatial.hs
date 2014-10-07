@@ -41,7 +41,6 @@ toGeoJSON g = op TO_GEOJSON [g]
 --
 -- >>> run' h $ table "places" # getIntersecting samplePoint (Index "geo")
 
--- TODO: creating geo indexes
 getIntersecting :: (Expr geo, Expr table) => geo -> Index -> table -> ReQL
 getIntersecting g i t = op' GET_INTERSECTING (t, g) $ idx
   where idx = case i of
@@ -98,7 +97,6 @@ polygonSub h p = op POLYGON_SUB (p, h)
 --
 -- >>> run' h $ circle samplePoint 100
 -- >>> run' h $ ex circle ["num_vertices" := 20, "unit" := "km", "fill" := False] samplePoint 100
--- TODO: num_vertices, geo_system, unit, fill
 circle :: (Expr point, Expr radius) => point -> radius -> ReQL
 circle p r = op CIRCLE (p, r)
 
