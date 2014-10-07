@@ -132,6 +132,9 @@ class ToDatum a where
 instance ToDatum a => ToDatum [a] where
   toDatum = Array . V.fromList . map toDatum
 
+instance ToDatum a => ToDatum (V.Vector a) where
+  toDatum = Array . V.map toDatum
+
 instance ToDatum Datum where
   toDatum = id
 
@@ -160,17 +163,10 @@ instance ToDatum Double
 
 toJSONDatum :: ToJSON a => a -> Datum
 toJSONDatum a = case toJSON a of
-  J.Null -> Null
-  J.Bool b -> Bool b
-  J.Number s -> Number (toRealFloat s)
-  J.String t -> String t
-  J.Array v -> Array (fmap toJSONDatum v)
-  J.Object o -> Object (fmap toJSONDatum o)
-
-instance J.FromJSON Datum where
-  parseJSON v@(J.Object o) = do
-    let ptype = HM.lookup "$reql_type$" o
-    return $ case ptype of
+  J.Object o ->
+    let asObject = Object $ HM.map toJSONDatum o
+        ptype = HM.lookup "$reql_type$" o
+    in case ptype of
       Just "GEOMETRY" |
         Just t <- HM.lookup "type" o,
         Just c <- HM.lookup "coordinates" o ->
@@ -178,7 +174,7 @@ instance J.FromJSON Datum where
             "Point" | Success p <- fromJSON c -> Point p
             "Line" | Success l <- fromJSON c -> Line l
             "Polygon" | Success p <- fromJSON c -> Polygon p
-            _ -> toJSONDatum v
+            _ -> asObject
       Just "TIME" |
         Just (J.Number ts) <- HM.lookup "epoch_time" o,
         Just (J.String tz) <- HM.lookup "timezone" o,
@@ -188,8 +184,15 @@ instance J.FromJSON Datum where
         Just (J.String b64) <- HM.lookup "data" o,
         Right dat <- Base64.decode (encodeUtf8 b64) ->
          Binary dat 
-      _ -> toJSONDatum v
-  parseJSON v = return $ toJSONDatum v
+      _ -> asObject
+  J.Null -> Null
+  J.Bool b -> Bool b
+  J.Number s -> Number (toRealFloat s)
+  J.String t -> String t
+  J.Array v -> Array (fmap toJSONDatum v)
+
+instance J.FromJSON Datum where
+  parseJSON = return . toJSONDatum
 
 instance ToJSON Datum where
   toJSON Null = J.Null

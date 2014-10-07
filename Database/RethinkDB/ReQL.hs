@@ -378,6 +378,7 @@ instance Expr e => Expr (M.HashMap T.Text e) where
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
+buildTerm (Datum (Array v)) = WireTerm $ toDatum (toWire MAKE_ARRAY, v, object [])
 buildTerm (Datum d) = WireTerm (toDatum d)
 buildTerm (Term type_ args oargs) =
   WireTerm $ toDatum (
