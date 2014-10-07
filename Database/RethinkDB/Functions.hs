@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, GADTs #-}
 
+-- TODO: diff ql2 for changes since 1.10
+
 -- | ReQL Functions
 --
 -- ReQL was designed for dynamic languages. Many operations take

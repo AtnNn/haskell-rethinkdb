@@ -101,7 +101,7 @@ instance Eq Datum where
   _ == _ = False
 
 instance Show LonLat where
-  show (LonLat lon lat) = "[" ++ show lon ++ "," ++ show lat ++ "]"
+  show (LonLat lon lat) = "[" ++ showDouble lon ++ "," ++ showDouble lat ++ "]"
 
 instance J.FromJSON LonLat where
   parseJSON v | Success [lon, lat] <- fromJSON v = return $ LonLat lon lat
@@ -111,15 +111,18 @@ instance Show Datum where
   show Null = "null"
   show (Bool True) = "true"
   show (Bool False) = "false"
-  show (Number d) = let s = show d in if ".0" `isSuffixOf` s then init (init s) else s
+  show (Number d) = showDouble d
   show (String t) = show t
   show (Array v) = "[" ++ intercalate "," (map show $ V.toList v) ++ "]"
   show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show k ++ ":" ++ show v) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
   show (Point p) = "Point<" ++ show p ++ ">"
-  show (Line l) = "Line<" ++ show l ++ ">"
-  show (Polygon p) = "Polygon<" ++ show p ++ ">"
+  show (Line l) = "Line<" ++ intercalate "," (map show $ V.toList l) ++ ">"
+  show (Polygon p) = "Polygon<" ++ intercalate "," (map (\x -> "[" ++ intercalate "," (map show $ V.toList x) ++ "]") (V.toList p)) ++ ">"
   show (Binary b) = "Binary<" ++ show b ++ ">"
+
+showDouble :: Double -> String
+showDouble d = let s = show d in if ".0" `isSuffixOf` s then init (init s) else s
 
 fromDatum :: FromDatum a => Datum -> Result a
 fromDatum = parse parseDatum
@@ -172,7 +175,7 @@ toJSONDatum a = case toJSON a of
         Just c <- HM.lookup "coordinates" o ->
           case t of
             "Point" | Success p <- fromJSON c -> Point p
-            "Line" | Success l <- fromJSON c -> Line l
+            "LineString" | Success l <- fromJSON c -> Line l
             "Polygon" | Success p <- fromJSON c -> Polygon p
             _ -> asObject
       Just "TIME" |
@@ -211,7 +214,7 @@ instance ToJSON Datum where
     "coordinates" J..= toJSON p]
   toJSON (Line l) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
-    "type" J..= ("Line" :: ST.Text),
+    "type" J..= ("LineString" :: ST.Text),
     "coordinates" J..= toJSON l]
   toJSON (Polygon p) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),

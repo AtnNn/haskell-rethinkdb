@@ -132,8 +132,8 @@ module Database.RethinkDB (
   
   -- Geospatial commands
   
-  circle, distance, fill, geojson,
-  toGeojson, getIntersecting,
+  circle, distance, fill, geoJSON,
+  toGeoJSON, getIntersecting,
   getNearest, includes, intersects,
   line, point, polygon, polygonSub,
   LonLat(..), Line, Polygon,
