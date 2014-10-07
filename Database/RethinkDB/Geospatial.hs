@@ -41,6 +41,7 @@ toGeoJSON g = op TO_GEOJSON [g]
 --
 -- >>> run' h $ table "places" # getIntersecting samplePoint (Index "geo")
 
+-- TODO: creating geo indexes
 getIntersecting :: (Expr geo, Expr table) => geo -> Index -> table -> ReQL
 getIntersecting g i t = op' GET_INTERSECTING (t, g) $ idx
   where idx = case i of
@@ -50,8 +51,7 @@ getIntersecting g i t = op' GET_INTERSECTING (t, g) $ idx
 -- | Query a geospatial index for the nearest matches
 --
 -- >>> run' h $ table "places" # getNearest samplePoint (Index "location")
-
--- TODO: optional arguments: max_results, max_dist, unit, geo_system
+-- >>> run' h $ table "places" # ex getNearest ["max_results" := 5, "max_dist" := 10, "unit" := "km"] samplePoint (Index "location")
 getNearest :: (Expr point, Expr table) => point -> Index -> table -> ReQL
 getNearest p i t = op' GET_NEAREST (t, p) idx
   where idx = case i of
@@ -97,7 +97,7 @@ polygonSub h p = op POLYGON_SUB (p, h)
 -- | Create a polygon approximating a circle
 --
 -- >>> run' h $ circle samplePoint 100
-
+-- >>> run' h $ ex circle ["num_vertices" := 20, "unit" := "km", "fill" := False] samplePoint 100
 -- TODO: num_vertices, geo_system, unit, fill
 circle :: (Expr point, Expr radius) => point -> radius -> ReQL
 circle p r = op CIRCLE (p, r)
@@ -105,7 +105,6 @@ circle p r = op CIRCLE (p, r)
 -- | Distance between a point and another geometry object
 --
 -- >>> run' h $ distance samplePoint sampleLine
-
--- TODO: geo_system, unit
+-- >>> run' h $ ex distance ["unit":="mi"] samplePoint sampleLine
 distance :: (Expr a, Expr b) => a -> b -> ReQL
 distance a b = op DISTANCE (a,b)
