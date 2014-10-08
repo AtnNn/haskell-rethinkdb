@@ -28,7 +28,7 @@ main = do
     Right mod -> do
       writeFile "Database/RethinkDB/Wire.hs" genRaw
       forM_ mod $ \(name, enums) ->
-        writeFile (unpack $ "Database/RethinkDB/Wire/" <> name <> ".hs")
+        maybe (return ()) (writeFile (unpack $ "Database/RethinkDB/Wire/" <> name <> ".hs"))
         (renderMessage (name, enums))
 
 protoFile = tr "protoFile" $ do
@@ -89,7 +89,8 @@ genRaw = unlines $ [
   "  fromWire :: Int -> Maybe a"
   ]
 
-renderMessage (name, enums) = unlines $ [
+renderMessage (name, []) = Nothing
+renderMessage (name, enums) = Just $ unlines $ [
   unwords ["module", "Database.RethinkDB.Wire." <> name, "where"],
   "import Prelude (Maybe(..), Eq, Show)",
   "import Database.RethinkDB.Wire"

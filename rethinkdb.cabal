@@ -1,5 +1,5 @@
 name: rethinkdb
-version: 1.15.0
+version: 1.15.0.0
 cabal-version: >=1.8
 build-type: Simple
 license: Apache
@@ -43,7 +43,6 @@ library
             Debug
         exposed: True
         buildable: True
-        ghc-options: -Werror
     exposed-modules:
         Database.RethinkDB
         Database.RethinkDB.NoClash
@@ -66,7 +65,7 @@ library
         Database.RethinkDB.Wire.VersionDummy
     exposed: True
     buildable: True
-    ghc-options: -O2 -Wall
+    ghc-options: -Wall
     ghc-prof-options: -fprof-auto
  
 test-suite doctests

@@ -1,8 +1,9 @@
 module Debug (
-  trace, traceIO, tr, tracePrint
+  module Debug.Trace,
+  tr, tracePrint
   ) where
 
-import Debug.Trace as T
+import Debug.Trace
 
 tr :: Show a => String -> a -> a
 tr s a = trace (s ++ " " ++ show a) a
