@@ -1006,7 +1006,7 @@ instance Expr Durability where
   expr Soft = "soft"
 
 -- | Optional argument for soft durability writes
-durability :: Durability => Attribute a
+durability :: Durability -> Attribute a
 durability d = "durability" := d
 
 -- | Optional argument for non-atomic writes

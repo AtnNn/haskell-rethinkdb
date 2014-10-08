@@ -5,7 +5,6 @@ module Database.RethinkDB.Types (
   Index(..)
   ) where
 
-import Data.Default (def, Default)
 import qualified Data.Text as Text
 import Data.Text (Text, pack)
 import Data.String

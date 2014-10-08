@@ -1,5 +1,5 @@
 module Database.RethinkDB.Wire.Datum where
-import Prelude (Maybe(..), Int, Eq, Show)
+import Prelude (Maybe(..), Eq, Show)
 import Database.RethinkDB.Wire
 data DatumType = R_NULL | R_BOOL | R_NUM | R_STR | R_ARRAY | R_OBJECT | R_JSON
   deriving (Eq, Show)
