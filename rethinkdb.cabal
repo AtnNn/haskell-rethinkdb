@@ -56,7 +56,6 @@ library
         Database.RethinkDB.Network
         Database.RethinkDB.MapReduce
         Database.RethinkDB.Wire
-        Database.RethinkDB.Wire.Backtrace
         Database.RethinkDB.Wire.Datum
         Database.RethinkDB.Wire.Frame
         Database.RethinkDB.Wire.Query
@@ -76,7 +75,7 @@ test-suite doctests
     main-is: doctests.hs
     buildable: True
     ghc-options: -threaded
- 
+
 benchmark bench
     build-depends:
         base,

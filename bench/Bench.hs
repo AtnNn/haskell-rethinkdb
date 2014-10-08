@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
+-- TODO: find the cause of the bad performance reported by these benchmarks
 
+module Main where
 
 import Control.Exception
 import Database.RethinkDB.NoClash
@@ -13,10 +14,16 @@ main :: IO ()
 main = do
   h <- prepare
   let test name = bench name . nfIO . void . run' h
+  let testn n name q = bench ("[" ++ show n ++ "x] " ++ name) . nfIO . (mapM_ next =<<) . sequence . replicate n $ runCursor h q
   defaultMain [
-    test "expr 1" $ num 1,
+    test "nil" $ nil,
+    testn 10 "nil" $ nil,
+    testn 100 "nil" $ nil,
     test "point get" $ table "bench" # get (num 0)
     ]
+
+runCursor :: RethinkDBHandle -> ReQL -> IO (Cursor Datum)
+runCursor = run
 
 prepare :: IO RethinkDBHandle
 prepare = do
