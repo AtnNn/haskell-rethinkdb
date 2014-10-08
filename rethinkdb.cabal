@@ -19,7 +19,7 @@ source-repository head
 flag dev
     default: False
     manual: True
- 
+
 library
     build-depends:
         base >=4 && <4.8,
@@ -56,13 +56,22 @@ library
         Database.RethinkDB.ReQL
         Database.RethinkDB.Network
         Database.RethinkDB.MapReduce
+        Database.RethinkDB.Wire
+        Database.RethinkDB.Wire.Backtrace
+        Database.RethinkDB.Wire.Datum
+        Database.RethinkDB.Wire.Frame
+        Database.RethinkDB.Wire.Query
+        Database.RethinkDB.Wire.Response
+        Database.RethinkDB.Wire.Term
+        Database.RethinkDB.Wire.VersionDummy
     exposed: True
     buildable: True
     ghc-options: -O2 -Wall
+    ghc-prof-options: -fprof-auto
  
 test-suite doctests
     build-depends:
-        base -any,
+        base,
         doctest >=0.9
     type: exitcode-stdio-1.0
     main-is: doctests.hs
@@ -71,9 +80,13 @@ test-suite doctests
  
 benchmark bench
     build-depends:
-        base -any,
-        criterion -any
+        base,
+        criterion,
+        rethinkdb,
+        text,
+        aeson
+    hs-source-dirs: bench
     type: exitcode-stdio-1.0
     main-is: Bench.hs
-    buildable: True
     ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
+    ghc-prof-options: -fprof-auto "-with-rtsopts=-p -s -h -i0.1 -N"

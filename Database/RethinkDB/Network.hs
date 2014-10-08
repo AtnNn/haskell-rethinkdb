@@ -27,7 +27,7 @@ module Database.RethinkDB.Network (
 import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName, connectTo, PortID(PortNumber))
-import System.IO (Handle, hClose, hIsEOF)
+import System.IO (Handle, hClose, hIsEOF, hSetBuffering, BufferMode(..))
 import Data.ByteString.Lazy (hPut, hGet, ByteString)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
@@ -112,6 +112,7 @@ connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
   h <- connectTo host (PortNumber (fromInteger port))
+  hSetBuffering h NoBuffering
   hPut h $ runPut $ do
     putWord32le magicNumber
     putWord32le (fromIntegral $ B.length auth)

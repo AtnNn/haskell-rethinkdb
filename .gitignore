@@ -1,6 +1,9 @@
 *~
 *.o
 *.hi
+*.prof
+*.aux
+*.hp
 dist/
 \#*#
 .#*

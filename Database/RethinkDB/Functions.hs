@@ -29,7 +29,7 @@ import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Types
 
-import Prelude (($), return, Double, Bool, String, (.))
+import Prelude (($), (.))
 import qualified Prelude as P
 
 -- $setup
