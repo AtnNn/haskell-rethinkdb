@@ -54,14 +54,14 @@ import qualified Prelude as P
 
 -- $init_doctests
 -- >>> try' $ run' h' $ dbCreate "doctests"
--- >>> try' $ run' h $ tableCreate "foo" def
+-- >>> try' $ run' h $ tableCreate "foo"
 -- >>> try' $ run' h $ delete $ table "foo"
--- >>> try' $ run' h $ tableCreate "bar" def
+-- >>> try' $ run' h $ tableCreate "bar"
 -- >>> try' $ run' h $ delete $ table "bar"
 -- >>> try' $ run' h $ tableDrop "bar"
--- >>> try' $ run' h $ tableCreate (table "posts") def
+-- >>> try' $ run' h $ tableCreate (table "posts")
 -- >>> try' $ run' h $ delete $ table "posts"
--- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" } def
+-- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" }
 -- >>> try' $ run' h $ delete $ table "users"
 
 -- | Create a table on the server
@@ -404,7 +404,7 @@ desc f = op DESC [f]
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
--- >>> run' h $ table "posts" # group (!"author") (reduce1 (\a b -> a + "\n" + b) . R.map (!"message"))
+-- >>> run' h $ table "posts" # group (!"author") (reduce (\a b -> a + "\n" + b) . R.map (!"message"))
 -- [["hello\nhi","lorem ipsum"]]
 -- >>> run' h $ table "users" # group ((!0) . splitOn "" . (!"name")) (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 -- [{"group":"b","reduction":[2,2]},{"group":"n","reduction":[0,0]}]
@@ -525,7 +525,7 @@ remove = op LITERAL ()
 -- 3.141592653589793
 -- >>> let r_sin x = js "Math.sin" `apply` [x]
 -- >>> run h $ R.map r_sin [pi, pi/2]
--- [1.2246063538223772582e-16,1]
+-- [1.2246063538223773e-16,1]
 js :: ReQL -> ReQL
 js s = op JAVASCRIPT [s]
 
@@ -539,7 +539,7 @@ branch a b c = op BRANCH (a, b, c)
 -- | Abort the query with an error
 --
 -- >>> run' h $ R.error (str "haha") R./ 2 + 1
--- *** Exception: runtime error: "haha"
+-- *** Exception: RethinkDB: Runtime error: "haha"
 --   in add(div({- HERE -} error("haha"), 2), 1)
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m]

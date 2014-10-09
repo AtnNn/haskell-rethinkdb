@@ -137,6 +137,8 @@ module Database.RethinkDB (
   getNearest, includes, intersects,
   line, point, polygon, polygonSub,
   LonLat(..), Line, Polygon,
+  maxResults, maxDist, unit, numVertices,
+  Unit(..),
   
   -- * Helpers
 
