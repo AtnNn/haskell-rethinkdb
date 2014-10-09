@@ -16,28 +16,27 @@ import Database.RethinkDB.ReQL
 -- | The time and date when the query is executed
 --
 -- > >>> run' h $ now
--- > 2013-10-28 00:01:43.930000066757 +0000
 now :: ReQL
 now = op NOW ()
 
 -- | Build a time object from the year, month, day, hour, minute, second and timezone fields
 --
 -- >>> run' h $ time 2011 12 24 23 59 59 "Z"
--- 2011-12-24 23:59:59 +0000
+-- Time<2011-12-24 23:59:59 +0000>
 time :: ReQL -> ReQL -> ReQL -> ReQL -> ReQL -> ReQL -> ReQL -> ReQL
 time y m d hh mm ss tz = op TIME [y, m, d, hh, mm, ss, tz]
 
 -- | Build a time object given the number of seconds since the unix epoch
 --
 -- >>> run' h $ epochTime 1147162826
--- 2006-05-09 08:20:26 +0000
+-- Time<2006-05-09 08:20:26 +0000>
 epochTime :: ReQL -> ReQL
 epochTime t = op EPOCH_TIME [t]
 
 -- | Build a time object given an iso8601 string
 --
 -- >>> run' h $ iso8601 "2012-01-07T08:34:00-0700"
--- 2012-01-07 15:34:00 UTC
+-- Time<2012-01-07 08:34:00 -0700>
 iso8601 :: ReQL -> ReQL
 iso8601 t = op ISO8601 [t]
 

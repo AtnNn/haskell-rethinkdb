@@ -74,6 +74,7 @@ instance FromDatum Double
 instance FromDatum Bool
 instance FromDatum ST.Text
 instance FromDatum J.Value
+instance FromDatum (String, Int)
 
 type Array = Vector Datum
 type Object = HM.HashMap ST.Text Datum

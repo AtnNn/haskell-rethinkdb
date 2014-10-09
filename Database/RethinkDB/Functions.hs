@@ -124,7 +124,7 @@ forEach s f = op FOREACH (s, expr P.. f)
 -- | A table
 --
 -- >>> fmap sort $ run h $ table "users" :: IO [Datum]
--- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill"}]
+-- [{"post_count":2,"name":"bill"},{"post_count":0,"name":"nancy"}]
 table :: Text -> Table
 table n = Table Nothing n Nothing
 
@@ -526,7 +526,7 @@ remove = op LITERAL ()
 -- 3.141592653589793
 -- >>> let r_sin x = js "Math.sin" `apply` [x]
 -- >>> run h $ R.map r_sin [pi, pi/2]
--- [1.2246063538223772582e-16,1]
+-- [1.2246063538223773e-16,1]
 js :: ReQL -> ReQL
 js s = op JAVASCRIPT [s]
 
