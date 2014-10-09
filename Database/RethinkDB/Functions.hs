@@ -29,7 +29,7 @@ import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Types
 
-import Prelude (($), return, Double, Bool, String, (.))
+import Prelude (($), (.))
 import qualified Prelude as P
 
 -- $setup
@@ -550,7 +550,7 @@ error m = op ERROR [m]
 -- >>> run' h $ db "test" # info
 -- {"name":"test","type":"DB"}
 db :: Text -> Database
-db s = Database s
+db = Database
 
 -- | Create a database on the server
 --
