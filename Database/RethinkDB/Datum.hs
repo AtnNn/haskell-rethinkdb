@@ -1,9 +1,7 @@
 {-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures, 
     FlexibleInstances, OverlappingInstances #-}
 
--- TODO: add (todatum, fromdatum, expr, result) instances for:
--- bytestring x 2, text x 2, map, hashmap, int*, integer, word*, bool, char, double, float, nil, tuple, list, vector, zonedtime, utctime, value, string, ratio, set
--- geo types should correctly parse as tuples and lists
+-- TODO: geo types should correctly parse as tuples and lists
 
 module Database.RethinkDB.Datum (
   parse, Parser, Result(..),
