@@ -35,11 +35,12 @@ instance Default TableCreateOptions where
 
 -- | Options used to create an index
 data IndexCreateOptions = IndexCreateOptions {
-  indexMulti :: Maybe Bool
+  indexMulti :: Maybe Bool,
+  indexGeo :: Maybe Bool
   }
 
 instance Default IndexCreateOptions where
-  def = IndexCreateOptions Nothing
+  def = IndexCreateOptions Nothing Nothing
 
 -- | A table description
 data Table = Table {

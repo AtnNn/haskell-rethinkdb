@@ -92,7 +92,7 @@ genRaw = unlines $ [
 
 renderMessage (name, enums) = unlines $ [
   unwords ["module", "Database.RethinkDB.Wire." <> name, "where"],
-  "import Prelude (Maybe(..), Int, Eq, Show)",
+  "import Prelude (Maybe(..), Eq, Show)",
   "import Database.RethinkDB.Wire"
   ] ++ map renderEnum enums
 

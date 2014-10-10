@@ -140,7 +140,7 @@ tableDrop (Table mdb table_name _) =
 -- | List the tables in a database
 --
 -- >>> fmap sort $ run h $ tableList (db "doctests") :: IO [String]
--- ["posts","users"]
+-- ["places","posts","users"]
 tableList :: Database -> ReQL
 tableList name = op TABLE_LIST [name]
 
@@ -578,7 +578,7 @@ dbList = op DB_LIST ()
 -- {"created":1}
 indexCreate :: (Expr fun) => P.String -> fun -> IndexCreateOptions -> Table -> ReQL
 indexCreate name f opts tbl = op' INDEX_CREATE (tbl, str name, f) $ catMaybes [
-  ("multi" :=) <$> indexMulti opts]
+  ("multi" :=) <$> indexMulti opts, ("geo" :=) <$> indexGeo opts]
 
 -- | Get the status of the given indexes
 --
