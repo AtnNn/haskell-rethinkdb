@@ -48,6 +48,8 @@ import Control.Monad.State (State, get, put, runState)
 import Control.Applicative ((<$>))
 import Data.Default (Default, def)
 import qualified Data.Text as T
+import qualified Data.ByteString as SB
+import qualified Data.ByteString.Lazy as LB
 import Data.Foldable (toList)
 import Data.Time
 import Control.Monad.Fix
@@ -55,6 +57,10 @@ import Data.Int
 import Data.Monoid
 import Data.Char
 import Data.Ratio
+import Data.Word
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import {-# SOURCE #-} Database.RethinkDB.Functions as R
 import Database.RethinkDB.Wire
@@ -332,15 +338,56 @@ instance Expr ReQL where
 instance Expr Char where
   exprList = datumTerm
 
-instance Expr Int64
+instance (Expr a, Expr b) => Expr (Either a b) where
+  expr (Left a) = expr ["Left" := a]
+  expr (Right b) = expr ["Right" := b]
+
+instance Expr a => Expr (HM.HashMap [Char] a) where
+  expr = expr . map (\(k,v) -> T.pack k := v) . HM.toList
+
+instance Expr a => Expr (HM.HashMap T.Text a) where
+  expr = expr . map (uncurry (:=)) . HM.toList
+
+instance Expr a => Expr (Map.Map [Char] a) where
+  expr = expr . map (\(k,v) -> T.pack k := v) . Map.toList
+
+instance Expr a => Expr (Map.Map T.Text a) where
+  expr = expr . map (uncurry (:=)) . Map.toList
+
+instance Expr a => Expr (Maybe a) where
+  expr Nothing = expr Null
+  expr (Just a) = expr a
+
+instance Expr a => Expr (Set.Set a) where
+  expr = expr . Set.toList
+
+instance Expr a => Expr (V.Vector a) where
+  expr = expr . V.toList
+
+instance Expr Value where
+  expr v = op Term.JSON [encodeTextJSON v]
+
 instance Expr Int
 instance Expr Integer
-instance Expr T.Text
 instance Expr Bool
-instance Expr Value
 instance Expr Datum
 instance Expr Double
 instance Expr ()
+instance Expr Float
+instance Expr Int8
+instance Expr Int16
+instance Expr Int32
+instance Expr Int64
+instance Expr LT.Text
+instance Expr T.Text
+instance Expr LB.ByteString
+instance Expr SB.ByteString
+instance Expr Word
+instance Expr Word8
+instance Expr Word16
+instance Expr Word32
+instance Expr Word64
+instance Expr (Ratio Integer)
 
 instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
@@ -361,9 +408,6 @@ instance Expr Table where
 instance Expr Database where
   expr (Database name) = op DB [name]
 
-instance Expr Rational
-instance ToDatum x => Expr (V.Vector x)
-
 instance Expr a => Expr [a] where
   expr = expr . arr
 
@@ -377,7 +421,7 @@ instance (Expr k, Expr v) => Expr (M.HashMap k v) where
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
 buildTerm (Datum d)
-  | complexDatum d = buildTerm $ Term Term.JSON [Datum $ toDatum $ encodeTextJSON d] []
+  | complexDatum d = buildTerm $ Term Term.JSON [Datum $ toDatum $ encodeTextJSON $ J.toJSON d] []
   | otherwise = WireTerm $ d
 buildTerm (Term type_ args oargs) =
   WireTerm $ toDatum (
@@ -392,8 +436,8 @@ complexDatum Number{} = False
 complexDatum String{} = False
 complexDatum _ = True
 
-encodeTextJSON :: Datum -> T.Text
-encodeTextJSON = LT.toStrict . LT.toLazyText . J.encodeToTextBuilder . J.toJSON
+encodeTextJSON :: Value -> T.Text
+encodeTextJSON = LT.toStrict . LT.toLazyText . J.encodeToTextBuilder
 
 buildAttributes :: [TermAttribute] -> Datum
 buildAttributes ts = toDatum $ M.fromList $ map toPair ts

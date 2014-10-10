@@ -21,6 +21,7 @@ import qualified Data.ByteString.Lazy as LB
 import Data.Time
 import Data.Time.Clock.POSIX
 import qualified Data.Text as ST
+import qualified Data.Text.Lazy as LT
 import Data.Text.Encoding (encodeUtf8)
 import qualified Data.HashMap.Strict as HM
 import Data.Monoid
@@ -31,9 +32,12 @@ import qualified Data.ByteString.Base64 as Base64
 import Control.Applicative
 import Data.Scientific
 import Data.Int
+import Data.Word
 import qualified Data.ByteString.Char8 as Char8
 import Control.Monad
 import qualified Data.Map as Map
+import Data.Ratio
+import qualified Data.Set as Set
 
 -- | A ReQL value
 data Datum =
@@ -61,17 +65,104 @@ instance FromDatum a => FromDatum [a] where
 instance FromDatum Datum where
   parseDatum = return
 
-instance FromDatum a => FromDatum (Map.Map String a) where
-  parseDatum (Object o) = fmap Map.fromList . mapM (\(k,v) -> (,) (ST.unpack k) <$> parseDatum v) $ HM.toList o
+instance FromDatum () where
+  parseDatum (Array a) | V.null a = return ()
   parseDatum _ = mempty
 
--- TODO: populate this list
+instance (FromDatum a, FromDatum b) => FromDatum (a, b) where
+  parseDatum (Array xs) | [a,b] <- V.toList xs =
+    (,) <$> parseDatum a <*> parseDatum b
+  parseDatum _ = mempty
+
+instance (FromDatum a, FromDatum b, FromDatum c) => FromDatum (a, b, c) where
+  parseDatum (Array xs) | [a,b,c] <- V.toList xs =
+    (,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c
+  parseDatum _ = mempty
+
+instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d) => FromDatum (a, b, c, d) where
+  parseDatum (Array xs) | [a,b,c,d] <- V.toList xs =
+    (,,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c <*> parseDatum d
+  parseDatum _ = mempty
+
+instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => FromDatum (a, b, c, d, e) where
+  parseDatum (Array xs) | [a,b,c,d,e] <- V.toList xs =
+    (,,,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c <*> parseDatum d <*> parseDatum e
+  parseDatum _ = mempty
+
+instance (FromDatum a, FromDatum b) => FromDatum (Either a b) where
+  parseDatum (Object o) =
+    Left <$> o .: "Left" 
+    <|> Right <$> o .: "Right"
+  parseDatum _ = mempty
+
+instance FromDatum SB.ByteString where
+  parseDatum (Binary b) = return b
+  parseDatum _ = mempty
+
+instance FromDatum LB.ByteString where
+  parseDatum (Binary b) = return $ LB.fromStrict b
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (HM.HashMap ST.Text a) where
+  parseDatum (Object o) =
+    fmap HM.fromList . sequence . map (\(k,v) -> (,) k <$> parseDatum v) $ HM.toList o
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (HM.HashMap [Char] a) where
+  parseDatum (Object o) =
+    fmap HM.fromList . sequence . map (\(k,v) -> (,) (ST.unpack k) <$> parseDatum v) $ HM.toList o
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (Map.Map ST.Text a) where
+  parseDatum (Object o) =
+    fmap Map.fromList . mapM (\(k,v) -> (,) k <$> parseDatum v) $ HM.toList o
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (Map.Map [Char] a) where
+  parseDatum (Object o) =
+    fmap Map.fromList . mapM (\(k,v) -> (,) (ST.unpack k) <$> parseDatum v) $ HM.toList o
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (Maybe a) where
+  parseDatum Null = return Nothing
+  parseDatum d = Just <$> parseDatum d
+
+instance (Ord a, FromDatum a) => FromDatum (Set.Set a) where
+  parseDatum (Array a) = fmap Set.fromList . mapM parseDatum $ V.toList a
+  parseDatum _ = mempty
+
+instance FromDatum ZonedTime where
+  parseDatum (Time t) = return t
+  parseDatum _ = mempty
+
+instance FromDatum UTCTime where
+  parseDatum (Time t) = return $ zonedTimeToUTC t
+  parseDatum _ = mempty
+
+instance FromDatum a => FromDatum (Vector a) where  
+  parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
+  parseDatum _ = mempty
+
+instance FromDatum Float
 instance FromDatum String
 instance FromDatum Int
+instance FromDatum Int8
+instance FromDatum Int16
+instance FromDatum Int32
+instance FromDatum Int64
+instance FromDatum Word
+instance FromDatum Word8
+instance FromDatum Word16
+instance FromDatum Word32
+instance FromDatum Word64
 instance FromDatum Double
 instance FromDatum Bool
-instance FromDatum ST.Text
 instance FromDatum J.Value
+instance FromDatum Char
+instance FromDatum Integer
+instance FromDatum LT.Text
+instance FromDatum ST.Text
+instance FromDatum (Ratio Integer)
 
 type Array = Vector Datum
 type Object = HM.HashMap ST.Text Datum
@@ -151,25 +242,64 @@ instance (ToDatum a, ToDatum b, ToDatum c) => ToDatum (a, b, c) where
 instance (ToDatum a, ToDatum b, ToDatum c, ToDatum d) => ToDatum (a, b, c, d) where
   toDatum (a, b, c, d) = Array $ V.fromList [toDatum a, toDatum b, toDatum c, toDatum d]
 
+instance (ToDatum a, ToDatum b, ToDatum c, ToDatum d, ToDatum e) => ToDatum (a, b, c, d, e) where
+  toDatum (a, b, c, d, e) = Array $ V.fromList [toDatum a, toDatum b, toDatum c, toDatum d, toDatum e]
+
 instance ToDatum a => ToDatum (HM.HashMap ST.Text a) where
   toDatum = Object . HM.map toDatum
+
+instance ToDatum a => ToDatum (HM.HashMap [Char] a) where
+  toDatum = Object . HM.fromList . map (\(k, v) -> (ST.pack k, toDatum v)) . HM.toList
+
+instance ToDatum a => ToDatum (Map.Map ST.Text a) where
+  toDatum = Object . HM.fromList . Map.toList . Map.map toDatum
+
+instance ToDatum a => ToDatum (Map.Map [Char] a) where
+  toDatum = Object . HM.fromList . map (\(k, v) -> (ST.pack k, toDatum v)) . Map.toList
 
 instance ToDatum ZonedTime where
   toDatum = Time
 
 instance ToDatum UTCTime where
-  toDatum = Time . utcToZonedTime (TimeZone 0 False "Z")
+  toDatum = Time . utcToZonedTime utc
+
+instance (ToDatum a, ToDatum b) => ToDatum (Either a b) where
+  toDatum (Left a) = Object $ HM.fromList [("Left", toDatum a)]
+  toDatum (Right b) = Object $ HM.fromList [("Right", toDatum b)]
+
+instance ToDatum LB.ByteString where
+  toDatum = Binary . LB.toStrict
+
+instance ToDatum SB.ByteString where
+  toDatum = Binary
+
+instance ToDatum a => ToDatum (Maybe a) where
+  toDatum Nothing = Null
+  toDatum (Just a) = toDatum a
+
+instance ToDatum a => ToDatum (Set.Set a) where
+  toDatum = Array . V.fromList . map toDatum . Set.toList
 
 instance ToDatum Value
 instance ToDatum Int
-instance ToDatum Char
-instance ToDatum String
+instance ToDatum Int8
+instance ToDatum Int16
+instance ToDatum Int32
 instance ToDatum Int64
+instance ToDatum Word
+instance ToDatum Word8
+instance ToDatum Word16
+instance ToDatum Word32
+instance ToDatum Word64
+instance ToDatum Char
+instance ToDatum [Char]
 instance ToDatum Integer
 instance ToDatum ST.Text
+instance ToDatum LT.Text
 instance ToDatum Bool
 instance ToDatum Double
-instance ToDatum Rational
+instance ToDatum Float
+instance ToDatum (Ratio Integer)
 
 toJSONDatum :: ToJSON a => a -> Datum
 toJSONDatum a = case toJSON a of

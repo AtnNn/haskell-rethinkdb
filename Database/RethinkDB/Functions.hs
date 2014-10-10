@@ -236,7 +236,7 @@ a < b = op LT (a, b)
 
 -- | Greater than or equal to
 --
--- >>> run h $ [1] R.>= ()
+-- >>> run h $ [1] R.>= Null
 -- false
 (>=) :: (Expr a, Expr b) => a -> b -> ReQL
 a >= b = op GE (a, b)
@@ -252,7 +252,7 @@ a <= b = op LE (a, b)
 --
 -- >>> run h $ R.not False
 -- true
--- >>> run h $ R.not ()
+-- >>> run h $ R.not Null
 -- true
 not :: (Expr a) => a -> ReQL
 not a = op NOT [a]

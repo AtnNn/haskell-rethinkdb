@@ -3,7 +3,6 @@
 required_instances () {
     cat <<EOF | sort
 [a]
-[Char]
 Datum
 (a, b, c, d, e)
 (a, b, c, d)
@@ -16,35 +15,52 @@ Double
 Float
 Int
 Integer
-Data.Vector.Vector a
-Data.ByteString.ByteString
-Data.ByteString.Lazy.ByteString
-Data.Text.Text
-Data.Text.Lazy.Text
-Data.Map.Map k v
-Data.HashMap.Strict.HashMap k v
-Data.Int.Int8
-Data.Int.Int16
-Data.Int.Int32
-Data.Int.Int64
-Data.Word.Word
-Data.Word.Word8
-Data.Word.Word16
-Data.Word.Word32
-Data.Word.Word64
-Data.Time.ZonedTime
-Data.Time.UTCTime
-Data.Aeson.Value
-Ratio Integer
-Maybe a
-Data.Set.Set
-
+(Vector a)
+SB.ByteString
+LB.ByteString
+ST.Text
+LT.Text
+(Map ST.Text a)
+(Map [Char] a)
+(HashMap ST.Text a)
+(HashMap [Char] a)
+Int8
+Int16
+Int32
+Int64
+Word
+Word8
+Word16
+Word32
+Word64
+ZonedTime
+UTCTime
+Value
+(Ratio Integer)
+(Maybe a)
+(Either a b)
+(Set a)
 EOF
 
 }
 
 instances () {
     cmds="
+:load Database.RethinkDB.NoClash
+import Database.RethinkDB as R
+import Data.Vector
+import Data.Set
+import Data.ByteString as SB
+import Data.ByteString.Lazy as LB
+import Data.Text as ST
+import Data.Text.Lazy as LT
+import Data.Map
+import Data.HashMap.Strict
+import Data.Int
+import Data.Word
+import Data.Time
+import Data.Aeson
+import Data.Ratio
 :info $1
 "
     cabal repl <<< "$cmds" \
@@ -55,7 +71,7 @@ instances () {
         | sort
 }
 
-for class in Expr Result ToDatum FromDatum; do
+for class in Expr R.Result ToDatum FromDatum; do
     echo Missing $class instances:
     diff -u <(instances $class) <(required_instances) | grep '^\+[^+]' | sed 's/^+//'
 done
