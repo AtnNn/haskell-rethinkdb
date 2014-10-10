@@ -1,53 +1,58 @@
-name:                rethinkdb
-version:             1.13.0
-description:         A driver for the RethinkDB database server
-synopsis:            A driver for the RethinkDB database server
-homepage:            http://github.com/atnnn/haskell-rethinkdb
-license:             Apache
-license-file:        LICENSE
-author:              Etienne Laurin
-maintainer:          Etienne Laurin <etienne@atnnn.com>
-category:            Database
-build-type:          Simple
-cabal-version:       >=1.8
+name:                   rethinkdb
+version:                1.15.0
+cabal-version:          >=1.8
+build-type:             Simple
+license:                Apache
+license-file:           LICENSE
+maintainer:             Etienne Laurin <etienne@atnnn.com>
+homepage:               http://github.com/atnnn/haskell-rethinkdb
+synopsis:               A driver for the RethinkDB database server
+description:            A driver for the RethinkDB database server
+category:               Database
+author:                 Etienne Laurin
+data-dir:               ""
 
 source-repository head
-  type: git
-  location: https://github.com/atnnn/haskell-rethinkdb
+    type:               git
+    location:           https://github.com/atnnn/haskell-rethinkdb
 
 library
-  ghc-options: -Wall -O2
-  exposed-modules:     Database.RethinkDB
-                       Database.RethinkDB.NoClash
-                       Database.RethinkDB.Driver
-                       Database.RethinkDB.Functions
-                       Database.RethinkDB.Time
-                       Database.RethinkDB.Types
-                       Database.RethinkDB.Datum
-                       Database.RethinkDB.Geospatial
-                       Database.RethinkDB.ReQL
-                       Database.RethinkDB.Network
-                       Database.RethinkDB.MapReduce
-                       Debug
-  -- TODO: remove Debug before release
-  build-depends:       base >= 4 && < 5,
-                       unordered-containers >= 0.2 && < 0.3,
-                       text >= 0.11 && < 0.12,
-                       aeson >= 0.7 && < 0.8,
-                       bytestring >= 0.10 && < 0.11,
-                       containers >= 0.5 && < 0.6,
-                       data-default >= 0.5 && < 0.6,
-                       network >= 2.6 && < 2.7,
-                       mtl >= 2.1 && < 2.2,
-                       vector >= 0.10 && < 0.11,
-                       time >= 1.4 && < 1.5,
-                       utf8-string >= 0.3 && < 0.4,
-                       binary >= 0.5 && < 0.6,
-                       scientific >= 0.3 && < 0.4,
-                       base64-bytestring >= 1.0 && < 1.1
+    build-depends:      base >=4.7.0.1 && <4.8,
+                        unordered-containers >=0.2.4.0 && <0.3,
+                        text >=1.1.0.0 && <1.3,
+                        aeson >=0.7,
+                        bytestring >=0.10.4.0 && <0.11,
+                        containers >=0.5.5.1 && <0.6,
+                        data-default >=0.5,
+                        network >=2.4.2.3,
+                        mtl >=2.1.3.1 && <2.2,
+                        vector >=0.10.9.1 && <0.11,
+                        time >=1.4.2 && <1.5,
+                        utf8-string >=0.3,
+                        binary >=0.5,
+                        scientific >=0.3,
+                        base64-bytestring >=1.0
+    exposed-modules:    Database.RethinkDB
+                        Database.RethinkDB.NoClash
+                        Database.RethinkDB.Driver
+                        Database.RethinkDB.Functions
+                        Database.RethinkDB.Time
+                        Database.RethinkDB.Types
+                        Database.RethinkDB.Datum
+                        Database.RethinkDB.Geospatial
+                        Database.RethinkDB.ReQL
+                        Database.RethinkDB.Network
+                        Database.RethinkDB.MapReduce
+                        Debug
+    exposed:            True
+    buildable:          True
+    ghc-options:        -Wall -O2
 
 test-suite doctests
-  type:          exitcode-stdio-1.0
-  ghc-options:   -threaded
-  main-is:       doctests.hs
-  build-depends: base, doctest >= 0.9 && < 0.10
+    build-depends:      base >=4.7.0.1 && <4.8,
+                        doctest >=0.9
+    type:               exitcode-stdio-1.0
+    main-is:            doctests.hs
+    buildable:          True
+    ghc-options:        -threaded
+
