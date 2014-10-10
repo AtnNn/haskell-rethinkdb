@@ -26,6 +26,7 @@ import Database.RethinkDB.Wire.Term as Term
 import Database.RethinkDB.ReQL
 import {-# SOURCE #-} Database.RethinkDB.MapReduce
 import Database.RethinkDB.Types
+import Database.RethinkDB.Datum hiding (Error)
 
 import Prelude (($), (.))
 import qualified Prelude as P
@@ -61,6 +62,9 @@ import qualified Prelude as P
 -- >>> try' $ run' h $ delete $ table "posts"
 -- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" }
 -- >>> try' $ run' h $ delete $ table "users"
+-- >>> try' $ run' h $ table "users" # indexDrop "occupation"
+-- >>> try' $ run' h $ table "users" # indexDrop "location"
+-- >>> try' $ run' h $ table "users" # indexDrop "friends"
 
 -- | Create a table on the server
 --
@@ -123,7 +127,7 @@ forEach s f = op FOREACH (s, expr P.. f)
 -- | A table
 --
 -- >>> fmap sort $ run h $ table "users" :: IO [Datum]
--- [{"post_count":0,"name":"nancy"},{"post_count":2,"name":"bill"}]
+-- [{"post_count":2,"name":"bill"},{"post_count":0,"name":"nancy"}]
 table :: Text -> Table
 table n = Table Nothing n Nothing
 
@@ -139,7 +143,7 @@ tableDrop (Table mdb table_name _) =
 -- | List the tables in a database
 --
 -- >>> fmap sort $ run h $ tableList (db "doctests") :: IO [String]
--- ["posts","users"]
+-- ["places","posts","users"]
 tableList :: Database -> ReQL
 tableList name = op TABLE_LIST [name]
 
@@ -403,7 +407,7 @@ desc f = op DESC [f]
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
 -- >>> run' h $ table "posts" # group (!"author") (reduce (\a b -> a + "\n" + b) . R.map (!"message"))
--- [["hello\nhi","lorem ipsum"]]
+-- [{"group":"bill","reduction":"hi\nhello"},{"group":"bob","reduction":"lorem ipsum"}]
 -- >>> run' h $ table "users" # group ((!0) . splitOn "" . (!"name")) (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 -- [{"group":"b","reduction":[2,2]},{"group":"n","reduction":[0,0]}]
 group ::
@@ -473,7 +477,7 @@ s ! k = op BRACKET (s, k)
 -- >>> run' h $ empty !? "foo"
 -- null
 (!?) :: (Expr s) => s -> ReQL -> ReQL
-s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op BRACKET (s', k'), ())
+s !? k = P.flip apply [expr s, k] $ \s' k' -> op DEFAULT (op BRACKET (s', k'), Null)
 
 -- | Keep only the given attributes
 --
@@ -605,7 +609,7 @@ sync tbl = op SYNC [tbl]
 -- | List the indexes on the table
 --
 -- >>> run' h $ indexList (table "users")
--- ["occupation"]
+-- ["friends","location","occupation"]
 indexList :: Table -> ReQL
 indexList tbl = op INDEX_LIST [tbl]
 
@@ -821,7 +825,7 @@ typeOf a = op TYPEOF [a]
 -- | Get information on a given expression. Useful for tables and databases.
 --
 -- >>> run h $ info $ table "users"
--- {"primary_key":"name","name":"users","indexes":[],"type":"TABLE","db":{"name":"doctests","type":"DB"}}
+-- {"primary_key":"name","name":"users","indexes":["friends","location"],"type":"TABLE","db":{"name":"doctests","type":"DB"}}
 info :: Expr a => a -> ReQL
 info a = op INFO [a]
 
@@ -1010,7 +1014,7 @@ durability d = "durability" := d
 -- | Optional argument for non-atomic writes
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
--- *** Exception: runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
+-- *** Exception: RethinkDB: Runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
 --   in
 --     {- HERE -}
 --     update(
@@ -1033,5 +1037,3 @@ conflict cr = "conflict" := cr
 
 uuid :: ReQL
 uuid = op UUID ()
-
--- TODO: binary

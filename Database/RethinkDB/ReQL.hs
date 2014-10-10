@@ -330,7 +330,7 @@ class Expr e where
   default expr :: ToDatum e => e -> ReQL
   expr = datumTerm
   exprList :: [e] -> ReQL
-  exprList = expr
+  exprList = expr . arr
 
 instance Expr ReQL where
   expr t = t
@@ -409,7 +409,7 @@ instance Expr Database where
   expr (Database name) = op DB [name]
 
 instance Expr a => Expr [a] where
-  expr = expr . arr
+  expr = exprList
 
 instance Expr ArgList where
   expr a = op MAKE_ARRAY a
