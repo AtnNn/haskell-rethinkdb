@@ -72,7 +72,7 @@ run' = run
 -- | Convert the raw query response into useful values
 class Result r where
   convertResult :: MVar Response -> IO r
-  default convertResult :: FromDatum a => MVar Response -> IO a
+  default convertResult :: FromDatum r => MVar Response -> IO r
   convertResult = unsafeFromDatum <=< convertResult
 
 instance Result Response where
