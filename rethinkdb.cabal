@@ -11,7 +11,7 @@ description:
     A driver for the RethinkDB database server
 category: Database
 author: Etienne Laurin
- 
+
 source-repository head
     type: git
     location: https://github.com/atnnn/haskell-rethinkdb
@@ -29,7 +29,7 @@ library
         bytestring ==0.10.*,
         containers ==0.5.*,
         data-default ==0.5.*,
-        network ==2.6.*,
+        network >=2.4 && <2.6,
         mtl >=2.1 && <2.3,
         vector ==0.10.*,
         time ==1.4.*,
@@ -66,7 +66,7 @@ library
     buildable: True
     ghc-options: -Wall
     ghc-prof-options: -fprof-auto
- 
+
 test-suite doctests
     build-depends:
         base,
