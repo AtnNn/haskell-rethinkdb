@@ -16,7 +16,6 @@ import Database.RethinkDB.ReQL
 -- | The time and date when the query is executed
 --
 -- > >>> run' h $ now
--- > 2013-10-28 00:01:43.930000066757 +0000
 now :: ReQL
 now = op NOW ()
 

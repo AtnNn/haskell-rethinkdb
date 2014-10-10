@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Database.RethinkDB.Geospatial where
 
 import Database.RethinkDB.ReQL
@@ -35,6 +36,7 @@ fill l = op FILL [l]
 --
 -- >>> run' h $ geoJSON ["type" := "Point", "coordinates" := [-45,80]]
 -- Point<[-45,80]>
+
 geoJSON :: Expr geojson => geojson -> ReQL
 geoJSON g = op GEOJSON [g]
 
@@ -49,7 +51,6 @@ toGeoJSON g = op TO_GEOJSON [g]
 --
 -- >>> run' h $ table "places" # getIntersecting (point (-122) 37) (Index "geo")
 -- []
-
 getIntersecting :: (Expr geo, Expr table) => geo -> Index -> table -> ReQL
 getIntersecting g i t = op' GET_INTERSECTING (t, g) $ idx
   where idx = case i of

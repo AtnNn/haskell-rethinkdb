@@ -551,7 +551,7 @@ error m = op ERROR [m]
 -- >>> run' h $ db "test" # info
 -- {"name":"test","type":"DB"}
 db :: Text -> Database
-db s = Database s
+db = Database
 
 -- | Create a database on the server
 --

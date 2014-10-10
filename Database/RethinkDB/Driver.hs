@@ -67,7 +67,7 @@ run h = runOpts h []
 
 -- | Run a given query and return a Datum
 run' :: Expr query => RethinkDBHandle -> query -> IO Datum
-run' h t = run h t
+run' = run
 
 -- | Convert the raw query response into useful values
 class Result r where
