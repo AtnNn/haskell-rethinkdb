@@ -142,7 +142,7 @@ module Database.RethinkDB (
   
   -- * Helpers
 
-  ex, str, num, (#), note, nil, empty,
+  ex, str, num, (#), note, empty,
   def
   
   ) where

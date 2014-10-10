@@ -139,6 +139,9 @@ instance ToDatum a => ToDatum (V.Vector a) where
 instance ToDatum Datum where
   toDatum = id
 
+instance ToDatum () where
+  toDatum _ = Array $ V.empty
+
 instance (ToDatum a, ToDatum b) => ToDatum (a, b) where
   toDatum (a, b) = Array $ V.fromList [toDatum a, toDatum b]
 
@@ -151,7 +154,12 @@ instance (ToDatum a, ToDatum b, ToDatum c, ToDatum d) => ToDatum (a, b, c, d) wh
 instance ToDatum a => ToDatum (HM.HashMap ST.Text a) where
   toDatum = Object . HM.map toDatum
 
--- TODO: complete this list
+instance ToDatum ZonedTime where
+  toDatum = Time
+
+instance ToDatum UTCTime where
+  toDatum = Time . utcToZonedTime (TimeZone 0 False "Z")
+
 instance ToDatum Value
 instance ToDatum Int
 instance ToDatum Char
@@ -161,6 +169,7 @@ instance ToDatum Integer
 instance ToDatum ST.Text
 instance ToDatum Bool
 instance ToDatum Double
+instance ToDatum Rational
 
 toJSONDatum :: ToJSON a => a -> Datum
 toJSONDatum a = case toJSON a of

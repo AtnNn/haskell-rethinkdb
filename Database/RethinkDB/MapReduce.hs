@@ -154,7 +154,7 @@ thenReduce :: [Map] -> Reduce -> MRF
 thenReduce maps (BuiltInReduce _ _ _ mrf) = maps `thenMRF` mrf
 
 collect :: MRF
-collect = MRF (MapFun $ \x -> expr [x]) union (Just nil) id
+collect = MRF (MapFun $ \x -> expr [x]) union (Just (expr ())) id
 
 -- | Rewrites the term in the second argument to merge all uses of the
 -- variable whose id is given in the first argument.
@@ -245,20 +245,20 @@ mapMRF MERGE [b] [] =
   Just . MapFun $ \s -> op' MERGE [s,  wrap b] [noRecurse]
 mapMRF CONCATMAP [f] [] = Just . ConcatMapFun $ toFun1 f
 mapMRF FILTER [f] [] =
-  Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const False)) x nil
+  Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const False)) x ()
 mapMRF FILTER [f] [TermAttribute "default" defval] =
-    Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const defval)) x nil
+    Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const defval)) x ()
 mapMRF GET_FIELD [attr] [] =
   Just . ConcatMapFun $ \x ->
   branch (op' HAS_FIELDS (x, wrap attr) [noRecurse])
-  [op' GET_FIELD (x, attr) [noRecurse]] nil
+  [op' GET_FIELD (x, attr) [noRecurse]] ()
 mapMRF HAS_FIELDS sel [] =
   Just . ConcatMapFun $ \x ->
-  branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse]) [x] nil
+  branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse]) [x] ()
 mapMRF WITH_FIELDS sel [] =
   Just . ConcatMapFun $ \x ->
   branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse])
-  [op' PLUCK (x : map wrap sel) [noRecurse]] nil
+  [op' PLUCK (x : map wrap sel) [noRecurse]] ()
 mapMRF _ _ _ = Nothing
 
 -- | Convert some of the built-in operations into a map/reduce
@@ -287,7 +287,7 @@ reduceMRF MAX [sel] [] =
              (\a b -> branch (a R.! 1 R.> b R.! 1) a b)
              Nothing
              (R.! 0)
-reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> distinct (a `union` b)) (Just nil) id
+reduceMRF DISTINCT [] [] = Just $ MRF (MapFun $ \a -> expr [a]) (\a b -> distinct (a `union` b)) (Just (expr ())) id
 reduceMRF _ _ _ = Nothing
 
 -- | Convert from one representation to the other
@@ -326,7 +326,7 @@ rewritex ttype args optargs = MRF maps reduces Nothing finallys where
   getReduceFun (MRF (MapFun _) f _ _) = f
   getReduceFun (MRF (ConcatMapFun _) f _ _) =
     \a b -> flip apply [a `union` b] $ \l ->
-      branch (isEmpty l) ([] :: [()]) [reduce f l]
+      branch (isEmpty l) () [reduce f l]
   getFinallyFun (MRF (MapFun _) _ _ f) = f
   getFinallyFun (MRF (ConcatMapFun _) _ mbase f) =
     f . maybe (R.! 0) (\base s ->

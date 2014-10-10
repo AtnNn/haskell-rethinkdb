@@ -27,8 +27,7 @@ module Database.RethinkDB.ReQL (
   Bound(..),
   closedOrOpen,
   datumTerm,
-  boolToTerm,
-  nil, empty,
+  empty,
   WireQuery(..),
   WireBacktrace(..),
   note,
@@ -51,7 +50,6 @@ import Data.Default (Default, def)
 import qualified Data.Text as T
 import Data.Foldable (toList)
 import Data.Time
-import Data.Time.Clock.POSIX
 import Control.Monad.Fix
 import Data.Int
 import Data.Monoid
@@ -78,6 +76,7 @@ import Database.RethinkDB.Datum
 -- | A ReQL Term
 data ReQL = ReQL { runReQL :: State QuerySettings Term }
 
+-- | Internal representation of a ReQL Term
 data Term = Term {
   termType :: TermType,
   termArgs :: [Term],
@@ -89,8 +88,10 @@ data Term = Term {
   termTerm :: Term
   } deriving Eq
 
+-- | A term ready to be sent over the network
 newtype WireTerm = WireTerm { termJSON :: Datum }
 
+-- | State used to build a Term
 data QuerySettings = QuerySettings {
   queryToken :: Int64,
   queryDefaultDatabase :: Database,
@@ -104,7 +105,9 @@ instance Default QuerySettings where
 withQuerySettings :: (QuerySettings -> ReQL) -> ReQL
 withQuerySettings f = ReQL $ (runReQL . f) =<< get
 
+-- | An operation that accepts optional arguments
 class OptArgs a where
+  -- | Extend an operation with optional arguments
   ex :: a -> [Attribute Static] -> a
 
 instance OptArgs ReQL where
@@ -117,9 +120,6 @@ instance OptArgs ReQL where
       
 instance OptArgs b => OptArgs (a -> b) where
   ex f a = flip ex a . f
-
-boolToTerm :: Bool -> Term
-boolToTerm b = Datum $ toDatum b
 
 newVarId :: State QuerySettings Int
 newVarId = do
@@ -158,20 +158,6 @@ shortLines sep args =
 varName :: Int -> String
 varName n = replicate (q+1) (chr $ ord 'a' + r)
   where (q, r) = quotRem n 26
-
--- | Convert other types into ReQL expressions
-class Expr e where
-  expr :: e -> ReQL
-  default expr :: ToDatum e => e -> ReQL
-  expr = datumTerm
-  exprList :: [e] -> ReQL
-  exprList = expr . arr
-
-instance Expr ReQL where
-  expr t = t
-
-instance Expr Char where
-  exprList = datumTerm
 
 -- | A list of terms
 data ArgList = ArgList { baseArray :: State QuerySettings [Term] }
@@ -318,10 +304,6 @@ str = datumTerm
 num :: Double -> ReQL
 num = expr
 
-instance Expr Int64
-instance Expr Int
-instance Expr Integer
-
 instance Num ReQL where
   fromInteger = datumTerm
   a + b = op ADD (a, b)
@@ -333,14 +315,32 @@ instance Num ReQL where
                         -1 :: Double,
                         op BRANCH (op Term.EQ (n, 0 :: Double), 0 :: Double, 1 :: Double))
 
-instance Expr T.Text
-instance Expr Bool
-
-instance Expr () where
-  expr _ = ReQL $ return $ Datum $ Null
-
 instance IsString ReQL where
   fromString = datumTerm
+
+-- | Convert other types into ReQL expressions
+class Expr e where
+  expr :: e -> ReQL
+  default expr :: ToDatum e => e -> ReQL
+  expr = datumTerm
+  exprList :: [e] -> ReQL
+  exprList = expr
+
+instance Expr ReQL where
+  expr t = t
+
+instance Expr Char where
+  exprList = datumTerm
+
+instance Expr Int64
+instance Expr Int
+instance Expr Integer
+instance Expr T.Text
+instance Expr Bool
+instance Expr Value
+instance Expr Datum
+instance Expr Double
+instance Expr ()
 
 instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
@@ -361,24 +361,18 @@ instance Expr Table where
 instance Expr Database where
   expr (Database name) = op DB [name]
 
-instance Expr Value
-instance Expr Datum
-instance Expr Double
-
-instance Expr Rational where
-  expr x = expr (fromRational x :: Double)
-
-instance Expr x => Expr (V.Vector x) where
-  expr v = expr (V.toList v)
+instance Expr Rational
+instance ToDatum x => Expr (V.Vector x)
 
 instance Expr a => Expr [a] where
-  expr = exprList
+  expr = expr . arr
 
 instance Expr ArgList where
   expr a = op MAKE_ARRAY a
 
-instance Expr e => Expr (M.HashMap T.Text e) where
-  expr m = expr $ map (uncurry (:=)) $ M.toList m
+instance (Expr k, Expr v) => Expr (M.HashMap k v) where
+  expr m = expr $ map (uncurry (::=)) $ M.toList m
+
 
 buildTerm :: Term -> WireTerm
 buildTerm (Note _ t) = buildTerm t
@@ -443,19 +437,8 @@ convertBacktrace (WireBacktrace b) =
     Success a -> a
     Error _ -> []
 
-instance Expr UTCTime where
-  expr t = op EPOCH_TIME [expr . toRational $ utcTimeToPOSIXSeconds t]
-
-instance Expr ZonedTime where
-  expr (ZonedTime
-        (LocalTime
-         date
-         (TimeOfDay hour minute seconds))
-        timezone) = let
-    (year, month, day) = toGregorian date
-    in  op TIME [
-      expr year, expr month, expr day, expr hour, expr minute, expr (toRational seconds),
-      str $ timeZoneOffsetString timezone]
+instance Expr UTCTime
+instance Expr ZonedTime
 
 instance Expr Term where
   expr = ReQL . return
@@ -493,13 +476,9 @@ instance Num a => Num (Bound a) where
   signum = fmap signum
   fromInteger = DefaultBound . fromInteger
 
--- | An empty list
-nil :: ReQL
-nil = expr ([] :: [()])
-
 -- | An empty object
 empty :: ReQL
-empty = expr ([] :: [Attribute Static])
+empty = op MAKE_OBJ ()
 
 instance (Expr a, Expr b) => Expr (a, b) where
   expr (a, b) = expr [expr a, expr b]

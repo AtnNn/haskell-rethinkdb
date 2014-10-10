@@ -110,7 +110,9 @@ instance FromDatum a => Result (Map String a) where
 
 
 instance Result () where
-  convertResult _ = return ()
+  convertResult m = do
+    _ <- takeMVar m
+    return ()
 
 instance Result J.Value where
   convertResult = unsafeFromDatum <=< getSingle
