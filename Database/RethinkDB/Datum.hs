@@ -1,8 +1,6 @@
 {-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures, 
     FlexibleInstances, OverlappingInstances #-}
 
--- TODO: geo types should correctly parse as tuples and lists
-
 module Database.RethinkDB.Datum (
   parse, Parser, Result(..),
   Datum(..), ToDatum(..), FromDatum(..), fromDatum,
@@ -401,6 +399,8 @@ instance Ord Datum where
   compare _ Number{} = GT
   compare Object{} _ = LT
   compare _ Object{} = GT
+  compare Binary{} _ = LT
+  compare _ Binary{} = GT
   compare Polygon{} _ = LT
   compare _ Polygon{} = GT
   compare Line{} _ = LT
@@ -409,8 +409,6 @@ instance Ord Datum where
   compare _ Point{} = GT
   compare Time{} _ = LT
   compare _ Time{} = GT
-  compare Binary{} _ = LT -- TODO: is this the right ordering for binary
-  compare _ Binary{} = GT
 
 (.=) :: ToDatum a => ST.Text -> a -> (ST.Text, Datum)
 k .= v = (k, toDatum v)

@@ -266,7 +266,7 @@ addMBox h tok term = do
   chan <- newChan
   mbox <- newEmptyMVar
   weak <- mkWeakMVar mbox $ do
-    closeToken h tok
+    closeToken h tok -- TODO: don't close if already closed
     atomicModifyIORef' (rdbWait h) $ \mboxes ->
       (M.delete tok mboxes, ())
   atomicModifyIORef' (rdbWait h) $ \mboxes ->
