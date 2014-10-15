@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, FlexibleInstances, DefaultSignatures #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, DefaultSignatures, GADTs #-}
 
 module Database.RethinkDB.Driver (
   run,
@@ -7,8 +7,7 @@ module Database.RethinkDB.Driver (
   runOpts,
   RunFlag(..),
   WriteResponse(..),
-  Change(..),
-  getSingle
+  Change(..)
   ) where
 
 import qualified Data.Aeson as J
@@ -36,6 +35,16 @@ import Database.RethinkDB.Datum hiding (Result)
 import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL
 
+-- $setup
+--
+-- Get the doctests ready
+--
+-- >>> :load Database.RethinkDB.NoClash
+-- >>> import qualified Database.RethinkDB as R
+-- >>> :set -XOverloadedStrings
+-- >>> h <- fmap (use "doctests") $ connect "localhost" 28015 def
+
+
 -- | Per-query settings
 data RunFlag =
   UseOutdated |
@@ -62,6 +71,24 @@ runOpts h opts t = do
   convertResult r
 
 -- | Run a given query and return a Result
+--
+-- >>> run h $ num 1 :: IO Int
+-- 1
+--
+-- >>> run h $ str "foo" :: IO (Either RethinkDBError Int)
+-- Left RethinkDB: Unexpected response: "when expecting a Int, encountered String instead"
+--
+-- >>> run h $ str "foo" :: IO (Maybe Int)
+-- Nothing
+--
+-- >>> run h $ str "foo" :: IO Int
+-- *** Exception: RethinkDB: Unexpected response: "when expecting a Int, encountered String instead"
+--
+-- >>> c <- run h $ table "users" # orderBy [asc "name"] # (!"name"):: IO (Cursor Datum)
+-- >>> next c
+-- Just "bill"
+-- >>> collect c
+-- ["nancy","sabrina"]
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
@@ -91,115 +118,68 @@ unsafeFromDatum val = case fromDatum val of
 instance FromDatum a => Result [a] where
   convertResult = collect <=< convertResult
 
-instance FromDatum a => Result (Maybe a) where
+instance (FromDatum a, e ~ RethinkDBError) => Result (Either e a) where
   convertResult v = do
     r <- takeMVar v
-    case r of
-      ResponseSingle Null -> return Nothing
-      ResponseSingle a -> fmap Just $ unsafeFromDatum a
-      ResponseError e -> throwIO e
-      ResponseBatch Nothing batch -> fmap Just $ unsafeFromDatum $ toDatum batch
-      ResponseBatch (Just _more) batch -> do
-        rest <- collect' =<< convertResult v
-        fmap Just $ unsafeFromDatum $ toDatum $ batch ++ rest
+    ed <- case r of
+               ResponseSingle Null -> return $ Right Null
+               ResponseSingle a -> return $ Right a
+               ResponseError e -> return $ Left e
+               ResponseBatch Nothing batch -> return $ Right $ toDatum batch
+               ResponseBatch (Just _more) batch -> do
+                      rest <- collect' =<< convertResult v
+                      return $ Right $ toDatum $ batch ++ rest
+    case ed of
+      Left e -> return $ Left e
+      Right d -> case fromDatum d of
+        Success a -> return $ Right a
+        Error e -> return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) e []
 
-instance Result Int where
-  convertResult = unsafeFromDatum <=< getSingle
+instance FromDatum a => Result (Maybe a) where
+  convertResult v = do 
+      ed <- convertResult v
+      case ed of
+        Left _ -> return Nothing
+        Right Null -> return Nothing
+        Right d -> case fromDatum d of
+                     Success a -> return $ Just a
+                     Error _ -> return $ Nothing
 
-instance Result Double where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Bool where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result String where
-  convertResult = unsafeFromDatum <=< getSingle
+instance Result Int
+instance Result Double
+instance Result Bool
 
 instance Result () where
   convertResult m = do
     _ <- takeMVar m
     return ()
 
-instance Result J.Value where
-  convertResult = unsafeFromDatum <=< convertResult
-
-instance Result Char where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Float where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Int8 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Int16 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Int32 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Int64 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Word where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Word8 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Word16 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Word32 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Word64 where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result Integer where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result LB.ByteString where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result SB.ByteString where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result LT.Text where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result ST.Text where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result ZonedTime where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result UTCTime where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance (Ord a, FromDatum a) => Result (Set.Set a) where
-  convertResult = fmap Set.fromList . convertResult
-
-instance FromDatum a => Result (V.Vector a) where
-  convertResult = unsafeFromDatum <=< convertResult
-
-instance (FromDatum a, FromDatum b) => Result (Either a b) where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance FromDatum a => Result (HM.HashMap [Char] a) where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance FromDatum a => Result (HM.HashMap ST.Text a) where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance FromDatum a => Result (Map.Map [Char] a) where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance FromDatum a => Result (Map.Map ST.Text a) where
-  convertResult = unsafeFromDatum <=< getSingle
-
-instance Result (Ratio Integer) where
-  convertResult = unsafeFromDatum <=< getSingle
+instance Result J.Value
+instance Result Char
+instance Result Float
+instance Result Int8
+instance Result Int16
+instance Result Int32
+instance Result Int64
+instance Result Word
+instance Result Word8
+instance Result Word16
+instance Result Word32
+instance Result Word64
+instance Result Integer
+instance Result LB.ByteString
+instance Result SB.ByteString
+instance Result LT.Text
+instance Result ST.Text
+instance Result ZonedTime
+instance Result UTCTime
+instance (Ord a, FromDatum a) => Result (Set.Set a)
+instance FromDatum a => Result (V.Vector a)
+instance FromDatum a => Result (HM.HashMap [Char] a)
+instance FromDatum a => Result (HM.HashMap ST.Text a)
+instance FromDatum a => Result (Map.Map [Char] a)
+instance FromDatum a => Result (Map.Map ST.Text a)
+instance Result (Ratio Integer)
 
 nextFail :: FromDatum a => Cursor Datum -> IO a
 nextFail c = do
@@ -255,17 +235,6 @@ instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => Re
     assertEnd c
     return (a, b, c_, d, e)
 
-getSingle :: MVar Response -> IO Datum
-getSingle v = do
-    r <- takeMVar v
-    case r of
-      ResponseSingle datum -> return datum
-      ResponseError e -> throwIO e
-      ResponseBatch Nothing [datum] -> return datum
-      ResponseBatch _ batch ->
-        throwIO $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
-        ("Expected a single datum but got: " ++ show batch) []
-
 instance Result Datum where
   convertResult v = do
     r <- takeMVar v
@@ -277,8 +246,7 @@ instance Result Datum where
         rest <- collect' =<< convertResult v
         return . toDatum $ batch ++ rest
 
-instance Result WriteResponse where
-  convertResult = unsafeFromDatum <=< convertResult
+instance Result WriteResponse
 
 data WriteResponse = WriteResponse {
   writeResponseInserted :: Int,
@@ -330,8 +298,10 @@ instance Show WriteResponse where
               nothing "changes" writeResponseChanges ]) ++
             "}"
     where
+      go :: Show a => String -> a -> Maybe String
       go k v = Just $ k ++ ":" ++ show v
       zero k f = if f wr == 0 then Nothing else go k (f wr)
+      nothing :: Show a => String -> (WriteResponse -> Maybe a) -> Maybe String
       nothing k f = maybe Nothing (go k) (f wr)
 
 -- TODO: profile

@@ -160,8 +160,10 @@ instance Exception RethinkDBError
 
 instance Show RethinkDBError where
   show (RethinkDBError code term message backtrace) =
-    show code ++ ": " ++ show message ++ "\n" ++
-    indent ("in " ++ show (annotate backtrace term))
+    show code ++ ": " ++ show message ++
+    if term == Datum Null
+       then ""
+       else "\n" ++ indent ("in " ++ show (annotate backtrace term))
     where
       indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
       annotate :: Backtrace -> Term -> Term

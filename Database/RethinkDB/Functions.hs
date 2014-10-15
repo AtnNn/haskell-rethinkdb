@@ -45,14 +45,12 @@ import qualified Prelude as P
 -- >>> import Database.RethinkDB.Functions ()
 -- >>> import Database.RethinkDB ()
 -- >>> import Data.List (sort)
--- >>> import System.IO.Unsafe
 -- >>> :set -XOverloadedStrings
 -- >>> let try' x = (try x `asTypeOf` return (Left (undefined :: SomeException))) >> return ()
--- >>> h' <- unsafeInterleaveIO $ connect "localhost" 28015 def
--- >>> let h = use "doctests" h'
+-- >>> h <- fmap (use "doctests") $ connect "localhost" 28015 def
 
 -- $init_doctests
--- >>> try' $ run' h' $ dbCreate "doctests"
+-- >>> try' $ run' h $ dbCreate "doctests"
 -- >>> try' $ run' h $ tableCreate "foo"
 -- >>> try' $ run' h $ delete $ table "foo"
 -- >>> try' $ run' h $ tableCreate "bar"
