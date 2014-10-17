@@ -16,14 +16,14 @@ main = do
   let test name = bench name . nfIO . void . run' h
   let testn n name q = bench ("[" ++ show n ++ "x] " ++ name) . nfIO . (mapM_ next =<<) . sequence . replicate n $ runCursor h q
   defaultMain [
-    test "nil" $ nil,
-    testn 10 "nil" $ nil,
-    testn 100 "nil" $ nil,
+    test "nil" $ expr Null,
+    testn 10 "nil" $ expr Null,
+    testn 100 "nil" $ expr Null,
     test "point get" $ table "bench" # get (num 0)
     ]
 
 runCursor :: RethinkDBHandle -> ReQL -> IO (Cursor Datum)
-runCursor = run
+runCursor = R.run
 
 prepare :: IO RethinkDBHandle
 prepare = do
