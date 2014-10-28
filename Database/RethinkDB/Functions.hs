@@ -586,13 +586,13 @@ indexCreate name f tbl = op INDEX_CREATE (tbl, str name, f)
 --
 -- > run' h $ table "users" # indexStatus []
 indexStatus :: Expr table => [ReQL] -> table -> ReQL
-indexStatus ixes tbl = op INDEX_STATUS (tbl, ixes)
+indexStatus ixes tbl = op INDEX_STATUS (tbl, op ARGS [ixes])
 
 -- | Wait for an index to be built
 --
 -- > run' h $ table "users" # indexWait []
 indexWait :: Expr table => [ReQL] -> table -> ReQL
-indexWait ixes tbl = op INDEX_STATUS (tbl, ixes)
+indexWait ixes tbl = op INDEX_STATUS (tbl, op ARGS [ixes])
 
 indexRename :: Expr table => ReQL -> ReQL -> table -> ReQL
 indexRename from to tbl = op INDEX_RENAME (tbl, from, to)
