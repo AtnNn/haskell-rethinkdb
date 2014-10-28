@@ -14,11 +14,11 @@ main :: IO ()
 main = do
   h <- prepare
   let test name = bench name . nfIO . void . run' h
-  let testn n name q = bench ("[" ++ show n ++ "x] " ++ name) . nfIO . (mapM_ next =<<) . sequence . replicate n $ runCursor h q
+  let testn n name q = bench ("[" ++ show n ++ "x] " ++ name) . nfIO . (mapM_ next =<<) . replicateM n $ runCursor h q
   defaultMain [
     test "nil" $ expr Null,
-    testn 10 "nil" $ expr Null,
-    testn 100 "nil" $ expr Null,
+    testn 10 "nil" $ expr [Null],
+    testn 100 "nil" $ expr [Null],
     test "point get" $ table "bench" # get (num 0)
     ]
 
