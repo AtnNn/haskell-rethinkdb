@@ -4,6 +4,7 @@
 *.prof
 *.aux
 *.hp
+*.eventlog
 dist/
 \#*#
 .#*
