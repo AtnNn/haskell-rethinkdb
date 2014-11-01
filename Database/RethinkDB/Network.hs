@@ -29,18 +29,19 @@ import Data.Typeable (Typeable)
 import Network (HostName)
 import Network.Socket (
   socket, Family(AF_INET), SocketType(Stream), sClose, SockAddr(SockAddrInet), setSocketOption, SocketOption(NoDelay),
-  socketToHandle)
+  Socket)
 import qualified Network.Socket as Socket
 import Network.BSD (getProtocolNumber, getHostByName, hostAddress)
-import System.IO (Handle, hClose, hIsEOF, hSetBuffering, BufferMode(..), IOMode(ReadWriteMode))
-import Data.ByteString.Lazy (hPut, hGet, ByteString)
+import Network.Socket.ByteString.Lazy (sendAll)
+import Network.Socket.ByteString (recv)
+import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
+import qualified Data.ByteString as BS
 import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, takeMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, newChan, killThread,
   newEmptyMVar, putMVar, mkWeakMVar)
-import Data.Monoid((<>))
 import Control.Exception (catch, Exception, throwIO, SomeException(..))
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
@@ -80,7 +81,7 @@ type Token = Word64
 
 -- | A connection to the database server
 data RethinkDBHandle = RethinkDBHandle {
-  rdbHandle :: Handle,
+  rdbSocket :: Socket,
   rdbWriteLock :: MVar (Maybe SomeException),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
@@ -97,7 +98,7 @@ instance Functor Cursor where
   fmap f Cursor{ .. } = Cursor { cursorMap = fmap f . cursorMap, .. }
 
 instance Show RethinkDBHandle where
-  show RethinkDBHandle{ rdbHandle } = "RethinkDB Connection " ++ show rdbHandle
+  show RethinkDBHandle{ rdbSocket } = "RethinkDB Connection " ++ show rdbSocket
 
 newToken :: RethinkDBHandle -> IO Token
 newToken RethinkDBHandle{rdbToken} =
@@ -108,7 +109,7 @@ data RethinkDBConnectionError =
   deriving (Show, Typeable)
 instance Exception RethinkDBConnectionError
 
-connectTo :: HostName -> Word16 -> IO Handle
+connectTo :: HostName -> Word16 -> IO Socket
 connectTo host port = do
   proto <- getProtocolNumber "tcp"
   bracketOnError (socket AF_INET Stream proto) sClose $ \sock -> do
@@ -116,7 +117,7 @@ connectTo host port = do
     he <- getHostByName host
     Socket.connect sock (SockAddrInet (fromIntegral port) (hostAddress he))
     setSocketOption sock NoDelay 1
-    socketToHandle sock ReadWriteMode -- TODO: use sockets directly 
+    return sock
 
 -- | Create a new connection to the database server
 --
@@ -127,41 +128,48 @@ connectTo host port = do
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
-  h <- connectTo host (fromInteger port)
-  hSetBuffering h NoBuffering
-  hPut h $ runPut $ do
+  s <- connectTo host (fromInteger port)
+  sendAll s $ runPut $ do
     putWord32le magicNumber
     putWord32le (fromIntegral $ B.length auth)
     putLazyByteString auth
     putWord32le $ fromIntegral $ toWire Protocol.JSON
-  res <- hGetNullTerminatedString h
+  res <- sGetNullTerminatedString s
   when (res /= "SUCCESS") $ throwIO (RethinkDBConnectionError $ show res)
   r <- newIORef 1
   let db' = Database "test"
   wlock <- newMVar Nothing
   waits <- newIORef M.empty
-  let rdb = RethinkDBHandle h wlock r db' waits
+  let rdb = RethinkDBHandle s wlock r db' waits
   tid <- forkIO $ readResponses rdb
   return $ rdb tid
 
-hGetNullTerminatedString :: Handle -> IO ByteString
-hGetNullTerminatedString h = go "" where
+recvAll :: Socket -> Int -> IO ByteString
+recvAll s n_ = go [] n_ where
+  go acc 0 = return $ B.fromChunks $ reverse acc
+  go acc n = do
+    d <- recv s n
+    if BS.null d
+      then throwIO $ RethinkDBConnectionError "Connection closed unexpectedly"
+      else go (d : acc) (n - BS.length d)
+
+sGetNullTerminatedString :: Socket -> IO ByteString
+sGetNullTerminatedString s = go [] where
   go acc = do
-    end <- hIsEOF h
-    if end then return acc else do
-      c <- B.hGet h 1
-      if c == B.pack [0] then return acc else
-        go (acc <> c)
+    c <- recv s 1
+    if BS.null c || c == BS.pack [0]
+      then return (B.fromChunks (reverse acc))
+      else go (c : acc)
 
 magicNumber :: Word32
 magicNumber = fromIntegral $ toWire V0_3
 
-withHandle :: RethinkDBHandle -> (Handle -> IO a) -> IO a
-withHandle RethinkDBHandle{ rdbHandle, rdbWriteLock } f =
+withSocket :: RethinkDBHandle -> (Socket -> IO a) -> IO a
+withSocket RethinkDBHandle{ rdbSocket, rdbWriteLock } f =
   modifyMVar rdbWriteLock $ \mex ->
   case mex of
     Nothing -> do
-      a <- f rdbHandle
+      a <- f rdbSocket
       return (Nothing, a)
     Just ex -> throwIO ex
 
@@ -300,8 +308,8 @@ addMBox h tok term = do
 sendQLQuery :: RethinkDBHandle -> Token -> WireQuery -> IO ()
 sendQLQuery h tok query = do
   let queryS = encode $ queryJSON query
-  withHandle h $ \s -> do
-    hPut s $ runPut $ do
+  withSocket h $ \s -> do
+    sendAll s $ runPut $ do
       putWord64le tok
       putWord32le (fromIntegral $ B.length queryS)
       putLazyByteString queryS 
@@ -316,22 +324,22 @@ readResponses h' = do
   tid <- myThreadId
   let h = h' tid
   let handler e@SomeException{} = do
-        hClose $ rdbHandle h
+        sClose $ rdbSocket h
         modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
         writeIORef (rdbWait h) M.empty
   flip catch handler $ forever $ readSingleResponse h
 
 readSingleResponse :: RethinkDBHandle -> IO ()
 readSingleResponse h = do
-  tokenString <- hGet (rdbHandle h) 8
+  tokenString <- recvAll (rdbSocket h) 8
   when (B.length tokenString /= 8) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let token = runGet getWord64le tokenString
-  header <- hGet (rdbHandle h) 4
+  header <- recvAll (rdbSocket h) 4
   when (B.length header /= 4) $
     throwIO $ RethinkDBConnectionError "RethinkDB connection closed unexpectedly"
   let replyLength = runGet getWord32le header
-  rawResponse <- hGet (rdbHandle h) (fromIntegral replyLength)
+  rawResponse <- recvAll (rdbSocket h) (fromIntegral replyLength)
   let parsedResponse = eitherDecode rawResponse
   case parsedResponse of
     Left errMsg -> do
@@ -364,10 +372,10 @@ use db' h = h { rdbDatabase = db' }
 
 -- | Close an open connection
 close :: RethinkDBHandle -> IO ()
-close h@RethinkDBHandle{ rdbHandle, rdbThread } = do
+close h@RethinkDBHandle{ rdbSocket, rdbThread } = do
   noReplyWait h
   killThread rdbThread
-  hClose rdbHandle
+  sClose rdbSocket
 
 closeToken :: RethinkDBHandle -> Token -> IO ()
 closeToken h tok = do
