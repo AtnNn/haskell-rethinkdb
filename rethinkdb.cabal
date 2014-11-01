@@ -82,7 +82,8 @@ benchmark bench
         criterion,
         rethinkdb,
         text,
-        aeson
+        aeson,
+        async
     hs-source-dirs: bench
     type: exitcode-stdio-1.0
     main-is: Bench.hs

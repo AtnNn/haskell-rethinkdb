@@ -9,21 +9,20 @@ import Database.RethinkDB.NoClash
 import qualified Database.RethinkDB as R
 import Criterion.Main
 import Control.Monad
+import Control.Concurrent.Async
 
 main :: IO ()
 main = do
   h <- prepare
   let test name = bench name . nfIO . void . run' h
-  let testn n name q = bench ("[" ++ show n ++ "x] " ++ name) . nfIO . (mapM_ next =<<) . replicateM n $ runCursor h q
+  let testn n name q = bench (name ++ "-" ++ show n) $ nfIO $ mapM_ wait =<< replicateM n (async $ run' h q)
   defaultMain [
     test "nil" $ expr Null,
     testn 10 "nil" $ expr [Null],
     testn 100 "nil" $ expr [Null],
-    test "point get" $ table "bench" # get (num 0)
+    testn 1000 "nil" $ expr [Null],
+    test "point-get" $ table "bench" # get (num 0)
     ]
-
-runCursor :: RethinkDBHandle -> ReQL -> IO (Cursor Datum)
-runCursor = R.run
 
 prepare :: IO RethinkDBHandle
 prepare = do
