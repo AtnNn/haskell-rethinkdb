@@ -39,7 +39,7 @@ library
         base64-bytestring ==1.0.*
      
     if flag(dev)
-        exposed-modules:
+        other-modules:
             Debug
         exposed: True
         buildable: True

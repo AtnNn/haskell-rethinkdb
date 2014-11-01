@@ -26,8 +26,13 @@ module Database.RethinkDB.Network (
 
 import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
-import Network (HostName, connectTo, PortID(PortNumber))
-import System.IO (Handle, hClose, hIsEOF, hSetBuffering, BufferMode(..))
+import Network (HostName)
+import Network.Socket (
+  socket, Family(AF_INET), SocketType(Stream), sClose, SockAddr(SockAddrInet), setSocketOption, SocketOption(NoDelay),
+  socketToHandle)
+import qualified Network.Socket as Socket
+import Network.BSD (getProtocolNumber, getHostByName, hostAddress)
+import System.IO (Handle, hClose, hIsEOF, hSetBuffering, BufferMode(..), IOMode(ReadWriteMode))
 import Data.ByteString.Lazy (hPut, hGet, ByteString)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
@@ -46,8 +51,9 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
 import Data.Binary.Get (runGet, getWord32le, getWord64le)
 import Data.Binary.Put (runPut, putWord32le, putWord64le, putLazyByteString)
-import Data.Word (Word64, Word32)
+import Data.Word (Word64, Word32, Word16)
 import qualified Data.HashMap.Strict as HM
+import Control.Exception (bracketOnError)
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Response
@@ -102,6 +108,16 @@ data RethinkDBConnectionError =
   deriving (Show, Typeable)
 instance Exception RethinkDBConnectionError
 
+connectTo :: HostName -> Word16 -> IO Handle
+connectTo host port = do
+  proto <- getProtocolNumber "tcp"
+  bracketOnError (socket AF_INET Stream proto) sClose $ \sock -> do
+    -- TODO: ipv6
+    he <- getHostByName host
+    Socket.connect sock (SockAddrInet (fromIntegral port) (hostAddress he))
+    setSocketOption sock NoDelay 1
+    socketToHandle sock ReadWriteMode -- TODO: use sockets directly 
+
 -- | Create a new connection to the database server
 --
 -- /Example:/ connect using the default port with no passphrase
@@ -111,7 +127,7 @@ instance Exception RethinkDBConnectionError
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
-  h <- connectTo host (PortNumber (fromInteger port))
+  h <- connectTo host (fromInteger port)
   hSetBuffering h NoBuffering
   hPut h $ runPut $ do
     putWord32le magicNumber
