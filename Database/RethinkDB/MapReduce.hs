@@ -200,7 +200,7 @@ toMapReduce v t@(Term type' args optargs) = let
     0 -> None $ wrap t
     
     -- Don't rewrite an operation that can be chained
-    1 | (arg1 : _) <- args', notConst arg1 -> do
+    1 | (arg1 : _) <- args', notConst arg1 ->
       fromMaybe rewrite $ mrChain type' arg1 (tail args) optargs
          
     -- Default to rewriting the term
@@ -259,6 +259,8 @@ mapMRF WITH_FIELDS sel [] =
   Just . ConcatMapFun $ \x ->
   branch (op' HAS_FIELDS (x : map wrap sel) [noRecurse])
   [op' PLUCK (x : map wrap sel) [noRecurse]] ()
+mapMRF BRACKET [k] [] =
+    Just . MapFun $ \s -> op' BRACKET (s, k) [noRecurse]
 mapMRF _ _ _ = Nothing
 
 -- | Convert some of the built-in operations into a map/reduce
@@ -307,7 +309,7 @@ rewrite1 :: TermType -> [Chain] -> [(T.Text, Chain)] -> MRF
 rewrite1 ttype args optargs = MRF maps red mbase finals where
   (finally2, [mr]) = extract Nothing ttype args optargs
   MRF maps red mbase fin1 = mr
-  finals = finally2 . fin1
+  finals = finally2 . return . fin1
 
 -- | Rewrite a command that combines the result of multiple map/reduce
 -- operations into a single map/reduce operation
@@ -318,7 +320,7 @@ rewritex ttype args optargs = MRF maps reduces Nothing finallys where
   maps = MapFun $ \x -> expr $ map (($ x) . getMapFun) mrs
   reduces a b = expr $ map (uncurry $ mkReduce a b) . index $ map getReduceFun mrs
   finallys = let fs = map getFinallyFun mrs in
-       \x -> finally . expr . map (uncurry $ mkFinally x) $ index fs
+       \x -> finally . map (uncurry $ mkFinally x) $ index fs
   mkReduce a b i f = f (a!i) (b!i)
   mkFinally x i f = f (x!i)
   getMapFun (MRF (MapFun f) _ _ _) = f
@@ -337,7 +339,7 @@ rewritex ttype args optargs = MRF maps reduces Nothing finallys where
 -- the result of the given command
 extract ::
   Maybe Int -> TermType -> [Chain] -> [(Key, Chain)]
-  -> (ReQL -> ReQL, [MRF])
+  -> ([ReQL] -> ReQL, [MRF])
 extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   args' <- sequence $ map extractOne args
   optargvs' <- sequence $ map extractOne (map snd optargs)
@@ -345,11 +347,13 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   return $ \v -> op' tt (map ($ v) args') (zipWith (:=) optargks $ map ($ v) optargvs')
     where
       extractOne chain = either (return . const) go $ chainToMRF chain
+      
+      go :: MRF -> WriterT [MRF] (State (Maybe Int)) ([ReQL] -> ReQL)
       go mrf = do
         tell [mrf]
         st' <- get
         case st' of
-          Nothing -> return id
+          Nothing -> return head
           Just n -> do
             put $ Just $ n + 1
-            return $ \v -> v ! expr n
+            return $ \v -> v !! n
