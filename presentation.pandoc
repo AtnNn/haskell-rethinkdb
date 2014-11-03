@@ -49,7 +49,7 @@ TODO: tiny url
 
 ![All Routes](muni.png)
 
-## Renamed Commands
+## Compared to JavaScript
 
 `default` and `do` are keywords in Haskell.
 
@@ -124,7 +124,9 @@ table "runs"
 In JavaScript:
 
 ```javascript
-r.table("runs").map(r.row("stops").count()).sum().run(conn, callback)
+> r.table("runs").map(r.row("stops").count()).sum()
+     .run(conn).then(console.log)
+6485
 ```
 
 In Haskell:
@@ -203,19 +205,21 @@ this type.
 
 ##  Running Queries
 
-The `run` can convert the result of a query to many different types
-such as cursors, tuples or maps.
+The `run` function can convert the result of a query to many different types
+including lists, cursors, tuples or maps.
 
 ```haskell
+> run h $ table "stops" ! "display_name" :: IO [String]
+["19th Ave & Holloway Ave",
+ "Merchant Rd & Golden Gate Br.", ...]
+
 > c <- run h $
     table "stops" ! "display_name" :: IO (Cursor String)
 > next c
 Just "19th Ave & Holloway Ave"
-> next c
-Just "Merchant Rd & Golden Gate Br."
 
-> run h $
-    table "stops" ! "display_name" # sample 2 :: IO (String, String)
+> run h $ table "stops" ! "display_name"
+      # sample 2 :: IO (String, String)
 ("Geary Blvd & Laguna St","City College Bookstore")
 
 > run h $ table "stops" ! 1 :: IO (Map String Datum)
@@ -248,7 +252,7 @@ For example:
 ["Harrison St & 9th St","Folsom St & 9th St"]
 ```
 
-## Map-Reduce
+## Aggregations
 
 ```haskell
 > run h $ table "runs" # group (!"route_id") count
@@ -267,17 +271,48 @@ For example:
 ```
 
 ```haskell
-TODO: driver is broken
-> run h $ table "runs" # group (!"route_id") (avg . count . (!"stops"))
+> run h $ table "runs"
+    # group (!"route_id") (avg . R.map count . (!"stops"))
+[{"group":"1","reduction":25.25},
+ {"group":"10","reduction":66}, ...]
 ```
 
-## Cursors and Concurrency
+## Multiple Aggregations
 
-async, each
+RethinkDB itself cannot perform multiple aggregations on the same
+group. The Haskell driver circumvents this limitation, allowing
+queries like this:
 
-## Javascript
+```haskell
+> run h $ table "runs"
+    # group (!"route_id")
+      ((\x -> [avg x, R.sum x, R.max x])
+       . R.map count . (!"stops"))
+[{"group":"1","reduction":[25.25,101,49]},
+ {"group":"10","reduction":[66,132,67]}, ...]
+```
 
-js
+## Multiple Aggregations
+
+The Haskell driver rewrites multiple aggregations into a single
+aggregation. Pretty-printing the query lets us examine what it looks
+like:
+
+```haskell
+> expr $ mapReduce
+    ((\x -> [avg x, R.sum x, R.max x])
+     . R.map count . (!"stops"))
+
+(\b -> ((\g -> [div(g[0][0], g[0][1]), g[1], g[2]]))(
+  reduce(map(b, (\h -> [
+        [((\d -> count(d)))(h["stops"]), 1],
+        ((\e -> count(e)))(h["stops"]),
+        ((\f -> count(f)))(h["stops"])])),
+    (\i  j -> [
+      [add(i[0][0], j[0][0]), add(i[0][1], j[0][1])],
+      add(i[1], j[1]),
+      branch(gt(i[2], j[2]), i[2], j[2])]))))
+```
 
 ## Importing Data
 
@@ -337,7 +372,7 @@ project (LonLat lon lat) = let
   in (convert eastings, convert northings)
 ```
 
-## Visualizing Data
+## Visualising Data
 
 ```haskell
 import Diagrams.Prelude
@@ -365,14 +400,18 @@ main = do
 
 ## Benchmarks
 
-criterion
+![Criterion Benchmarks](criterion.png)
 
 ## Documentation
 
-haddock
+https://hackage.haskell.org/package/rethinkdb/
+
+![Hadock Documentation](haddocks.png)
 
 ## Questions?
 
-github
-hackage
-issues
+* IRC: Freenode #RethinkDB
+
+* Source code and Issue tracker: https://github.com/AtnNn/haskell-rethinkdb/
+
+* Downloads and documentation: https://hackage.haskell.org/package/rethinkdb/
