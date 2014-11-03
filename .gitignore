@@ -1,0 +1,17 @@
+muni.svg
+*.hi
+*.o
+*.aux
+*.dvi
+*.nav
+*.out
+.cabal-sandbox/
+
+cabal.sandbox.config
+*.log
+*.pdf
+*.snm
+*.tex
+*.toc
+*.vrb
+RenderMuni

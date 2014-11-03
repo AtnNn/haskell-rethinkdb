@@ -1,0 +1,378 @@
+% A RethinkDB driver for Haskell
+% Étienne Laurin
+% 2014-11-13
+
+## Setup
+
+```bash
+$ cabal update
+$ cabal install rethinkdb -j
+$ ghci
+```
+```haskell
+> import Database.RethinkDB.NoClash
+> import qualified Database.RethinkDB as R
+> :set -XOverloadedStrings
+> default (Datum, ReQL, Integer, String)
+
+> h <- connect "localhost" 28015 def
+> run h dbList
+["test","muni"]
+```
+
+## Download These Slides
+
+http://atnnn.github.io/haskell-driver-2014-11-13.pdf
+
+TODO: tiny url
+
+## Sample Data
+
+```haskell
+> run h $ table "routes" ! 1
+{"display_name":"18-46th Avenue","id":"18"}
+
+> run h $ table "runs" ! 1
+{"display_name":"Inbound to Fisherman's Wharf",
+"stops":["15926","14882",...],
+"direction_name":"Inbound",
+"id":"08BX_IB",
+"route_id":"8BX"}
+
+> run h $ table "stops" ! 1
+{"display_name":"Merchant Rd & Golden Gate Br.",
+"location":Point<[-122.47587,37.8066699]>,
+"id":"114776"}
+```
+
+## Rendered
+
+![All Routes](muni.png)
+
+## Renamed Commands
+
+`default` and `do` are keywords in Haskell.
+
+- `default` was renamed to `handle`
+- `do` was renamed to `apply`
+
+Almost all other operations have the same name as in the JavaScript driver:
+
+http://rethinkdb.com/api/javascript/
+
+## Different Syntax
+
+In JavaScript:
+
+```javascript
+r.expr({foo: "bar"})('foo')
+```
+
+In Haskell:
+
+```haskell
+["foo" := "bar"] ! "foo"
+```
+
+- `!` to access fields
+- `:=` to build objects
+- `expr` can usually be omitted
+
+## Function Composition
+
+In JavaScript:
+
+```javascript
+r.table("runs")
+ .map(r.row("stops").count())
+ .sum()
+```
+
+In Haskell:
+
+```haskell
+R.sum
+ . R.map (\row -> count (row!"stops"))
+ . table $ "runs"
+
+(.) :: (b -> c) -> (a -> b) -> a -> c
+R.map :: (Expr a, Expr seq) => (ReQL -> a) -> seq -> ReQL
+```
+
+## Function Composition
+
+In JavaScript:
+
+```javascript
+r.table("runs")
+ .map(r.row("stops").count())
+ .sum()
+```
+
+In Haskell:
+
+```haskell
+table "runs"
+ # R.map (\row -> (row!"stops") # count)
+ # R.sum
+
+(#) :: (Expr b, Expr a) => a -> (a -> b) -> ReQL
+```
+
+## Function Composition
+
+In JavaScript:
+
+```javascript
+r.table("runs").map(r.row("stops").count()).sum().run(conn, callback)
+```
+
+In Haskell:
+
+```haskell
+> run h $ R.sum . R.map (count . (!"stops")) $ table "runs"
+6485
+```
+
+## Types
+
+The `ReQL` type represents an operation that can be performed on the
+server.
+
+
+```haskell
+> table "routes" # get "N" # (!"display_name") :: ReQL
+get(table("routes"), "N")["display_name"]
+> run h it
+"N-Judah"
+```
+
+## Types
+
+The `Expr` typeclass can build queries from other types.
+
+```haskell
+class Expr e where
+  expr :: e -> ReQL
+
+table "routes" :: Table
+get "N" :: Expr s => s -> ReQL
+table "routes" # get "N" :: ReQL
+```
+
+## Types
+
+The `ReQL` type has a `Num`, `Fractional` and `Floating` instance,
+allowing it to overload the built-in math operators:
+
+```haskell
+count (table "routes") / 2 + 1 :: ReQL
+```
+
+But it has no `Ord` instance. There are separate comparison operators
+in the `R` namespace:
+
+```haskell
+> run h $ count (table "stops") > 3000
+Error: Could not deduce (Ord ReQL) arising from a use of ‘>’
+> run h $ count (table "stops") R.> 3000
+true
+```
+
+## Types
+
+Query results are stored in a `Datum`:
+
+```haskell
+data Datum
+  = Null
+  | Bool Bool
+  | String Text
+  | Number Double
+  | Array Array
+  | Object Object
+  | Time ZonedTime
+  | Point LonLat
+  | Line Line
+  | Polygon Polygon
+  | Binary ByteString
+```
+
+The `ToDatum` and `FromDatum` typeclasses allow converting to and from
+this type.
+
+##  Running Queries
+
+The `run` can convert the result of a query to many different types
+such as cursors, tuples or maps.
+
+```haskell
+> c <- run h $
+    table "stops" ! "display_name" :: IO (Cursor String)
+> next c
+Just "19th Ave & Holloway Ave"
+> next c
+Just "Merchant Rd & Golden Gate Br."
+
+> run h $
+    table "stops" ! "display_name" # sample 2 :: IO (String, String)
+("Geary Blvd & Laguna St","City College Bookstore")
+
+> run h $ table "stops" ! 1 :: IO (Map String Datum)
+```
+
+## Optional Arguments
+
+In JavaScript:
+
+```javascript
+r.circle([-122.411017, 37.773589], 500)
+r.circle([-122.411017, 37.773589], 500, {unit: 'm'})
+```
+
+In Haskell:
+
+```haskell
+circle [-122.411017, 37.773589] 500
+ex circle [unit Meter] [-122.411017, 37.773589] 500
+```
+
+For example:
+
+```haskell
+> let heavybit = [-122.411017, 37.773589]
+> run h $ table "stops" # R.filter (\stop ->
+      ex circle [unit Meter] heavybit 200
+      # includes (stop!"location"))
+    # R.map (!"display_name")
+["Harrison St & 9th St","Folsom St & 9th St"]
+```
+
+## Map-Reduce
+
+```haskell
+> run h $ table "runs" # group (!"route_id") count
+[{"group":"1","reduction":4},
+ {"group":"10","reduction":2}, ...]
+```
+
+```haskell
+> run h $ table "runs"
+    # group (!"route_id") count
+    # group (!"reduction") count
+[{"group":1,"reduction":1},
+ {"group":2,"reduction":76},
+ {"group":3,"reduction":1},
+ {"group":4,"reduction":3}]
+```
+
+```haskell
+TODO: driver is broken
+> run h $ table "runs" # group (!"route_id") (avg . count . (!"stops"))
+```
+
+## Cursors and Concurrency
+
+async, each
+
+## Javascript
+
+js
+
+## Importing Data
+
+```haskell
+> let api path = str . (++ path) $
+    "http://proximobus.appspot.com/agencies/sf-muni"
+> run h $ tableCreate "routes"
+> run h $ table "routes" #
+    insert (http (api "/routes.json") def ! "items")
+{"inserted":81}
+> run h $ table "routes" # ex update [nonAtomic] (\route ->
+    http (api "/routes/" + (route!"id") + ".json") def)
+{"replaced":81}
+> run h $ tableCreate "stops"
+> run h $ table "routes" ! "id" # forEach (\id ->
+    table "runs" # insert (
+    http (api "/routes/" + id + "/runs.json") def ! "items"))
+{"inserted":168}
+```
+
+## Importing Data
+
+```haskell
+> run h $ createTable "stops"
+> run h $ table "runs" # forEach (\run ->
+    flip apply [
+       http (api "/routes/" + (run!"route_id") + "/runs/"
+          + (run!"id") + "/stops.json") def ! "items"]
+    $ \stops -> expr [
+       table "runs" # get (run!"id") #
+          update (const ["stops" := stops!"id"]),
+       table "stops" # insert stops])
+{"inserted":3691}
+> run h $ table "stops" # ex update [nonAtomic] (\stop -> [
+    "latitude" := remove,
+    "longitude" := remove,
+    "location" := point (stop!"longitude") (stop!"latitude")])
+{"replaced":3691}
+```
+
+## Visualising Data
+
+```haskell
+import Geodetics.Grid
+import Geodetics.Geodetic
+import Geodetics.TransverseMercator
+
+project :: LonLat -> (Double, Double)
+project (LonLat lon lat) = let
+  gd lat lon =
+    Geodetic (lat*~degree) (lon*~degree) (0*~meter) WGS84
+  pos = gd lat lon
+  sf_sw = gd 37.614775 (-122.522278)
+  offset = GridOffset (0*~meter) (0*~meter) (0*~meter)
+  pt = toGrid (mkGridTM sf_sw offset _1) pos
+  convert f = fromRational $ toRational (f pt /~ meter)
+  in (convert eastings, convert northings)
+```
+
+## Visualizing Data
+
+```haskell
+import Diagrams.Prelude
+import Diagrams.Backend.SVG.CmdLine
+import Data.Colour.SRGB
+
+main = do
+  h <- fmap (use "muni") $ R.connect "localhost" 28015 def
+  runs <- run h $ flip R.map (table "runs") $ \run -> [
+    (\r -> expr [r!"bg_color", r!"fg_color"]) `R.apply`
+      [get (run!"route_id") (table "routes")],
+    run!"stops" # R.map (\stop ->
+      table "stops" # get stop # (!"location"))]
+
+  let lines = flip map runs $ \((bg, fg), pts) ->
+    let line = fromVertices (map (p2 . project) pts)
+    in (line # lineColor (sRGB24read fg) # lw medium) `atop`
+         (line # lineColor (sRGB24read bg) # lw thick)
+  mainWith (mconcat lines :: Diagram B R2)
+```
+
+## Rendered
+
+![All Routes](muni.png)
+
+## Benchmarks
+
+criterion
+
+## Documentation
+
+haddock
+
+## Questions?
+
+github
+hackage
+issues
