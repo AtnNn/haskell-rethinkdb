@@ -22,9 +22,9 @@ $ ghci
 
 ## Download These Slides
 
-http://atnnn.github.io/haskell-driver-2014-11-13.pdf
+http://atnnn.github.io/rethinkdb/haskell-driver-2014-11-13.pdf
 
-TODO: tiny url
+http://goo.gl/UOX4iD
 
 ## Sample Data
 
@@ -319,13 +319,16 @@ like:
 ```haskell
 > let api path = str . (++ path) $
     "http://proximobus.appspot.com/agencies/sf-muni"
+
 > run h $ tableCreate "routes"
 > run h $ table "routes" #
     insert (http (api "/routes.json") def ! "items")
 {"inserted":81}
+
 > run h $ table "routes" # ex update [nonAtomic] (\route ->
     http (api "/routes/" + (route!"id") + ".json") def)
 {"replaced":81}
+
 > run h $ tableCreate "stops"
 > run h $ table "routes" ! "id" # forEach (\id ->
     table "runs" # insert (
@@ -346,6 +349,7 @@ like:
           update (const ["stops" := stops!"id"]),
        table "stops" # insert stops])
 {"inserted":3691}
+
 > run h $ table "stops" # ex update [nonAtomic] (\stop -> [
     "latitude" := remove,
     "longitude" := remove,
@@ -406,7 +410,7 @@ main = do
 
 https://hackage.haskell.org/package/rethinkdb/
 
-![Hadock Documentation](haddocks.png)
+![Haddock Documentation](haddocks.png)
 
 ## Questions?
 
@@ -415,3 +419,7 @@ https://hackage.haskell.org/package/rethinkdb/
 * Source code and Issue tracker: https://github.com/AtnNn/haskell-rethinkdb/
 
 * Downloads and documentation: https://hackage.haskell.org/package/rethinkdb/
+
+. . .
+
+* Why are there no Monads in this presentation?
