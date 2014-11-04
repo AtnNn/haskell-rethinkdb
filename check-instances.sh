@@ -40,6 +40,7 @@ Value
 (Maybe a)
 (Either a b)
 (Set a)
+LonLat
 EOF
 
 }

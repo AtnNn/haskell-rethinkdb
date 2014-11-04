@@ -278,6 +278,11 @@ instance ToDatum a => ToDatum (Maybe a) where
 instance ToDatum a => ToDatum (Set.Set a) where
   toDatum = Array . V.fromList . map toDatum . Set.toList
 
+instance ToDatum (Ratio Integer) where
+  toDatum a = toDatum (toDouble a)
+    where toDouble :: Rational -> Double
+          toDouble = fromRational
+
 instance ToDatum Value
 instance ToDatum Int
 instance ToDatum Int8
@@ -297,7 +302,6 @@ instance ToDatum LT.Text
 instance ToDatum Bool
 instance ToDatum Double
 instance ToDatum Float
-instance ToDatum (Ratio Integer)
 
 toJSONDatum :: ToJSON a => a -> Datum
 toJSONDatum a = case toJSON a of

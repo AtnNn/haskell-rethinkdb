@@ -118,22 +118,22 @@ unsafeFromDatum val = case fromDatum val of
 instance FromDatum a => Result [a] where
   convertResult = collect <=< convertResult
 
-instance (FromDatum a, e ~ RethinkDBError) => Result (Either e a) where
+instance (FromDatum b, a ~ RethinkDBError) => Result (Either a b) where
   convertResult v = do
     r <- takeMVar v
     ed <- case r of
                ResponseSingle Null -> return $ Right Null
-               ResponseSingle a -> return $ Right a
-               ResponseError e -> return $ Left e
+               ResponseSingle b -> return $ Right b
+               ResponseError a -> return $ Left a
                ResponseBatch Nothing batch -> return $ Right $ toDatum batch
                ResponseBatch (Just _more) batch -> do
                       rest <- collect' =<< convertResult v
                       return $ Right $ toDatum $ batch ++ rest
     case ed of
-      Left e -> return $ Left e
+      Left a -> return $ Left a
       Right d -> case fromDatum d of
-        Success a -> return $ Right a
-        Error e -> return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) e []
+        Success b -> return $ Right b
+        Error a -> return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) a []
 
 instance FromDatum a => Result (Maybe a) where
   convertResult v = do 

@@ -121,16 +121,16 @@ circle p r = op CIRCLE (p, r)
 -- | Distance between a point and another geometry object
 --
 -- >>> run' h $ distance (point (-73) 40) (point (-122) 37)
--- 4233453.467303547
+-- 4233453.467303546
 -- >>> run' h $ ex distance [unit Mile] (point (-73) 40) (point (-122) 37)
--- 2630.54602825968
+-- 2630.5460282596796
 distance :: (Expr a, Expr b) => a -> b -> ReQL
 distance a b = op DISTANCE (a,b)
 
 -- | Optional argument for getNearest
 maxResults :: ReQL -> Attribute a
 maxResults n = "max_results" := n
-  
+
 -- | Optional argument for getNearest
 maxDist :: ReQL -> Attribute a
 maxDist d = "max_dist" := d
