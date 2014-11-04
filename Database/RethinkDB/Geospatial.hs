@@ -123,7 +123,7 @@ circle p r = op CIRCLE (p, r)
 -- >>> run' h $ distance (point (-73) 40) (point (-122) 37)
 -- 4233453.467303546
 -- >>> run' h $ ex distance [unit Mile] (point (-73) 40) (point (-122) 37)
--- 2630.54602825968
+-- 2630.5460282596796
 distance :: (Expr a, Expr b) => a -> b -> ReQL
 distance a b = op DISTANCE (a,b)
 
