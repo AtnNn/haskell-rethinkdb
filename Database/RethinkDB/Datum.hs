@@ -141,6 +141,10 @@ instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
   parseDatum _ = mempty
 
+instance FromDatum LonLat where
+  parseDatum (Point l) = return l
+  parseDatum _ = mempty
+
 instance FromDatum Float
 instance FromDatum String
 instance FromDatum Int
@@ -188,7 +192,7 @@ instance Eq Datum where
   _ == _ = False
 
 instance Show LonLat where
-  show (LonLat lon lat) = "[" ++ showDouble lon ++ "," ++ showDouble lat ++ "]"
+  show (LonLat lon lat) = "LonLat " ++ showDouble lon ++ " " ++ showDouble lat
 
 instance J.FromJSON LonLat where
   parseJSON v | Success [lon, lat] <- fromJSON v = return $ LonLat lon lat
@@ -203,10 +207,13 @@ instance Show Datum where
   show (Array v) = "[" ++ intercalate "," (map show $ V.toList v) ++ "]"
   show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show k ++ ":" ++ show v) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
-  show (Point p) = "Point<" ++ show p ++ ">"
-  show (Line l) = "Line<" ++ intercalate "," (map show $ V.toList l) ++ ">"
-  show (Polygon p) = "Polygon<" ++ intercalate "," (map (\x -> "[" ++ intercalate "," (map show $ V.toList x) ++ "]") (V.toList p)) ++ ">"
+  show (Point p) = "Point<" ++ showLonLat p ++ ">"
+  show (Line l) = "Line<[" ++ intercalate "],[" (map showLonLat $ V.toList l) ++ "]>"
+  show (Polygon p) = "Polygon<[" ++ intercalate "],[" (map (\x -> "[" ++ intercalate "],[" (map showLonLat $ V.toList x) ++ "]") (V.toList p)) ++ "]>"
   show (Binary b) = "Binary<" ++ show b ++ ">"
+
+showLonLat :: LonLat -> String
+showLonLat (LonLat a b) = showDouble a ++ "," ++ showDouble b
 
 showDouble :: Double -> String
 showDouble d = let s = show d in if ".0" `isSuffixOf` s then init (init s) else s
@@ -282,6 +289,9 @@ instance ToDatum (Ratio Integer) where
   toDatum a = toDatum (toDouble a)
     where toDouble :: Rational -> Double
           toDouble = fromRational
+
+instance ToDatum LonLat where
+  toDatum l = Point l
 
 instance ToDatum Value
 instance ToDatum Int

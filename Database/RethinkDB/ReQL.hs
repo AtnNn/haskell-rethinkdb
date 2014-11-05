@@ -388,6 +388,7 @@ instance Expr Word16
 instance Expr Word32
 instance Expr Word64
 instance Expr (Ratio Integer)
+instance Expr LonLat
 
 instance (a ~ ReQL) => Expr (a -> ReQL) where
   expr f = ReQL $ do
