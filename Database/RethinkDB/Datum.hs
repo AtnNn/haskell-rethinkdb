@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures, 
+{-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures,
     FlexibleInstances, OverlappingInstances #-}
 
 module Database.RethinkDB.Datum (
@@ -89,7 +89,7 @@ instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => Fr
 
 instance (FromDatum a, FromDatum b) => FromDatum (Either a b) where
   parseDatum (Object o) =
-    Left <$> o .: "Left" 
+    Left <$> o .: "Left"
     <|> Right <$> o .: "Right"
   parseDatum _ = mempty
 
@@ -137,8 +137,9 @@ instance FromDatum UTCTime where
   parseDatum (Time t) = return $ zonedTimeToUTC t
   parseDatum _ = mempty
 
-instance FromDatum a => FromDatum (Vector a) where  
+instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
+  parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . Point) $ V.toList l
   parseDatum _ = mempty
 
 instance FromDatum LonLat where
@@ -335,7 +336,7 @@ toJSONDatum a = case toJSON a of
       Just "BINARY" |
         Just (J.String b64) <- HM.lookup "data" o,
         Right dat <- Base64.decode (encodeUtf8 b64) ->
-         Binary dat 
+         Binary dat
       _ -> asObject
   J.Null -> Null
   J.Bool b -> Bool b
@@ -372,11 +373,11 @@ instance ToJSON Datum where
   toJSON (Binary b) = J.object [
     "$reql_type$" J..= ("BINARY" :: ST.Text),
     "data" J..= Char8.unpack (Base64.encode b)]
-  
+
 
 parseTimeZone :: String -> Maybe TimeZone
 parseTimeZone "Z" = Just utc
-parseTimeZone tz = minutesToTimeZone <$> case tz of 
+parseTimeZone tz = minutesToTimeZone <$> case tz of
   ('-':tz') -> negate <$> go tz'
   ('+':tz') -> go tz'
   _ -> go tz
