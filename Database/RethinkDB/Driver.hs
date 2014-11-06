@@ -180,6 +180,7 @@ instance FromDatum a => Result (HM.HashMap ST.Text a)
 instance FromDatum a => Result (Map.Map [Char] a)
 instance FromDatum a => Result (Map.Map ST.Text a)
 instance Result (Ratio Integer)
+instance Result LonLat
 
 nextFail :: FromDatum a => Cursor Datum -> IO a
 nextFail c = do

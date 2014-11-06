@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures, 
+{-# LANGUAGE OverloadedStrings, PatternGuards, DefaultSignatures,
     FlexibleInstances, OverlappingInstances #-}
 
 module Database.RethinkDB.Datum (
@@ -89,7 +89,7 @@ instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => Fr
 
 instance (FromDatum a, FromDatum b) => FromDatum (Either a b) where
   parseDatum (Object o) =
-    Left <$> o .: "Left" 
+    Left <$> o .: "Left"
     <|> Right <$> o .: "Right"
   parseDatum _ = mempty
 
@@ -137,8 +137,15 @@ instance FromDatum UTCTime where
   parseDatum (Time t) = return $ zonedTimeToUTC t
   parseDatum _ = mempty
 
-instance FromDatum a => FromDatum (Vector a) where  
+-- TODO: This instance breaks (fmap toDatum . fromDatum) == return
+instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
+  parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList l
+  parseDatum (Polygon p) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList p
+  parseDatum _ = mempty
+
+instance FromDatum LonLat where
+  parseDatum (Point l) = return l
   parseDatum _ = mempty
 
 instance FromDatum Float
@@ -188,7 +195,7 @@ instance Eq Datum where
   _ == _ = False
 
 instance Show LonLat where
-  show (LonLat lon lat) = "[" ++ showDouble lon ++ "," ++ showDouble lat ++ "]"
+  show (LonLat lon lat) = "LonLat " ++ showDouble lon ++ " " ++ showDouble lat
 
 instance J.FromJSON LonLat where
   parseJSON v | Success [lon, lat] <- fromJSON v = return $ LonLat lon lat
@@ -203,10 +210,13 @@ instance Show Datum where
   show (Array v) = "[" ++ intercalate "," (map show $ V.toList v) ++ "]"
   show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show k ++ ":" ++ show v) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
-  show (Point p) = "Point<" ++ show p ++ ">"
-  show (Line l) = "Line<" ++ intercalate "," (map show $ V.toList l) ++ ">"
-  show (Polygon p) = "Polygon<" ++ intercalate "," (map (\x -> "[" ++ intercalate "," (map show $ V.toList x) ++ "]") (V.toList p)) ++ ">"
+  show (Point p) = "Point<" ++ showLonLat p ++ ">"
+  show (Line l) = "Line<[" ++ intercalate "],[" (map showLonLat $ V.toList l) ++ "]>"
+  show (Polygon p) = "Polygon<[" ++ intercalate "],[" (map (\x -> "[" ++ intercalate "],[" (map showLonLat $ V.toList x) ++ "]") (V.toList p)) ++ "]>"
   show (Binary b) = "Binary<" ++ show b ++ ">"
+
+showLonLat :: LonLat -> String
+showLonLat (LonLat a b) = showDouble a ++ "," ++ showDouble b
 
 showDouble :: Double -> String
 showDouble d = let s = show d in if ".0" `isSuffixOf` s then init (init s) else s
@@ -283,6 +293,9 @@ instance ToDatum (Ratio Integer) where
     where toDouble :: Rational -> Double
           toDouble = fromRational
 
+instance ToDatum LonLat where
+  toDatum l = Point l
+
 instance ToDatum Value
 instance ToDatum Int
 instance ToDatum Int8
@@ -325,7 +338,7 @@ toJSONDatum a = case toJSON a of
       Just "BINARY" |
         Just (J.String b64) <- HM.lookup "data" o,
         Right dat <- Base64.decode (encodeUtf8 b64) ->
-         Binary dat 
+         Binary dat
       _ -> asObject
   J.Null -> Null
   J.Bool b -> Bool b
@@ -362,11 +375,11 @@ instance ToJSON Datum where
   toJSON (Binary b) = J.object [
     "$reql_type$" J..= ("BINARY" :: ST.Text),
     "data" J..= Char8.unpack (Base64.encode b)]
-  
+
 
 parseTimeZone :: String -> Maybe TimeZone
 parseTimeZone "Z" = Just utc
-parseTimeZone tz = minutesToTimeZone <$> case tz of 
+parseTimeZone tz = minutesToTimeZone <$> case tz of
   ('-':tz') -> negate <$> go tz'
   ('+':tz') -> go tz'
   _ -> go tz
