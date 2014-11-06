@@ -12,6 +12,7 @@ module Database.RethinkDB.Datum (
   ) where
 
 import qualified Data.Aeson as J
+import qualified Data.Aeson.Types as J
 import Data.Aeson.Types (Parser, Result(..), FromJSON(..), parse, ToJSON(..), Value)
 import Data.Aeson (fromJSON)
 import qualified Data.ByteString as SB
@@ -56,70 +57,73 @@ class FromDatum a where
   default parseDatum :: FromJSON a => Datum -> Parser a
   parseDatum = parseJSON . toJSON
 
+errorExpected :: Show d => String -> d -> J.Parser x
+errorExpected t d = fail $ "Expected " ++ t ++ " but found " ++ take 100 (show d)
+
 instance FromDatum a => FromDatum [a] where
   parseDatum (Array v) = mapM parseDatum $ V.toList v
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance FromDatum Datum where
   parseDatum = return
 
 instance FromDatum () where
   parseDatum (Array a) | V.null a = return ()
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance (FromDatum a, FromDatum b) => FromDatum (a, b) where
   parseDatum (Array xs) | [a,b] <- V.toList xs =
     (,) <$> parseDatum a <*> parseDatum b
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance (FromDatum a, FromDatum b, FromDatum c) => FromDatum (a, b, c) where
   parseDatum (Array xs) | [a,b,c] <- V.toList xs =
     (,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d) => FromDatum (a, b, c, d) where
   parseDatum (Array xs) | [a,b,c,d] <- V.toList xs =
     (,,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c <*> parseDatum d
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => FromDatum (a, b, c, d, e) where
   parseDatum (Array xs) | [a,b,c,d,e] <- V.toList xs =
     (,,,,) <$> parseDatum a <*> parseDatum b <*> parseDatum c <*> parseDatum d <*> parseDatum e
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance (FromDatum a, FromDatum b) => FromDatum (Either a b) where
   parseDatum (Object o) =
     Left <$> o .: "Left"
     <|> Right <$> o .: "Right"
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Object" d
 
 instance FromDatum SB.ByteString where
   parseDatum (Binary b) = return b
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Binary" d
 
 instance FromDatum LB.ByteString where
   parseDatum (Binary b) = return $ LB.fromStrict b
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Binary" d
 
 instance FromDatum a => FromDatum (HM.HashMap ST.Text a) where
   parseDatum (Object o) =
     fmap HM.fromList . sequence . map (\(k,v) -> (,) k <$> parseDatum v) $ HM.toList o
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Object" d
 
 instance FromDatum a => FromDatum (HM.HashMap [Char] a) where
   parseDatum (Object o) =
     fmap HM.fromList . sequence . map (\(k,v) -> (,) (ST.unpack k) <$> parseDatum v) $ HM.toList o
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Object" d
 
 instance FromDatum a => FromDatum (Map.Map ST.Text a) where
   parseDatum (Object o) =
     fmap Map.fromList . mapM (\(k,v) -> (,) k <$> parseDatum v) $ HM.toList o
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Object" d
 
 instance FromDatum a => FromDatum (Map.Map [Char] a) where
   parseDatum (Object o) =
     fmap Map.fromList . mapM (\(k,v) -> (,) (ST.unpack k) <$> parseDatum v) $ HM.toList o
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Object" d
 
 instance FromDatum a => FromDatum (Maybe a) where
   parseDatum Null = return Nothing
@@ -127,26 +131,26 @@ instance FromDatum a => FromDatum (Maybe a) where
 
 instance (Ord a, FromDatum a) => FromDatum (Set.Set a) where
   parseDatum (Array a) = fmap Set.fromList . mapM parseDatum $ V.toList a
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array" d
 
 instance FromDatum ZonedTime where
   parseDatum (Time t) = return t
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Time" d
 
 instance FromDatum UTCTime where
   parseDatum (Time t) = return $ zonedTimeToUTC t
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Time" d
 
 -- TODO: This instance breaks (fmap toDatum . fromDatum) == return
 instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
   parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList l
   parseDatum (Polygon p) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList p
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Array, Line or Polygon" d
 
 instance FromDatum LonLat where
   parseDatum (Point l) = return l
-  parseDatum _ = mempty
+  parseDatum d = errorExpected "Point" d
 
 instance FromDatum Float
 instance FromDatum String
@@ -177,9 +181,6 @@ type Polygon = Vector (Vector LonLat)
 data LonLat = LonLat { longitude, latitude :: Double }
             deriving (Eq, Ord)
 
-instance ToJSON LonLat where
-  toJSON (LonLat a b) = toJSON [a, b]
-
 instance Eq Datum where
   Null == Null = True
   Bool a == Bool b = a == b
@@ -196,10 +197,6 @@ instance Eq Datum where
 
 instance Show LonLat where
   show (LonLat lon lat) = "LonLat " ++ showDouble lon ++ " " ++ showDouble lat
-
-instance J.FromJSON LonLat where
-  parseJSON v | Success [lon, lat] <- fromJSON v = return $ LonLat lon lat
-  parseJSON _ = mempty
 
 instance Show Datum where
   show Null = "null"
@@ -326,9 +323,9 @@ toJSONDatum a = case toJSON a of
         Just t <- HM.lookup "type" o,
         Just c <- HM.lookup "coordinates" o ->
           case t of
-            "Point" | Success p <- fromJSON c -> Point p
-            "LineString" | Success l <- fromJSON c -> Line l
-            "Polygon" | Success p <- fromJSON c -> Polygon p
+            "Point" | Success [lon, lat] <- fromJSON c -> Point (LonLat lon lat)
+            "LineString" | Success l <- V.mapM toLonLat =<< fromJSON c -> Line l
+            "Polygon" | Success p <- V.mapM (V.mapM toLonLat) =<< fromJSON c -> Polygon p
             _ -> asObject
       Just "TIME" |
         Just (J.Number ts) <- HM.lookup "epoch_time" o,
@@ -345,7 +342,9 @@ toJSONDatum a = case toJSON a of
   J.Number s -> Number (toRealFloat s)
   J.String t -> String t
   J.Array v -> Array (fmap toJSONDatum v)
-
+  where 
+    toLonLat [lon, lat] = J.Success $ LonLat lon lat
+    toLonLat _ = J.Error "expected a pair"
 instance J.FromJSON Datum where
   parseJSON = return . toJSONDatum
 
@@ -363,19 +362,21 @@ instance ToJSON Datum where
   toJSON (Point p) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
     "type" J..= ("Point" :: ST.Text),
-    "coordinates" J..= toJSON p]
+    "coordinates" J..= pointToPair p]
   toJSON (Line l) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
     "type" J..= ("LineString" :: ST.Text),
-    "coordinates" J..= toJSON l]
+    "coordinates" J..= V.map pointToPair l]
   toJSON (Polygon p) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
     "type" J..= ("Polygon" :: ST.Text),
-    "coordinates" J..= toJSON p]
+    "coordinates" J..= V.map (V.map pointToPair) p]
   toJSON (Binary b) = J.object [
     "$reql_type$" J..= ("BINARY" :: ST.Text),
     "data" J..= Char8.unpack (Base64.encode b)]
 
+pointToPair :: LonLat -> (Double, Double)
+pointToPair (LonLat lon lat) = (lon, lat)
 
 parseTimeZone :: String -> Maybe TimeZone
 parseTimeZone "Z" = Just utc
@@ -431,7 +432,7 @@ instance Ord Datum where
 k .= v = (k, toDatum v)
 
 (.:) :: FromDatum a => HM.HashMap ST.Text Datum -> ST.Text -> Parser a
-o .: k = maybe mempty parseDatum $ HM.lookup k o
+o .: k = maybe (fail $ "key " ++ show k ++ "not found") parseDatum $ HM.lookup k o
 
 (.:?) :: FromDatum a => HM.HashMap ST.Text Datum -> ST.Text -> Parser (Maybe a)
 o .:? k = maybe (return Nothing) (fmap Just . parseDatum) $ HM.lookup k o
