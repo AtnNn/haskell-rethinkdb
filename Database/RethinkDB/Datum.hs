@@ -137,9 +137,11 @@ instance FromDatum UTCTime where
   parseDatum (Time t) = return $ zonedTimeToUTC t
   parseDatum _ = mempty
 
+-- TODO: This instance breaks (fmap toDatum . fromDatum) == return
 instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
-  parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . Point) $ V.toList l
+  parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList l
+  parseDatum (Polygon p) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList p
   parseDatum _ = mempty
 
 instance FromDatum LonLat where
