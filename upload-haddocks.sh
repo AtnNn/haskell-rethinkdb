@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -xeu
+
 package=rethinkdb
 version=`grep '^version: ' $package.cabal | cut -f 2 -d ' '`
 
@@ -12,6 +14,6 @@ cd dist/doc/html
 
 cp -R $package $package-$version-docs
 
-tar cvz --format=ustar -f $package-$version-docs.tar.gz $package-$version-docs
+tar cz --format=ustar -f $package-$version-docs.tar.gz $package-$version-docs
 
-curl -X PUT -H Content-Type: application/x-tar -H Content-Encoding: gzip -u $user --data-binary @$package-$version-docs.tar.gz https://hackage.haskell.org/package/$package/docs
+curl -X PUT -H 'Content-Type: application/x-tar' -H 'Content-Encoding: gzip' -u $user --data-binary @$package-$version-docs.tar.gz https://hackage.haskell.org/package/$package-$version/docs
