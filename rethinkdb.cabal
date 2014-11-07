@@ -10,7 +10,7 @@ synopsis: A driver for RethinkDB 1.15
 description:
     A driver for the RethinkDB database server
 category: Database
-author: Etienne Laurin
+author: Etienne Laurin, Brandon Martin
 
 source-repository head
     type: git
