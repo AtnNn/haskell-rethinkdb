@@ -35,7 +35,7 @@ fill l = op FILL [l]
 -- | Convert a GeoJSON object into a RethinkDB geometry object
 --
 -- >>> run' h $ geoJSON ["type" := "Point", "coordinates" := [-45,80]]
--- Point<[-45,80]>
+-- Point<-45,80>
 
 geoJSON :: Expr geojson => geojson -> ReQL
 geoJSON g = op GEOJSON [g]
@@ -93,7 +93,7 @@ line p = op LINE [op ARGS [p]]
 -- | Create a point objects
 --
 -- >>> run' h $ point (-73) 40
--- Point<[-73,40]>
+-- Point<-73,40>
 point :: (Expr longitude, Expr latitude) => longitude -> latitude -> ReQL
 point lon lat = op POINT (lon, lat)
 
