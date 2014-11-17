@@ -58,6 +58,8 @@ import qualified Prelude as P
 -- >>> try' $ run' h $ tableDrop "bar"
 -- >>> try' $ run' h $ tableCreate (table "posts")
 -- >>> try' $ run' h $ delete $ table "posts"
+-- >>> try' $ run' h $ tableCreate (table "places")
+-- >>> try' $ run' h $ delete $ table "places"
 -- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" }
 -- >>> try' $ run' h $ delete $ table "users"
 -- >>> try' $ run' h $ table "users" # indexDrop "occupation"
@@ -404,7 +406,7 @@ desc f = op DESC [f]
 
 -- | Turn a grouping function and a reduction function into a grouped map reduce operation
 --
--- >>> run' h $ table "posts" # group (!"author") (reduce (\a b -> a + "\n" + b) . R.map (!"message"))
+-- >>> run' h $ table "posts" # orderBy [asc "id"] # group (!"author") (reduce (\a b -> a + "\n" + b) . R.map (!"message"))
 -- [{"group":"bill","reduction":"hi\nhello"},{"group":"bob","reduction":"lorem ipsum"}]
 -- >>> run' h $ table "users" # group ((!0) . splitOn "" . (!"name")) (\users -> let pc = users!"post_count" in [avg pc, R.sum pc])
 -- [{"group":"b","reduction":[2,2]},{"group":"n","reduction":[0,0]}]

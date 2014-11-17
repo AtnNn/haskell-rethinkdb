@@ -1,5 +1,7 @@
 # RethinkDB Haskell Driver #
 
+[![Build Status](https://travis-ci.org/AtnNn/haskell-rethinkdb.svg?branch=master)](https://travis-ci.org/AtnNn/haskell-rethinkdb)
+
 This driver targets versions 1.15 of [RethinkDB](http://rethinkdb.com).
 
 API Documentation:
