@@ -28,10 +28,10 @@ import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName)
 import Network.Socket (
-  socket, Family(AF_INET), SocketType(Stream), sClose, SockAddr(SockAddrInet), setSocketOption, SocketOption(NoDelay),
-  Socket)
+  socket, Family(AF_INET, AF_INET6), SocketType(Stream), sClose, setSocketOption, SocketOption(NoDelay),
+  Socket, AddrInfo(AddrInfo, addrAddress, addrFamily))
 import qualified Network.Socket as Socket
-import Network.BSD (getProtocolNumber, getHostByName, hostAddress)
+import Network.BSD (getProtocolNumber)
 import Network.Socket.ByteString.Lazy (sendAll)
 import Network.Socket.ByteString (recv)
 import Data.ByteString.Lazy (ByteString)
@@ -42,7 +42,7 @@ import Control.Concurrent (
   writeChan, MVar, Chan, modifyMVar, takeMVar, forkIO, readChan,
   myThreadId, newMVar, ThreadId, newChan, killThread,
   newEmptyMVar, putMVar, mkWeakMVar)
-import Control.Exception (catch, Exception, throwIO, SomeException(..))
+import Control.Exception (catch, Exception, throwIO, SomeException(..), bracketOnError)
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -52,9 +52,8 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Mem.Weak (finalize)
 import Data.Binary.Get (runGet, getWord32le, getWord64le)
 import Data.Binary.Put (runPut, putWord32le, putWord64le, putLazyByteString)
-import Data.Word (Word64, Word32, Word16)
+import Data.Word (Word64, Word32)
 import qualified Data.HashMap.Strict as HM
-import Control.Exception (bracketOnError)
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Response
@@ -109,26 +108,33 @@ data RethinkDBConnectionError =
   deriving (Show, Typeable)
 instance Exception RethinkDBConnectionError
 
-connectTo :: HostName -> Word16 -> IO Socket
+getAddrFamily :: AddrInfo -> Family
+getAddrFamily addrInfo = case addrInfo of
+    AddrInfo { addrFamily = AF_INET6 } -> AF_INET6
+    _                                  -> AF_INET
+
+connectTo :: HostName -> Integer -> IO Socket
 connectTo host port = do
+  h <- Socket.getAddrInfo Nothing (Just host) (Just $ show port)
+  let addrI = head h
+  let addrF = getAddrFamily addrI
   proto <- getProtocolNumber "tcp"
-  bracketOnError (socket AF_INET Stream proto) sClose $ \sock -> do
-    -- TODO: ipv6
-    he <- getHostByName host
-    Socket.connect sock (SockAddrInet (fromIntegral port) (hostAddress he))
+  bracketOnError (socket addrF Stream proto) sClose $ \sock -> do
+    Socket.connect sock (addrAddress addrI)
     setSocketOption sock NoDelay 1
     return sock
 
 -- | Create a new connection to the database server
 --
--- /Example:/ connect using the default port with no passphrase
+-- /Example:/ connect using the default port with no passphrase (/note:/ IPv4 and IPv6 supported)
 --
 -- >>> h <- connect "localhost" 28015 Nothing
+-- >>> h <- connect "::1" 28015 Nothing
 
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
   let auth = B.fromChunks . return . BS.fromString $ fromMaybe "" mauth
-  s <- connectTo host (fromInteger port)
+  s <- connectTo host port
   sendAll s $ runPut $ do
     putWord32le magicNumber
     putWord32le (fromIntegral $ B.length auth)

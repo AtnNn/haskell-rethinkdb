@@ -1,7 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- TODO: find the cause of the bad performance reported by these benchmarks
-
 module Main where
 
 import Control.Exception
