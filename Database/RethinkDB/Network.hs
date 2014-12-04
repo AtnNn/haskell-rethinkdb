@@ -16,6 +16,7 @@ module Database.RethinkDB.Network (
   collect',
   nextResponse,
   Response(..),
+  Profile,
   ErrorCode(..),
   RethinkDBError(..),
   RethinkDBConnectionError(..),
@@ -28,7 +29,8 @@ import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName)
 import Network.Socket (
-  socket, Family(AF_INET), SocketType(Stream), sClose, SockAddr(SockAddrInet), setSocketOption, SocketOption(NoDelay),
+  socket, Family(AF_INET), SocketType(Stream), sClose,
+  SockAddr(SockAddrInet), setSocketOption, SocketOption(NoDelay),
   Socket)
 import qualified Network.Socket as Socket
 import Network.BSD (getProtocolNumber, getHostByName, hostAddress)
@@ -38,11 +40,11 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.UTF8 as BS (fromString)
 import qualified Data.ByteString as BS
+import Control.Applicative ((<$>), (<*>))
 import Control.Concurrent (
-  writeChan, MVar, Chan, modifyMVar, takeMVar, forkIO, readChan,
-  myThreadId, newMVar, ThreadId, newChan, killThread,
-  newEmptyMVar, putMVar, mkWeakMVar)
-import Control.Exception (catch, Exception, throwIO, SomeException(..))
+  writeChan, Chan, forkIO, readChan, myThreadId, ThreadId, newChan, killThread,
+  MVar, newMVar, modifyMVar, newEmptyMVar, putMVar, mkWeakMVar, takeMVar, tryTakeMVar)
+import Control.Exception (catch, Exception, throwIO, SomeException(..), bracketOnError)
 import Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, writeIORef)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -54,7 +56,6 @@ import Data.Binary.Get (runGet, getWord32le, getWord64le)
 import Data.Binary.Put (runPut, putWord32le, putWord64le, putLazyByteString)
 import Data.Word (Word64, Word32, Word16)
 import qualified Data.HashMap.Strict as HM
-import Control.Exception (bracketOnError)
 
 import Database.RethinkDB.Wire
 import Database.RethinkDB.Wire.Response
@@ -85,12 +86,13 @@ data RethinkDBHandle = RethinkDBHandle {
   rdbWriteLock :: MVar (Maybe SomeException),
   rdbToken :: IORef Token, -- ^ The next token to use
   rdbDatabase :: Database,  -- ^ The default database
-  rdbWait :: IORef (Map Token (Chan Response, Term, IO ())),
+  rdbWait :: IORef (Map Token (Chan (Response, Maybe Profile), Term, IO ())),
   rdbThread :: ThreadId
   }
 
 data Cursor a = Cursor {
   cursorMBox :: MVar Response,
+  cursorPBox :: MVar (Maybe Profile),
   cursorBuffer :: MVar (Either RethinkDBError ([Datum], Bool)),
   cursorMap :: Datum -> IO a }
 
@@ -189,7 +191,7 @@ instance Show RethinkDBError where
        then ""
        else "\n" ++ indent ("in " ++ show (annotate backtrace term))
     where
-      indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
+      indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines
       annotate :: Backtrace -> Term -> Term
       annotate (x : xs) t | Just new <- inside x t (annotate xs) = new
       annotate _ t = Note "HERE" t
@@ -206,15 +208,16 @@ instance Show RethinkDBError where
           Nothing -> Nothing
           Just (a,b,c) -> Just (x:a,b,c)
 
--- | The response to a query
 data Response =
   ResponseError RethinkDBError |
   ResponseSingle Datum |
   ResponseBatch (Maybe More) [Datum]
 
+type Profile = Datum
+
 data More = More {
   _moreFeed :: Bool,
-  _moreHandle :: RethinkDBHandle, 
+  _moreHandle :: RethinkDBHandle,
   _moreToken :: Token
   }
 
@@ -240,13 +243,14 @@ instance Show Response where
 
 newtype WireResponse = WireResponse { _responseDatum :: Datum }
 
-convertResponse :: RethinkDBHandle -> Term -> Token -> WireResponse -> Response
+convertResponse :: RethinkDBHandle -> Term -> Token -> WireResponse -> (Response, Maybe Profile)
 convertResponse h q t (WireResponse (Object o)) = let
   type_    = o .? "t" >>= fromWire
   results :: Maybe [Datum]
   results  = o .? "r"
   bt       = o .? "b" --> maybe [] (convertBacktrace . WireBacktrace)
-  -- _profile = o .? "p" -- TODO
+  profile :: Maybe Datum
+  profile = o .? "p"
   atom :: Maybe Datum
   atom     = case results of Just [single] -> Just single; _ -> Nothing
   m .? k   = HM.lookup k m >>= resultToMaybe . fromDatum
@@ -255,30 +259,33 @@ convertResponse h q t (WireResponse (Object o)) = let
   _ <!< Nothing = ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
   f <!< (Just a) = f a
   in case type_ of
-  Just SUCCESS_ATOM -> ResponseSingle <!< atom
-  Just SUCCESS_PARTIAL -> ResponseBatch (Just $ More False h t) <!< results
-  Just SUCCESS_FEED -> ResponseBatch (Just $ More True h t) <!< results
-  Just SUCCESS_SEQUENCE -> ResponseBatch Nothing <!< results
-  Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
-  Just COMPILE_ERROR -> ResponseError $ RethinkDBError ErrorBadQuery q e bt
-  Just RUNTIME_ERROR -> ResponseError $ RethinkDBError ErrorRuntime q e bt
-  Just WAIT_COMPLETE -> ResponseSingle (toDatum True)
-  Nothing -> ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt
+  Just SUCCESS_ATOM -> (ResponseSingle <!< atom, profile)
+  Just SUCCESS_PARTIAL -> (ResponseBatch (Just $ More False h t) <!< results, profile)
+  Just SUCCESS_FEED -> (ResponseBatch (Just $ More True h t) <!< results, profile)
+  Just SUCCESS_SEQUENCE -> (ResponseBatch Nothing <!< results, profile)
+  Just CLIENT_ERROR -> (ResponseError $ RethinkDBError ErrorBrokenClient q e bt, Nothing)
+  Just COMPILE_ERROR -> (ResponseError $ RethinkDBError ErrorBadQuery q e bt, Nothing)
+  Just RUNTIME_ERROR -> (ResponseError $ RethinkDBError ErrorRuntime q e bt, Nothing)
+  Just WAIT_COMPLETE -> (ResponseSingle (toDatum True), profile)
+  Nothing -> (ResponseError $ RethinkDBError ErrorUnexpectedResponse q e bt, Nothing)
 
 convertResponse _ q _ (WireResponse json) =
-  ResponseError $
-  RethinkDBError ErrorUnexpectedResponse q ("Response is not a JSON object: " ++ show json) []
+  (ResponseError $
+  RethinkDBError ErrorUnexpectedResponse q ("Response is not a JSON object: " ++ show json) [],
+  Nothing)
 
-runQLQuery :: RethinkDBHandle -> WireQuery -> Term -> IO (MVar Response)
+runQLQuery :: RethinkDBHandle -> WireQuery -> Term -> IO (MVar Response, MVar (Maybe Profile))
 runQLQuery h query term = do
   tok <- newToken h
   let noReply = isNoReplyQuery query
-  mbox <- if noReply
-          then newEmptyMVar
-          else addMBox h tok term
+  (mbox, pbox) <- if noReply
+                  then (,) <$> newEmptyMVar <*> newEmptyMVar
+                  else addMBox h tok term
   sendQLQuery h tok query
-  when noReply $ putMVar mbox $ ResponseSingle $ Null
-  return mbox
+  when noReply $ do
+    putMVar mbox $ ResponseSingle Null
+    putMVar pbox Nothing
+  return (mbox, pbox)
 
 isNoReplyQuery :: WireQuery -> Bool
 isNoReplyQuery (WireQuery (Array v)) |
@@ -287,23 +294,25 @@ isNoReplyQuery (WireQuery (Array v)) |
     True
 isNoReplyQuery _ = False
 
-addMBox :: RethinkDBHandle -> Token -> Term -> IO (MVar Response)
+addMBox :: RethinkDBHandle -> Token -> Term -> IO (MVar Response, MVar (Maybe Profile))
 addMBox h tok term = do
   chan <- newChan
+  pbox <- newEmptyMVar
   mbox <- newEmptyMVar
-  weak <- mkWeakMVar mbox $ do
+  mWeak <- mkWeakMVar mbox $ do
     closeToken h tok -- TODO: don't close if already closed
     atomicModifyIORef' (rdbWait h) $ \mboxes ->
       (M.delete tok mboxes, ())
   atomicModifyIORef' (rdbWait h) $ \mboxes ->
-    (M.insert tok (chan, term, finalize weak) mboxes, ())
+    (M.insert tok (chan, term, finalize mWeak) mboxes, ())
   _ <- forkIO $ fix $ \loop -> do
-    response <- readChan chan
+    (response, profile) <- readChan chan
     putMVar mbox response
+    putMVar pbox profile
     when (not $ isLastResponse response) $ do
       nextResponse response
       loop
-  return mbox
+  return (mbox, pbox)
 
 sendQLQuery :: RethinkDBHandle -> Token -> WireQuery -> IO ()
 sendQLQuery h tok query = do
@@ -312,7 +321,7 @@ sendQLQuery h tok query = do
     sendAll s $ runPut $ do
       putWord64le tok
       putWord32le (fromIntegral $ B.length queryS)
-      putLazyByteString queryS 
+      putLazyByteString queryS
 
 data RethinkDBReadError =
   RethinkDBReadError SomeException
@@ -353,8 +362,8 @@ readSingleResponse h = do
     case M.lookup tok mboxes of
       Nothing -> return ()
       Just (mbox, term, closetok) -> do
-        let convertedResponse = convertResponse h term tok response
-        writeChan mbox convertedResponse
+        let (convertedResponse, profile) = convertResponse h term tok response
+        writeChan mbox (convertedResponse, profile)
         when (isLastResponse convertedResponse) $ closetok
 
 isLastResponse :: Response -> Bool
@@ -362,7 +371,7 @@ isLastResponse ResponseError{} = True
 isLastResponse ResponseSingle{} = True
 isLastResponse (ResponseBatch (Just _) _) = False
 isLastResponse (ResponseBatch Nothing _) = True
- 
+
 -- | Set the default database
 --
 -- The new handle is an alias for the old one. Calling close on either one
@@ -388,10 +397,11 @@ nextResponse (ResponseBatch (Just (More _ h tok)) _) = do
   sendQLQuery h tok query
 nextResponse _ = return ()
 
-makeCursor :: MVar Response -> IO (Cursor Datum)
-makeCursor cursorMBox = do
+makeCursor :: MVar Response -> MVar (Maybe Profile) -> IO (Cursor Datum, Maybe Profile)
+makeCursor cursorMBox cursorPBox = do
+  profile <- takeMVar cursorPBox
   cursorBuffer <- newMVar (Right ([], False))
-  return Cursor{..}
+  return (Cursor{..}, profile)
   where cursorMap = return . id
 
 -- | Get the next value from a cursor
@@ -400,7 +410,7 @@ next c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
   case mbuffer of
     Left err -> throwIO err
     Right ([], True) -> return (Right ([], True), Nothing)
-    Right (x:xs, end) -> do x' <- cursorMap x; return $ (Right (xs, end), Just x')
+    Right (x:xs, end) -> do x' <- cursorMap x; return (Right (xs, end), Just x')
     Right ([], False) -> cursorFetchBatch c >>= loop
 
 -- | Get the next batch from a cursor
@@ -417,12 +427,13 @@ nextBatch c@Cursor{ .. } = modifyMVar cursorBuffer $ fix $ \loop mbuffer ->
 cursorFetchBatch :: Cursor a -> IO (Either RethinkDBError ([Datum], Bool))
 cursorFetchBatch c = do
   response <- takeMVar (cursorMBox c)
+  _ <- tryTakeMVar (cursorPBox c)
   case response of
     ResponseError e -> return $ Left e
     ResponseBatch more datums -> return $ Right (datums, isNothing more)
-    ResponseSingle (Array a) -> return $ Right (toList a, True)
+    ResponseSingle(Array a) -> return $ Right (toList a, True)
     ResponseSingle _ ->
-      return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
+      return . Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null)
       "Expected a stream or an array but got a datum" []
 
 -- | A lazy stream of all the elements in the cursor
@@ -447,11 +458,12 @@ collect' c = fix $ \loop -> do
 
 -- | Wait for NoReply queries to complete on the server
 --
--- >>> () <- runOpts h [NoReply] $ table "users" # get "bob" # update (\row -> merge row ["occupation" := "teacher"])
+-- >>> ((), Nothing) <- runOpts h [NoReply] $ table "users" # get "bob" # update (\row -> merge row ["occupation" := "teacher"])
 -- >>> noReplyWait h
 noReplyWait :: RethinkDBHandle -> IO ()
 noReplyWait h = do
-  m <- runQLQuery h (WireQuery $ toDatum [toWire NOREPLY_WAIT]) (Datum Null)
+  (r, m) <- runQLQuery h (WireQuery $ toDatum [toWire NOREPLY_WAIT]) (Datum Null)
+  _ <- takeMVar r
   _ <- takeMVar m
   return ()
 
