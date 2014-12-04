@@ -3,6 +3,8 @@
 module Database.RethinkDB.Driver (
   run,
   run',
+  runProfile,
+  runProfile',
   Result(..),
   runOpts,
   RunFlag(..),
@@ -12,7 +14,7 @@ module Database.RethinkDB.Driver (
 
 import qualified Data.Aeson as J
 import Control.Monad
-import Control.Concurrent.MVar (MVar, takeMVar)
+import Control.Concurrent (MVar, takeMVar)
 import Data.Text (Text)
 import Control.Applicative ((<$>), (<*>))
 import Data.List
@@ -52,6 +54,7 @@ data RunFlag =
   Durability Durability |
   Profile |
   ArrayLimit Int
+  -- TODO add other available query flags
 
 data Durability = Hard | Soft
 
@@ -64,7 +67,7 @@ renderOption Profile = "profile" .= True
 renderOption (ArrayLimit n) = "array_limit" .= n
 
 -- | Run a query with the given options
-runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunFlag] -> query -> IO r
+runOpts :: (Expr query, Result r) => RethinkDBHandle -> [RunFlag] -> query -> IO (r, Maybe Profile)
 runOpts h opts t = do
   let (q, bt) = buildQuery (expr t) 0 (rdbDatabase h) (map renderOption opts)
   r <- runQLQuery h q bt
@@ -90,25 +93,48 @@ runOpts h opts t = do
 -- >>> collect c
 -- ["nancy","sabrina"]
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
-run h = runOpts h []
+run h q = do
+    (r, _) <- runOpts h [] q
+    return r
 
 -- | Run a given query and return a Datum
 run' :: Expr query => RethinkDBHandle -> query -> IO Datum
 run' = run
 
+runProfile :: (Expr query, Result r) => RethinkDBHandle -> query -> IO (r, Profile)
+runProfile h q = do
+    (r, p) <- runOpts h [Profile] q
+    case p of
+      Just p' -> return (r, p')
+      _ -> return (r, Null)
+
+runProfile' :: Expr query => RethinkDBHandle -> query -> IO (Datum, Profile)
+runProfile' = runProfile
+
+firstM :: Monad m => (a -> m b) -> (a, c) -> m (b, c)
+firstM f (a, b) = do
+    a' <- f a
+    return (a', b)
+
+takeResponseProfile :: (MVar Response, MVar (Maybe Profile)) -> IO (Response, Maybe Profile)
+takeResponseProfile v = do
+    let (r, m) = v
+    (,) <$> takeMVar r <*> takeMVar m
+
 -- | Convert the raw query response into useful values
 class Result r where
-  convertResult :: MVar Response -> IO r
-  default convertResult :: FromDatum r => MVar Response -> IO r
-  convertResult = unsafeFromDatum <=< convertResult
+  convertResult :: (MVar Response, MVar (Maybe Profile)) -> IO (r, Maybe Profile)
+  default convertResult :: FromDatum r => (MVar Response, MVar (Maybe Profile)) -> IO (r, Maybe Profile)
+  convertResult = firstM unsafeFromDatum <=< convertResult
 
 instance Result Response where
-  convertResult = takeMVar
+  convertResult = takeResponseProfile
 
 instance FromDatum a => Result (Cursor a) where
-  convertResult r = do
-    c <- makeCursor r 
-    return c { cursorMap = unsafeFromDatum }
+  convertResult v = do
+    let (r, m) = v
+    (c, p) <- makeCursor r m
+    return (c { cursorMap = unsafeFromDatum }, p)
 
 unsafeFromDatum :: FromDatum a => Datum -> IO a
 unsafeFromDatum val = case fromDatum val of
@@ -116,43 +142,44 @@ unsafeFromDatum val = case fromDatum val of
   Success a -> return a
 
 instance FromDatum a => Result [a] where
-  convertResult = collect <=< convertResult
+  convertResult = firstM collect <=< convertResult
 
 instance (FromDatum b, a ~ RethinkDBError) => Result (Either a b) where
   convertResult v = do
-    r <- takeMVar v
-    ed <- case r of
-               ResponseSingle Null -> return $ Right Null
-               ResponseSingle b -> return $ Right b
-               ResponseError a -> return $ Left a
-               ResponseBatch Nothing batch -> return $ Right $ toDatum batch
-               ResponseBatch (Just _more) batch -> do
-                      rest <- collect' =<< convertResult v
-                      return $ Right $ toDatum $ batch ++ rest
+    (t, p) <- takeResponseProfile v
+    ed <- case t of
+      ResponseSingle Null -> return $ Right Null
+      ResponseSingle b -> return $ Right b
+      ResponseError a -> return $ Left a
+      ResponseBatch Nothing batch -> return $ Right $ toDatum batch
+      ResponseBatch (Just _more) batch -> do
+        c <- convertResult v
+        (rest, _) <- firstM collect' c
+        return $ Right $ toDatum $ batch ++ rest
     case ed of
-      Left a -> return $ Left a
+      Left a -> return (Left a, p)
       Right d -> case fromDatum d of
-        Success b -> return $ Right b
-        Error a -> return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) a []
+        Success b -> return (Right b, p)
+        Error a -> return (Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) a [], p)
 
 instance FromDatum a => Result (Maybe a) where
-  convertResult v = do 
-      ed <- convertResult v
-      case ed of
-        Left _ -> return Nothing
-        Right Null -> return Nothing
-        Right d -> case fromDatum d of
-                     Success a -> return $ Just a
-                     Error _ -> return $ Nothing
+  convertResult v = do
+    (r, p) <- convertResult v
+    case r of
+      Left _ -> return (Nothing, Nothing)
+      Right Null -> return (Nothing, p)
+      Right d -> case fromDatum d of
+        Success a -> return (Just a, p)
+        Error _ -> return (Nothing, Nothing)
 
 instance Result Int
 instance Result Double
 instance Result Bool
 
 instance Result () where
-  convertResult m = do
-    _ <- takeMVar m
-    return ()
+  convertResult v = do
+    (_, p) <- takeResponseProfile v
+    return ((), p)
 
 instance Result J.Value
 instance Result Char
@@ -200,52 +227,53 @@ assertEnd c = do
 
 instance (FromDatum a, FromDatum b) => Result (a, b) where
   convertResult r = do
-    c <- convertResult r
+    (c, p) <- convertResult r
     a <- nextFail c
     b <- nextFail c
     assertEnd c
-    return (a, b)
+    return ((a, b), p)
 
 instance (FromDatum a, FromDatum b, FromDatum c) => Result (a, b, c) where
   convertResult r = do
-    c <- convertResult r
+    (c, p) <- convertResult r
     a <- nextFail c
     b <- nextFail c
     c_ <- nextFail c
     assertEnd c
-    return (a, b, c_)
+    return ((a, b, c_), p)
 
 instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d) => Result (a, b, c, d) where
   convertResult r = do
-    c <- convertResult r
+    (c, p) <- convertResult r
     a <- nextFail c
     b <- nextFail c
     c_ <- nextFail c
     d <- nextFail c
     assertEnd c
-    return (a, b, c_, d)
+    return ((a, b, c_, d), p)
 
 instance (FromDatum a, FromDatum b, FromDatum c, FromDatum d, FromDatum e) => Result (a, b, c, d, e) where
   convertResult r = do
-    c <- convertResult r
+    (c, p) <- convertResult r
     a <- nextFail c
     b <- nextFail c
     c_ <- nextFail c
     d <- nextFail c
     e <- nextFail c
     assertEnd c
-    return (a, b, c_, d, e)
+    return ((a, b, c_, d, e), p)
 
 instance Result Datum where
   convertResult v = do
-    r <- takeMVar v
-    case r of
-      ResponseSingle datum -> return datum
+    (t, p) <- takeResponseProfile v
+    case t of
+      ResponseSingle datum -> return (datum, p)
       ResponseError e -> throwIO e
-      ResponseBatch Nothing batch -> return $ toDatum batch
+      ResponseBatch Nothing batch -> return (toDatum batch, p)
       ResponseBatch (Just _more) batch -> do
-        rest <- collect' =<< convertResult v
-        return . toDatum $ batch ++ rest
+        c <- convertResult v
+        (rest, _) <- firstM collect' c
+        return (toDatum $ batch ++ rest, p)
 
 instance Result WriteResponse
 
@@ -304,5 +332,3 @@ instance Show WriteResponse where
       zero k f = if f wr == 0 then Nothing else go k (f wr)
       nothing :: Show a => String -> (WriteResponse -> Maybe a) -> Maybe String
       nothing k f = maybe Nothing (go k) (f wr)
-
--- TODO: profile

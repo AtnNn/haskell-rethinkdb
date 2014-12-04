@@ -16,7 +16,7 @@ module Database.RethinkDB (
   RethinkDBHandle,
   close,
   use,
-  run, run', runOpts,
+  run, run', runProfile, runProfile', runOpts,
   ReQL,
   Datum(..),
   ToDatum(..), FromDatum(..), fromDatum,
