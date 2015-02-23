@@ -89,3 +89,9 @@ benchmark bench
     main-is: Bench.hs
     ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
     ghc-prof-options: "-with-rtsopts=-p -s -h -i0.1 -N"
+
+executable proto2hs
+  if flag(dev)
+    buildable: True
+  main-is: proto2hs.hs
+  build-depends: base, text, attoparsec

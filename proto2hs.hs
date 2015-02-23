@@ -1,5 +1,3 @@
-#!/usr/bin/env runhaskell
-{-# OPTIONS_GHC -fdefer-type-errors #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where

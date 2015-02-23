@@ -1,7 +1,7 @@
 module Database.RethinkDB.Wire.Term where
 import Prelude (Maybe(..), Eq, Show)
 import Database.RethinkDB.Wire
-data TermType = DATUM | MAKE_ARRAY | MAKE_OBJ | VAR | JAVASCRIPT | UUID | HTTP | ERROR | IMPLICIT_VAR | DB | TABLE | GET | GET_ALL | EQ | NE | LT | LE | GT | GE | NOT | ADD | SUB | MUL | DIV | MOD | APPEND | PREPEND | DIFFERENCE | SET_INSERT | SET_INTERSECTION | SET_UNION | SET_DIFFERENCE | SLICE | SKIP | LIMIT | INDEXES_OF | CONTAINS | GET_FIELD | KEYS | OBJECT | HAS_FIELDS | WITH_FIELDS | PLUCK | WITHOUT | MERGE | BETWEEN | REDUCE | MAP | FILTER | CONCATMAP | ORDERBY | DISTINCT | COUNT | IS_EMPTY | UNION | NTH | BRACKET | INNER_JOIN | OUTER_JOIN | EQ_JOIN | ZIP | INSERT_AT | DELETE_AT | CHANGE_AT | SPLICE_AT | COERCE_TO | TYPEOF | UPDATE | DELETE | REPLACE | INSERT | DB_CREATE | DB_DROP | DB_LIST | TABLE_CREATE | TABLE_DROP | TABLE_LIST | SYNC | INDEX_CREATE | INDEX_DROP | INDEX_LIST | INDEX_STATUS | INDEX_WAIT | INDEX_RENAME | FUNCALL | BRANCH | ANY | ALL | FOREACH | FUNC | ASC | DESC | INFO | MATCH | UPCASE | DOWNCASE | SAMPLE | DEFAULT | JSON | ISO8601 | TO_ISO8601 | EPOCH_TIME | TO_EPOCH_TIME | NOW | IN_TIMEZONE | DURING | DATE | TIME_OF_DAY | TIMEZONE | YEAR | MONTH | DAY | DAY_OF_WEEK | DAY_OF_YEAR | HOURS | MINUTES | SECONDS | TIME | MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY | JANUARY | FEBRUARY | MARCH | APRIL | MAY | JUNE | JULY | AUGUST | SEPTEMBER | OCTOBER | NOVEMBER | DECEMBER | LITERAL | GROUP | SUM | AVG | MIN | MAX | SPLIT | UNGROUP | RANDOM | CHANGES | ARGS | BINARY | GEOJSON | TO_GEOJSON | POINT | LINE | POLYGON | DISTANCE | INTERSECTS | INCLUDES | CIRCLE | GET_INTERSECTING | FILL | GET_NEAREST | POLYGON_SUB
+data TermType = DATUM | MAKE_ARRAY | MAKE_OBJ | VAR | JAVASCRIPT | UUID | HTTP | ERROR | IMPLICIT_VAR | DB | TABLE | GET | GET_ALL | EQ | NE | LT | LE | GT | GE | NOT | ADD | SUB | MUL | DIV | MOD | APPEND | PREPEND | DIFFERENCE | SET_INSERT | SET_INTERSECTION | SET_UNION | SET_DIFFERENCE | SLICE | SKIP | LIMIT | INDEXES_OF | CONTAINS | GET_FIELD | KEYS | OBJECT | HAS_FIELDS | WITH_FIELDS | PLUCK | WITHOUT | MERGE | BETWEEN | REDUCE | MAP | FILTER | CONCAT_MAP | ORDER_BY | DISTINCT | COUNT | IS_EMPTY | UNION | NTH | BRACKET | INNER_JOIN | OUTER_JOIN | EQ_JOIN | ZIP | RANGE | INSERT_AT | DELETE_AT | CHANGE_AT | SPLICE_AT | COERCE_TO | TYPE_OF | UPDATE | DELETE | REPLACE | INSERT | DB_CREATE | DB_DROP | DB_LIST | TABLE_CREATE | TABLE_DROP | TABLE_LIST | CONFIG | STATUS | WAIT | RECONFIGURE | REBALANCE | SYNC | INDEX_CREATE | INDEX_DROP | INDEX_LIST | INDEX_STATUS | INDEX_WAIT | INDEX_RENAME | FUNCALL | BRANCH | ANY | ALL | FOR_EACH | FUNC | ASC | DESC | INFO | MATCH | UPCASE | DOWNCASE | SAMPLE | DEFAULT | JSON | TO_JSON_STRING | ISO8601 | TO_ISO8601 | EPOCH_TIME | TO_EPOCH_TIME | NOW | IN_TIMEZONE | DURING | DATE | TIME_OF_DAY | TIMEZONE | YEAR | MONTH | DAY | DAY_OF_WEEK | DAY_OF_YEAR | HOURS | MINUTES | SECONDS | TIME | MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY | JANUARY | FEBRUARY | MARCH | APRIL | MAY | JUNE | JULY | AUGUST | SEPTEMBER | OCTOBER | NOVEMBER | DECEMBER | LITERAL | GROUP | SUM | AVG | MIN | MAX | SPLIT | UNGROUP | RANDOM | CHANGES | ARGS | BINARY | GEOJSON | TO_GEOJSON | POINT | LINE | POLYGON | DISTANCE | INTERSECTS | INCLUDES | CIRCLE | GET_INTERSECTING | FILL | GET_NEAREST | POLYGON_SUB
   deriving (Eq, Show)
 instance WireValue TermType where
   toWire DATUM = 1
@@ -53,8 +53,8 @@ instance WireValue TermType where
   toWire REDUCE = 37
   toWire MAP = 38
   toWire FILTER = 39
-  toWire CONCATMAP = 40
-  toWire ORDERBY = 41
+  toWire CONCAT_MAP = 40
+  toWire ORDER_BY = 41
   toWire DISTINCT = 42
   toWire COUNT = 43
   toWire IS_EMPTY = 86
@@ -65,12 +65,13 @@ instance WireValue TermType where
   toWire OUTER_JOIN = 49
   toWire EQ_JOIN = 50
   toWire ZIP = 72
+  toWire RANGE = 173
   toWire INSERT_AT = 82
   toWire DELETE_AT = 83
   toWire CHANGE_AT = 84
   toWire SPLICE_AT = 85
   toWire COERCE_TO = 51
-  toWire TYPEOF = 52
+  toWire TYPE_OF = 52
   toWire UPDATE = 53
   toWire DELETE = 54
   toWire REPLACE = 55
@@ -81,6 +82,11 @@ instance WireValue TermType where
   toWire TABLE_CREATE = 60
   toWire TABLE_DROP = 61
   toWire TABLE_LIST = 62
+  toWire CONFIG = 174
+  toWire STATUS = 175
+  toWire WAIT = 177
+  toWire RECONFIGURE = 176
+  toWire REBALANCE = 179
   toWire SYNC = 138
   toWire INDEX_CREATE = 75
   toWire INDEX_DROP = 76
@@ -92,7 +98,7 @@ instance WireValue TermType where
   toWire BRANCH = 65
   toWire ANY = 66
   toWire ALL = 67
-  toWire FOREACH = 68
+  toWire FOR_EACH = 68
   toWire FUNC = 69
   toWire ASC = 73
   toWire DESC = 74
@@ -103,6 +109,7 @@ instance WireValue TermType where
   toWire SAMPLE = 81
   toWire DEFAULT = 92
   toWire JSON = 98
+  toWire TO_JSON_STRING = 172
   toWire ISO8601 = 99
   toWire TO_ISO8601 = 100
   toWire EPOCH_TIME = 101
@@ -215,8 +222,8 @@ instance WireValue TermType where
   fromWire 37 = Just REDUCE
   fromWire 38 = Just MAP
   fromWire 39 = Just FILTER
-  fromWire 40 = Just CONCATMAP
-  fromWire 41 = Just ORDERBY
+  fromWire 40 = Just CONCAT_MAP
+  fromWire 41 = Just ORDER_BY
   fromWire 42 = Just DISTINCT
   fromWire 43 = Just COUNT
   fromWire 86 = Just IS_EMPTY
@@ -227,12 +234,13 @@ instance WireValue TermType where
   fromWire 49 = Just OUTER_JOIN
   fromWire 50 = Just EQ_JOIN
   fromWire 72 = Just ZIP
+  fromWire 173 = Just RANGE
   fromWire 82 = Just INSERT_AT
   fromWire 83 = Just DELETE_AT
   fromWire 84 = Just CHANGE_AT
   fromWire 85 = Just SPLICE_AT
   fromWire 51 = Just COERCE_TO
-  fromWire 52 = Just TYPEOF
+  fromWire 52 = Just TYPE_OF
   fromWire 53 = Just UPDATE
   fromWire 54 = Just DELETE
   fromWire 55 = Just REPLACE
@@ -243,6 +251,11 @@ instance WireValue TermType where
   fromWire 60 = Just TABLE_CREATE
   fromWire 61 = Just TABLE_DROP
   fromWire 62 = Just TABLE_LIST
+  fromWire 174 = Just CONFIG
+  fromWire 175 = Just STATUS
+  fromWire 177 = Just WAIT
+  fromWire 176 = Just RECONFIGURE
+  fromWire 179 = Just REBALANCE
   fromWire 138 = Just SYNC
   fromWire 75 = Just INDEX_CREATE
   fromWire 76 = Just INDEX_DROP
@@ -254,7 +267,7 @@ instance WireValue TermType where
   fromWire 65 = Just BRANCH
   fromWire 66 = Just ANY
   fromWire 67 = Just ALL
-  fromWire 68 = Just FOREACH
+  fromWire 68 = Just FOR_EACH
   fromWire 69 = Just FUNC
   fromWire 73 = Just ASC
   fromWire 74 = Just DESC
@@ -265,6 +278,7 @@ instance WireValue TermType where
   fromWire 81 = Just SAMPLE
   fromWire 92 = Just DEFAULT
   fromWire 98 = Just JSON
+  fromWire 172 = Just TO_JSON_STRING
   fromWire 99 = Just ISO8601
   fromWire 100 = Just TO_ISO8601
   fromWire 101 = Just EPOCH_TIME
