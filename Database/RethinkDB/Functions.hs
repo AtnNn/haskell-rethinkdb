@@ -122,7 +122,7 @@ delete s = op Term.DELETE [s]
 -- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # ex update [nonAtomic] (const ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) :: IO WriteResponse
 -- {replaced:2}
 forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
-forEach s f = op FOREACH (s, expr P.. f)
+forEach s f = op FOR_EACH (s, expr P.. f)
 
 -- | A table
 --
@@ -313,7 +313,7 @@ append a b = op APPEND (b, a)
 -- >>> run h $ concatMap id [[1, 2], [3], [4, 5]]
 -- [1,2,3,4,5]
 concatMap :: (Expr a, Expr b) => (ReQL -> b) -> a -> ReQL
-concatMap f e = op CONCATMAP (e, expr P.. f)
+concatMap f e = op CONCAT_MAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
@@ -394,7 +394,7 @@ zip a = op ZIP [a]
 -- >>> run' h $ table "users" # ex orderBy ["index":="name"] [] # pluck ["name"]
 -- [{"name":"bill"},{"name":"nancy"}]
 orderBy :: (Expr s) => [ReQL] -> s -> ReQL
-orderBy o s = op ORDERBY (expr s : P.map expr o)
+orderBy o s = op ORDER_BY (expr s : P.map expr o)
 
 -- | Ascending order
 asc :: ReQL -> ReQL
@@ -820,7 +820,7 @@ handle h r = op DEFAULT (r, expr . h)
 -- >>> run h $ typeOf 1
 -- "NUMBER"
 typeOf :: Expr a => a -> ReQL
-typeOf a = op TYPEOF [a]
+typeOf a = op TYPE_OF [a]
 
 -- | Get information on a given expression. Useful for tables and databases.
 --
@@ -1035,5 +1035,55 @@ instance Expr ConflictResolution where
 conflict :: ConflictResolution -> Attribute a
 conflict cr = "conflict" := cr
 
+-- | Generate a UUID
 uuid :: ReQL
 uuid = op UUID ()
+
+-- * New in 1.16
+
+-- | Generate numbers starting from 0
+range :: ReQL -> ReQL
+range n = op RANGE [n]
+
+-- | Generate numbers within a range
+rangeFromTo :: ReQL -> ReQL -> ReQL
+rangeFromTo a b = op RANGE (a, b)
+
+-- | Generate numbers starting from 0
+rangeAll :: ReQL
+rangeAll = op RANGE ()
+
+-- | Wait for tables to be ready
+wait :: Expr table => table -> ReQL
+wait t = op WAIT [t]
+
+-- | Convert an object or value to a JSON string
+toJSON :: Expr a => a -> ReQL
+toJSON a = op TO_JSON_STRING [a]
+
+-- | Map over two sequences
+zipWith :: (Expr left, Expr right, Expr b)
+        => (ReQL -> ReQL -> b) -> left -> right -> ReQL
+zipWith f a b = op MAP (a, b, \x y -> expr (f x y))
+
+-- | Map over multiple sequences
+zipWithN :: (Arr a, Expr f)
+         => f -> a -> ReQL
+zipWithN f s = op MAP $ arr s <> arr [f]
+
+-- | Change a table's configuration
+reconfigure :: (Expr table, Expr replicas)
+            => ReQL -> replicas -> table -> ReQL
+reconfigure shards replicas t = op' RECONFIGURE [t] ["shards" := shards, "replicas" := replicas]
+
+-- | Rebalance a table's shards
+rebalance :: Expr table => table -> ReQL
+rebalance t = op REBALANCE [t]
+
+-- | Get the config for a table or database
+config :: Expr table => table -> ReQL
+config t = op CONFIG [t]
+
+-- | Get the status of a table
+status :: Expr table => table -> ReQL
+status t = op STATUS [t]

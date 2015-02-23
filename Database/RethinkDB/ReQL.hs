@@ -20,7 +20,6 @@ module Database.RethinkDB.ReQL (
   Static, Dynamic, OptArg,
   OptArgs(..),
   cons,
-  arr,
   baseArray,
   withQuerySettings,
   reqlToDatum,
@@ -31,7 +30,8 @@ module Database.RethinkDB.ReQL (
   WireQuery(..),
   WireBacktrace(..),
   note,
-  (?:=)
+  (?:=),
+  Arr(arr)
   ) where
 
 import qualified Data.Aeson as J
@@ -45,7 +45,7 @@ import Data.Maybe (fromMaybe, catMaybes)
 import Data.String (IsString(..))
 import Data.List (intercalate)
 import Control.Monad.State (State, get, put, runState)
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<*>))
 import Data.Default (Default, def)
 import qualified Data.Text as T
 import qualified Data.ByteString as SB
@@ -167,6 +167,10 @@ varName n = replicate (q+1) (chr $ ord 'a' + r)
 
 -- | A list of terms
 data ArgList = ArgList { baseArray :: State QuerySettings [Term] }
+
+instance Monoid ArgList where
+  mempty = ArgList $ return []
+  mappend (ArgList a) (ArgList b) = ArgList $ (++) <$> a <*> b
 
 -- | Build arrays of exprs
 class Arr a where
@@ -400,6 +404,30 @@ instance (a ~ ReQL, b ~ ReQL) => Expr (a -> b -> ReQL) where
     a <- newVarId
     b <- newVarId
     runReQL $ op FUNC ([a, b], expr $ f (op VAR [a]) (op VAR [b]))
+
+instance (a ~ ReQL, b ~ ReQL, c ~ ReQL) => Expr (a -> b -> c -> ReQL) where
+  expr f = ReQL $ do
+    a <- newVarId
+    b <- newVarId
+    c <- newVarId
+    runReQL $ op FUNC ([a, b, c], expr $ f (op VAR [a]) (op VAR [b]) (op VAR [c]))
+
+instance (a ~ ReQL, b ~ ReQL, c ~ ReQL, d ~ ReQL) => Expr (a -> b -> c -> d -> ReQL) where
+  expr f = ReQL $ do
+    a <- newVarId
+    b <- newVarId
+    c <- newVarId
+    d <- newVarId
+    runReQL $ op FUNC ([a, b, c], expr $ f (op VAR [a]) (op VAR [b]) (op VAR [c]) (op VAR [d]))
+
+instance (a ~ ReQL, b ~ ReQL, c ~ ReQL, d ~ ReQL, e ~ ReQL) => Expr (a -> b -> c -> d -> e -> ReQL) where
+  expr f = ReQL $ do
+    a <- newVarId
+    b <- newVarId
+    c <- newVarId
+    d <- newVarId
+    e <- newVarId
+    runReQL $ op FUNC ([a, b, c], expr $ f (op VAR [a]) (op VAR [b]) (op VAR [c]) (op VAR [d]) (op VAR [e]))
 
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->

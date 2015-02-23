@@ -243,7 +243,7 @@ mapMRF WITHOUT ks [] =
     Just . MapFun $ \s -> op' WITHOUT (s : map wrap ks) [noRecurse]
 mapMRF MERGE [b] [] =
   Just . MapFun $ \s -> op' MERGE [s,  wrap b] [noRecurse]
-mapMRF CONCATMAP [f] [] = Just . ConcatMapFun $ toFun1 f
+mapMRF CONCAT_MAP [f] [] = Just . ConcatMapFun $ toFun1 f
 mapMRF FILTER [f] [] =
   Just . ConcatMapFun $ \x -> branch (toFun1 f x # handle (const False)) x ()
 mapMRF FILTER [f] [TermAttribute "default" defval] =

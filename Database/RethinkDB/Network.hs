@@ -264,6 +264,7 @@ convertResponse h q t (WireResponse (Object o)) = let
   Just SUCCESS_ATOM -> ResponseSingle <!< atom
   Just SUCCESS_PARTIAL -> ResponseBatch (Just $ More False h t) <!< results
   Just SUCCESS_FEED -> ResponseBatch (Just $ More True h t) <!< results
+  Just SUCCESS_ATOM_FEED -> ResponseBatch (Just $ More True h t) <!< results
   Just SUCCESS_SEQUENCE -> ResponseBatch Nothing <!< results
   Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
   Just COMPILE_ERROR -> ResponseError $ RethinkDBError ErrorBadQuery q e bt
