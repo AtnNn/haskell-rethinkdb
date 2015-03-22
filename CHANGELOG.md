@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.16.0.0
+- Improved the doctests
+- Added IPv6 support
+- Added support for new RethinkDB 1.16 features (http://rethinkdb.com/blog/1.16-release/)
+
 ## 1.15.2.1
 - Fix `FromDatum Rational` instance
 - Increase upper bound for `network`
