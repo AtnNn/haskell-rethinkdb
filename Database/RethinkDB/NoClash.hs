@@ -11,4 +11,4 @@ import Database.RethinkDB hiding (
   sum, map, mod, concatMap, (&&),
   not, (||), (/=), (<), (<=), (>), (>=), error, (==), filter,
   max, min,
-  zip)
+  zip, zipWith)

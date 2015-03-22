@@ -70,7 +70,8 @@ module Database.RethinkDB (
 
   -- * Transformations
 
-  map, withFields, concatMap,
+  map, zipWith, zipWithN,
+  withFields, concatMap,
   orderBy, asc, desc,
   skip, limit, slice,
   indexesOf, isEmpty, union, sample,
@@ -122,10 +123,12 @@ module Database.RethinkDB (
   
   -- * Control structures
 
-  args, apply, js, branch, forEach, error,
+  args, apply, js, branch, forEach,
+  range, rangeFromTo, rangeAll,
+  error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
-  typeOf, info, json, uuid,
+  typeOf, info, json, toJSON, uuid,
   http,
   HttpOptions(..), HttpResultFormat(..),
   HttpMethod(..), PaginationStrategy(..),
@@ -139,6 +142,11 @@ module Database.RethinkDB (
   LonLat(..), Line, Polygon,
   maxResults, maxDist, unit, numVertices,
   Unit(..),
+  
+  -- * Administration
+  
+  config, rebalance, reconfigure,
+  status, wait,
   
   -- * Helpers
 

@@ -62,6 +62,7 @@ library
         Database.RethinkDB.Wire.Response
         Database.RethinkDB.Wire.Term
         Database.RethinkDB.Wire.VersionDummy
+        Database.RethinkDB.Doctest
     exposed: True
     buildable: True
     ghc-options: -Wall
