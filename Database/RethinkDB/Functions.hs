@@ -35,19 +35,11 @@ import qualified Prelude as P
 --
 -- Get the doctests ready
 --
--- >>> :load Database.RethinkDB.NoClash
+-- >>> :load Database.RethinkDB.Doctest
 -- >>> import qualified Database.RethinkDB as R
--- >>> default (Datum, ReQL, String, Int, Double)
--- >>> import Prelude
--- >>> import Data.Text (Text)
--- >>> import Data.Maybe
--- >>> import Control.Exception
--- >>> import Database.RethinkDB.Functions ()
--- >>> import Database.RethinkDB ()
--- >>> import Data.List (sort)
 -- >>> :set -XOverloadedStrings
--- >>> let try' x = (try x `asTypeOf` return (Left (undefined :: SomeException))) >> return ()
--- >>> h <- fmap (use "doctests") $ connect "localhost" 28015 def
+-- >>> default (Datum, ReQL, String, Int, Double)
+-- >>> h <- doctestConnect 
 
 -- $init_doctests
 -- >>> try' $ run' h $ dbCreate "doctests"
@@ -134,7 +126,7 @@ table n = Table Nothing n Nothing
 -- | Drop a table
 --
 -- >>> run' h $ tableDrop (table "foo")
--- {"dropped":1}
+-- {"config_changes":[{"new_val":null,"old_val":{"primary_key":"id","write_acks":"majority","durability":"hard","name":"foo","shards":...,"id":...,"db":"doctests"}}],"tables_dropped":1}
 tableDrop :: Table -> ReQL
 tableDrop (Table mdb table_name _) =
   withQuerySettings $ \QuerySettings{ queryDefaultDatabase = ddb } ->
@@ -317,22 +309,22 @@ concatMap f e = op CONCAT_MAP (e, expr P.. f)
 
 -- | SQL-like inner join of two sequences
 --
--- >>> run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
--- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
+-- >>> sorted $ run' h $ innerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
+-- [{"name":"bill","message":"hello"},{"name":"bill","message":"hi"}]
 innerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 innerJoin f a b = op INNER_JOIN (a, b, fmap expr P.. f)
 
 -- | SQL-like outer join of two sequences
 --
--- >>> run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id", asc "name"] # pluck ["name", "message"]
--- [{"name":"nancy"},{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
+-- >>> sorted $ run' h $ outerJoin (\user post -> user!"name" R.== post!"author") (table "users") (table "posts") # R.zip # orderBy [asc "id", asc "name"] # pluck ["name", "message"]
+-- [{"name":"bill","message":"hello"},{"name":"bill","message":"hi"},{"name":"nancy"}]
 outerJoin :: (Expr a, Expr b, Expr c) => (ReQL -> ReQL -> c) -> a -> b -> ReQL
 outerJoin f a b = op OUTER_JOIN (a, b, fmap expr P.. f)
 
 -- | An efficient inner_join that uses a key for the left table and an index for the right table.
 --
--- >>> run' h $ table "posts" # eqJoin "author" (table "users") "name" # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
--- [{"name":"bill","message":"hi"},{"name":"bill","message":"hello"}]
+-- >>> sorted $ run' h $ table "posts" # eqJoin "author" (table "users") "name" # R.zip # orderBy [asc "id"] # pluck ["name", "message"]
+-- [{"name":"bill","message":"hello"},{"name":"bill","message":"hi"}]
 eqJoin :: (Expr fun, Expr right, Expr left) => fun -> right -> Index -> left -> ReQL
 eqJoin key right (Index idx) left = op' EQ_JOIN (left, key, right) ["index" := idx]
 eqJoin key right PrimaryKey left = op EQ_JOIN (left, key, right)
@@ -527,7 +519,7 @@ remove = op LITERAL ()
 -- 3.141592653589793
 -- >>> let r_sin x = js "Math.sin" `apply` [x]
 -- >>> run h $ R.map r_sin [pi, pi/2]
--- [1.2246063538223773e-16,1]
+-- [1.2246...,1]
 js :: ReQL -> ReQL
 js s = op JAVASCRIPT [s]
 
@@ -549,21 +541,21 @@ error m = op ERROR [m]
 -- | Create a Database reference
 --
 -- >>> run' h $ db "test" # info
--- {"name":"test","type":"DB"}
+-- {"name":"test","id":...,"type":"DB"}
 db :: Text -> Database
 db = Database
 
 -- | Create a database on the server
 --
 -- >>> run' h $ dbCreate "dev"
--- {"created":1}
+-- {"config_changes":[{"new_val":{"name":"dev","id":...},"old_val":null}],"dbs_created":1}
 dbCreate :: P.String -> ReQL
 dbCreate db_name = op DB_CREATE [str db_name]
 
 -- | Drop a database
 --
 -- >>> run' h $ dbDrop (db "dev")
--- {"dropped":1}
+-- {"config_changes":[{"new_val":null,"old_val":{"name":"dev","id":...}}],"tables_dropped":0,"dbs_dropped":1}
 dbDrop :: Database -> ReQL
 dbDrop (Database name) = op DB_DROP [name]
 
@@ -825,7 +817,7 @@ typeOf a = op TYPE_OF [a]
 -- | Get information on a given expression. Useful for tables and databases.
 --
 -- >>> run h $ info $ table "users"
--- {"primary_key":"name","name":"users","indexes":["friends","location"],"type":"TABLE","db":{"name":"doctests","type":"DB"}}
+-- {"primary_key":"name","doc_count_estimates":...,"name":"users","id":...,"indexes":["friends","location"],"type":"TABLE","db":{"name":"doctests","id":...,"type":"DB"}}
 info :: Expr a => a -> ReQL
 info a = op INFO [a]
 
@@ -1036,54 +1028,90 @@ conflict :: ConflictResolution -> Attribute a
 conflict cr = "conflict" := cr
 
 -- | Generate a UUID
+--
+-- >>> run h uuid
+-- "...-...-...-..."
 uuid :: ReQL
 uuid = op UUID ()
 
 -- * New in 1.16
 
 -- | Generate numbers starting from 0
+--
+-- >>> run h $ range 10
+-- [0,1,2,3,4,5,6,7,8,9]
 range :: ReQL -> ReQL
 range n = op RANGE [n]
 
 -- | Generate numbers within a range
+--
+-- >>> run h $ rangeFromTo 2 4
+-- [2,3]
 rangeFromTo :: ReQL -> ReQL -> ReQL
 rangeFromTo a b = op RANGE (a, b)
 
 -- | Generate numbers starting from 0
+--
+-- >>> run' h $ rangeAll # limit 4
+-- [0,1,2,3]
 rangeAll :: ReQL
 rangeAll = op RANGE ()
 
 -- | Wait for tables to be ready
+--
+-- >>> run h $ table "users" # wait
+-- {"ready":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":true,"ready_for_outdated_reads":true,"ready_for_writes":true,"ready_for_reads":true},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
 wait :: Expr table => table -> ReQL
 wait t = op WAIT [t]
 
 -- | Convert an object or value to a JSON string
+--
+-- >>> run h $ toJSON "a"
+-- "\"a\""
 toJSON :: Expr a => a -> ReQL
 toJSON a = op TO_JSON_STRING [a]
 
 -- | Map over two sequences
+--
+-- >>> run h $ zipWith (+) [1,2] [3,4]
+-- [4,6]
 zipWith :: (Expr left, Expr right, Expr b)
         => (ReQL -> ReQL -> b) -> left -> right -> ReQL
 zipWith f a b = op MAP (a, b, \x y -> expr (f x y))
 
 -- | Map over multiple sequences
+--
+-- >>> run' h $ zipWithN (\a b c -> expr $ a + b * c) [[1,2],[3,4],[5,6]]
+-- [16,26]
 zipWithN :: (Arr a, Expr f)
          => f -> a -> ReQL
 zipWithN f s = op MAP $ arr s <> arr [f]
 
 -- | Change a table's configuration
+--
+-- >>> run h $ table "users" # reconfigure 2 1
+-- {"config_changes":[{"new_val":{"primary_key":"name","write_acks":"majority","durability":"hard","name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}],"reconfigured":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":...,"ready_for_outdated_reads":...,"ready_for_writes":...,"ready_for_reads":...},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
 reconfigure :: (Expr table, Expr replicas)
             => ReQL -> replicas -> table -> ReQL
 reconfigure shards replicas t = op' RECONFIGURE [t] ["shards" := shards, "replicas" := replicas]
 
 -- | Rebalance a table's shards
+--
+-- >>> run h $ table "users" # rebalance
+-- {"rebalanced":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":...,"ready_for_outdated_reads":...,"ready_for_writes":...,"ready_for_reads":...},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
 rebalance :: Expr table => table -> ReQL
 rebalance t = op REBALANCE [t]
 
 -- | Get the config for a table or database
+--
+-- >>> run h $ table "users" # config
+-- {"primary_key":"name","write_acks":"majority","durability":"hard","name":"users","shards":...,"id":...,"db":"doctests"}
 config :: Expr table => table -> ReQL
 config t = op CONFIG [t]
 
 -- | Get the status of a table
+--
+-- >>> run h $ table "users" # status
+-- {"status":{"all_replicas_ready":true,"ready_for_outdated_reads":true,"ready_for_writes":true,"ready_for_reads":true},"name":"users","shards":...,"id":...,"db":"doctests"}
 status :: Expr table => table -> ReQL
 status t = op STATUS [t]

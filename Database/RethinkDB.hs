@@ -1,4 +1,4 @@
--- | Haskell client driver for RethinkDB 
+-- | Haskell client driver for RethinkDB
 --
 -- Based upon the official Javascript, Python and Ruby API: <http://www.rethinkdb.com/api/>
 --
@@ -9,7 +9,7 @@
 -- > import qualified Database.RethinkDB.NoClash
 
 module Database.RethinkDB (
-  
+
   -- * Accessing RethinkDB
 
   connect,
@@ -26,12 +26,12 @@ module Database.RethinkDB (
   ErrorCode(..),
   Response,
   Result(..),
-  
+
   -- * Cursors
-  
+
   next, collect, collect', each,
   Cursor,
-  
+
   -- * Manipulating databases
 
   Database(..),
@@ -70,7 +70,8 @@ module Database.RethinkDB (
 
   -- * Transformations
 
-  map, withFields, concatMap,
+  map, zipWith, zipWithN,
+  withFields, concatMap,
   orderBy, asc, desc,
   skip, limit, slice,
   indexesOf, isEmpty, union, sample,
@@ -96,15 +97,15 @@ module Database.RethinkDB (
   setInsert, setUnion, setIntersection, setDifference,
   (!), (!?),
   hasFields,
-  insertAt, spliceAt, deleteAt, changeAt, keys,  
+  insertAt, spliceAt, deleteAt, changeAt, keys,
   literal, remove,
   Attribute(..),
 
   -- * String manipulation
-  
+
   match, upcase, downcase,
   split, splitOn, splitMax,
-  
+
   -- * Math and logic
 
   (+), (-), (*), (/), mod,
@@ -112,26 +113,28 @@ module Database.RethinkDB (
   (==), (/=), (>), (>=), (<), (<=),
   not,
   random, randomTo, randomFromTo,
-  
+
   -- * Dates and times
-  
+
   now, time, epochTime, iso8601, inTimezone, during,
   timezone, date, timeOfDay, year, month, day, dayOfWeek,
   dayOfYear, hours, minutes, seconds,
   toIso8601, toEpochTime,
-  
+
   -- * Control structures
 
-  args, apply, js, branch, forEach, error,
+  args, apply, js, branch, forEach,
+  range, rangeFromTo, rangeAll,
+  error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
-  typeOf, info, json, uuid,
+  typeOf, info, json, toJSON, uuid,
   http,
   HttpOptions(..), HttpResultFormat(..),
   HttpMethod(..), PaginationStrategy(..),
-  
+
   -- * Geospatial commands
-  
+
   circle, distance, fill, geoJSON,
   toGeoJSON, getIntersecting,
   getNearest, includes, intersects,
@@ -139,12 +142,18 @@ module Database.RethinkDB (
   LonLat(..), Line, Polygon,
   maxResults, maxDist, unit, numVertices,
   Unit(..),
-  
+
+  -- * Administration
+
+  config, rebalance, reconfigure,
+  status, wait,
+
+
   -- * Helpers
 
   ex, str, num, (#), note, empty,
   def
-  
+
   ) where
 
 import Prelude ()

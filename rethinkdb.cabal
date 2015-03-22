@@ -1,12 +1,12 @@
 name: rethinkdb
-version: 1.15.2.1
+version: 1.16.0.0
 cabal-version: >=1.8
 build-type: Simple
 license: Apache
 license-file: LICENSE
 maintainer: Etienne Laurin <etienne@atnnn.com>
 homepage: http://github.com/atnnn/haskell-rethinkdb
-synopsis: A driver for RethinkDB 1.15
+synopsis: A driver for RethinkDB 1.16
 description:
     A driver for the RethinkDB database server
 category: Database
@@ -62,6 +62,7 @@ library
         Database.RethinkDB.Wire.Response
         Database.RethinkDB.Wire.Term
         Database.RethinkDB.Wire.VersionDummy
+        Database.RethinkDB.Doctest
     exposed: True
     buildable: True
     ghc-options: -Wall

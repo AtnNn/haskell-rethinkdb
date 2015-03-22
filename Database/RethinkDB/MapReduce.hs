@@ -344,7 +344,7 @@ extract st tt args optargs = fst $ flip runState st $ runWriterT $ do
   args' <- sequence $ map extractOne args
   optargvs' <- sequence $ map extractOne (map snd optargs)
   let optargks = map fst optargs
-  return $ \v -> op' tt (map ($ v) args') (zipWith (:=) optargks $ map ($ v) optargvs')
+  return $ \v -> op' tt (map ($ v) args') (Prelude.zipWith (:=) optargks $ map ($ v) optargvs')
     where
       extractOne chain = either (return . const) go $ chainToMRF chain
       
