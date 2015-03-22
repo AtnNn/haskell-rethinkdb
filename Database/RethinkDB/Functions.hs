@@ -189,14 +189,14 @@ infixr 3 &&
 -- >>> run h $ True R.|| False
 -- true
 (||) :: (Expr a, Expr b) => a -> b -> ReQL
-a || b = op ANY (a, b)
+a || b = op OR (a, b)
 
 -- | Boolean and
 --
 -- >>> run h $ True R.&& False
 -- false
 (&&) :: (Expr a, Expr b) => a -> b -> ReQL
-a && b = op ALL (a, b)
+a && b = op AND (a, b)
 
 infix 4 ==, /=
 
@@ -681,7 +681,7 @@ withFields p s = op WITH_FIELDS (s, p)
 -- >>> run h $ indexesOf (match "ba.") [str "foo", "bar", "baz"]
 -- [1,2]
 indexesOf :: (Expr fun, Expr seq) => fun -> seq -> ReQL
-indexesOf f s = op INDEXES_OF (s, f)
+indexesOf f s = op OFFSETS_OF (s, f)
 
 -- | Test if a sequence is empty
 --
@@ -992,6 +992,10 @@ changes s = op CHANGES [s]
 -- {inserted:1,changes:[{"old_val":null,"new_val":{"name":"sabrina"}}]}
 returnChanges :: Attribute a
 returnChanges = "return_changes" := P.True
+
+-- | Optional argument for changes
+includeStates :: Attribute a
+includeStates = "include_states" := P.True
 
 data Durability = Hard | Soft
 

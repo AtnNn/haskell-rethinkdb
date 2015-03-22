@@ -60,7 +60,7 @@ module Database.RethinkDB (
 
   db, table,
   get, getAll,
-  filter, between,
+  filter, between, minval, maxval,
   Bound(..),
 
   -- * Joins

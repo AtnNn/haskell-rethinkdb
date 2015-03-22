@@ -168,7 +168,7 @@ sGetNullTerminatedString s = go [] where
       else go (c : acc)
 
 magicNumber :: Word32
-magicNumber = fromIntegral $ toWire V0_3
+magicNumber = fromIntegral $ toWire V0_4
 
 withSocket :: RethinkDBHandle -> (Socket -> IO a) -> IO a
 withSocket RethinkDBHandle{ rdbSocket, rdbWriteLock } f =
@@ -263,8 +263,6 @@ convertResponse h q t (WireResponse (Object o)) = let
   in case type_ of
   Just SUCCESS_ATOM -> ResponseSingle <!< atom
   Just SUCCESS_PARTIAL -> ResponseBatch (Just $ More False h t) <!< results
-  Just SUCCESS_FEED -> ResponseBatch (Just $ More True h t) <!< results
-  Just SUCCESS_ATOM_FEED -> ResponseBatch (Just $ More True h t) <!< results
   Just SUCCESS_SEQUENCE -> ResponseBatch Nothing <!< results
   Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
   Just COMPILE_ERROR -> ResponseError $ RethinkDBError ErrorBadQuery q e bt

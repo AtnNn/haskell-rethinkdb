@@ -31,7 +31,9 @@ module Database.RethinkDB.ReQL (
   WireBacktrace(..),
   note,
   (?:=),
-  Arr(arr)
+  Arr(arr),
+  minval,
+  maxval
   ) where
 
 import qualified Data.Aeson as J
@@ -521,16 +523,35 @@ data Bound a =
   Open { getBound :: a } -- ^ An inclusive bound
   | Closed { getBound :: a } -- ^ An exclusive bound
   | DefaultBound { getBound :: a }
+  | MinVal
+  | MaxVal
+
+instance Expr a => Expr (Bound a) where
+  expr (Open a) = expr a
+  expr (Closed a) = expr a
+  expr (DefaultBound a) = expr a
+  expr MinVal = op MINVAL ()
+  expr MaxVal = op MAXVAL ()
+
+minval :: Bound a
+minval = MinVal
+
+maxval :: Bound a
+maxval = MaxVal
 
 instance Functor Bound where
   fmap f (Open a) = Open (f a)
   fmap f (Closed a) = Closed (f a)
   fmap f (DefaultBound a) = DefaultBound (f a)
+  fmap _ MinVal = MinVal
+  fmap _ MaxVal = MaxVal
 
 closedOrOpen :: Bound a -> Maybe T.Text
 closedOrOpen Open{} = Just "open"
 closedOrOpen Closed{} = Just "closed"
 closedOrOpen DefaultBound{} = Nothing
+closedOrOpen MinVal = Nothing
+closedOrOpen MaxVal = Nothing
 
 boundOp :: (a -> a -> a) -> Bound a -> Bound a -> Bound a
 boundOp f (Closed a) (Closed b) = Closed $ f a b
@@ -539,14 +560,23 @@ boundOp f (Open a) (Closed b) = Open $ f a b
 boundOp f (Open a) (Open b) = Open $ f a b
 boundOp f (DefaultBound a) b = fmap (f a) b
 boundOp f a (DefaultBound b) = fmap (flip f b) a
+boundOp _ MaxVal a = a
+boundOp _ MinVal a = a
+boundOp _ a MaxVal = a
+boundOp _ a MinVal = a
 
 instance Num a => Num (Bound a) where
   (+) = boundOp (+)
   (-) = boundOp (-)
   (*) = boundOp (*)
-  negate = fmap negate
-  abs = fmap abs
-  signum = fmap signum
+  negate MinVal = MaxVal
+  negate MaxVal = MaxVal 
+  negate a = fmap negate a
+  abs MinVal = MaxVal
+  abs a = fmap abs a
+  signum MinVal = Open (-1)
+  signum MaxVal = Open 1
+  signum a = fmap signum a
   fromInteger = DefaultBound . fromInteger
 
 -- | An empty object
