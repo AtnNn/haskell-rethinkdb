@@ -111,10 +111,10 @@ delete s = op Term.DELETE [s]
 -- | Like map but for write queries
 --
 -- >>> _ <- run' h $ table "users" # replace (without ["post_count"])
--- >>> run h $ forEach (table "users") (\user -> table "users" # get (user!"name") # ex update [nonAtomic] (const ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) :: IO WriteResponse
+-- >>> run h $ forEach (\user -> table "users" # get (user!"name") # ex update [nonAtomic] (const ["post_count" := R.count (table "posts" # R.filter (\post -> post!"author" R.== user!"name"))])) (table "users") :: IO WriteResponse
 -- {replaced:2}
-forEach :: (Expr s, Expr a) => s -> (ReQL -> a) -> ReQL
-forEach s f = op FOR_EACH (s, expr P.. f)
+forEach :: (Expr a, Expr s) => (ReQL -> a) -> s -> ReQL
+forEach f s = op FOR_EACH (s, expr P.. f)
 
 -- | A table
 --

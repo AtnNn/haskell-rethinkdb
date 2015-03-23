@@ -12,3 +12,5 @@ dist/
 *.hi-boot
 .cabal-sandbox/
 cabal.sandbox.config
+.ghci
+.lvimrc
