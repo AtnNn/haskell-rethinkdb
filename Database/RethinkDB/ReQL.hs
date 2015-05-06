@@ -1,7 +1,7 @@
 {-# LANGUAGE ExistentialQuantification, RecordWildCards,
              ScopedTypeVariables, FlexibleInstances,
              OverloadedStrings, PatternGuards, GADTs, 
-             EmptyDataDecls, DefaultSignatures #-}
+             EmptyDataDecls, DefaultSignatures, CPP #-}
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
@@ -47,7 +47,9 @@ import Data.Maybe (fromMaybe, catMaybes)
 import Data.String (IsString(..))
 import Data.List (intercalate)
 import Control.Monad.State (State, get, put, runState)
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative ((<$>), (<*>))
+#endif
 import Data.Default (Default, def)
 import qualified Data.Text as T
 import qualified Data.ByteString as SB
@@ -56,7 +58,9 @@ import Data.Foldable (toList)
 import Data.Time
 import Control.Monad.Fix
 import Data.Int
+#if __GLASGOW_HASKELL__ < 710
 import Data.Monoid
+#endif
 import Data.Char
 import Data.Ratio
 import Data.Word

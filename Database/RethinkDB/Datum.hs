@@ -1,6 +1,9 @@
 {-# LANGUAGE CPP, OverloadedStrings, PatternGuards, DefaultSignatures, FlexibleInstances #-}
 #if __GLASGOW_HASKELL__ < 710
 {-# LANGUAGE OverlappingInstances #-}
+#define PRAGMA_OVERLAPPING
+#else
+#define PRAGMA_OVERLAPPING {-# OVERLAPPING #-}
 #endif
 
 module Database.RethinkDB.Datum (
@@ -155,11 +158,7 @@ instance FromDatum LonLat where
   parseDatum d = errorExpected "Point" d
 
 instance FromDatum Float
-#if __GLASGOW_HASKELL__ >= 710
-instance {-# OVERLAPPING #-} FromDatum String
-#else
-instance FromDatum String
-#endif
+instance PRAGMA_OVERLAPPING FromDatum String
 instance FromDatum Int
 instance FromDatum Int8
 instance FromDatum Int16
@@ -311,11 +310,7 @@ instance ToDatum Word16
 instance ToDatum Word32
 instance ToDatum Word64
 instance ToDatum Char
-#if __GLASGOW_HASKELL__ >= 710
-instance {-# OVERLAPPING #-} ToDatum [Char]
-#else
-instance ToDatum [Char]
-#endif
+instance PRAGMA_OVERLAPPING ToDatum [Char]
 instance ToDatum Integer
 instance ToDatum ST.Text
 instance ToDatum LT.Text
