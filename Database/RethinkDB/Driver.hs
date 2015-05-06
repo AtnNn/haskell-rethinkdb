@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, FlexibleInstances, DefaultSignatures, GADTs #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, DefaultSignatures, GADTs, CPP #-}
 
 module Database.RethinkDB.Driver (
   run,
@@ -14,7 +14,9 @@ import qualified Data.Aeson as J
 import Control.Monad
 import Control.Concurrent.MVar (MVar, takeMVar)
 import Data.Text (Text)
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative ((<$>), (<*>))
+#endif
 import Data.List
 import Data.Maybe
 import Control.Exception (throwIO)
