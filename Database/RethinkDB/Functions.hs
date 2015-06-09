@@ -549,8 +549,8 @@ db = Database
 --
 -- >>> run' h $ dbCreate "dev"
 -- {"config_changes":[{"new_val":{"name":"dev","id":...},"old_val":null}],"dbs_created":1}
-dbCreate :: P.String -> ReQL
-dbCreate db_name = op DB_CREATE [str db_name]
+dbCreate :: Text -> ReQL
+dbCreate db_name = op DB_CREATE [expr db_name]
 
 -- | Drop a database
 --
@@ -573,8 +573,8 @@ dbList = op DB_LIST ()
 -- {"created":1}
 -- >>> run' h $ table "users" # ex indexCreate ["geo":=True] "location" (!"location")
 -- {"created":1}
-indexCreate :: (Expr fun) => P.String -> fun -> Table -> ReQL
-indexCreate name f tbl = op INDEX_CREATE (tbl, str name, f)
+indexCreate :: (Expr fun) => Text -> fun -> Table -> ReQL
+indexCreate name f tbl = op INDEX_CREATE (tbl, expr name, f)
 
 -- | Get the status of the given indexes
 --
