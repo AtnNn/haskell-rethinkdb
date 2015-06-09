@@ -9,7 +9,7 @@
 module Database.RethinkDB.Datum (
   parse, Parser, Result(..),
   Datum(..), ToDatum(..), FromDatum(..), fromDatum,
-  LonLat(..), Array, Object, Line, Polygon,
+  LonLat(..), Array, Object, GeoLine(..), GeoPolygon(..),
   (.=), (.:), (.:?),
   encode, decode, eitherDecode,
   resultToMaybe, resultToEither,
@@ -53,8 +53,8 @@ data Datum =
   Object Object |
   Time ZonedTime |
   Point LonLat |
-  Line Line |
-  Polygon Polygon |
+  Line GeoLine |
+  Polygon GeoPolygon |
   Binary SB.ByteString
 
 class FromDatum a where
@@ -146,12 +146,17 @@ instance FromDatum UTCTime where
   parseDatum (Time t) = return $ zonedTimeToUTC t
   parseDatum d = errorExpected "Time" d
 
--- TODO: This instance breaks (fmap toDatum . fromDatum) == return
 instance FromDatum a => FromDatum (Vector a) where
   parseDatum (Array v) = fmap V.fromList . mapM parseDatum $ V.toList v
-  parseDatum (Line l) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList l
-  parseDatum (Polygon p) = fmap V.fromList . mapM (parseDatum . toDatum) $ V.toList p
-  parseDatum d = errorExpected "Array, Line or Polygon" d
+  parseDatum d = errorExpected "Array" d
+
+instance FromDatum GeoLine where
+  parseDatum (Line l) = return l
+  parseDatum d = errorExpected "Line" d
+
+instance FromDatum GeoPolygon where
+  parseDatum (Polygon p) = return p
+  parseDatum d = errorExpected "Polygon" d
 
 instance FromDatum LonLat where
   parseDatum (Point l) = return l
@@ -180,8 +185,10 @@ instance FromDatum (Ratio Integer)
 
 type Array = Vector Datum
 type Object = HM.HashMap ST.Text Datum
-type Line = Vector LonLat
-type Polygon = Vector (Vector LonLat)
+newtype GeoLine = GeoLine { geoLinePoints :: Vector LonLat } 
+            deriving (Eq, Ord)
+newtype GeoPolygon = GeoPolygon { geoPolygonLines :: Vector (Vector LonLat) }
+            deriving (Eq, Ord)
 
 data LonLat = LonLat { longitude, latitude :: Double }
             deriving (Eq, Ord)
@@ -213,8 +220,8 @@ instance Show Datum where
   show (Object o) = "{" ++ intercalate "," (map (\(k,v) -> show k ++ ":" ++ show v) $ HM.toList o) ++ "}"
   show (Time t) = "Time<" ++ show t ++ ">"
   show (Point p) = "Point<" ++ showLonLat p ++ ">"
-  show (Line l) = "Line<[" ++ intercalate "],[" (map showLonLat $ V.toList l) ++ "]>"
-  show (Polygon p) = "Polygon<[" ++ intercalate "],[" (map (\x -> "[" ++ intercalate "],[" (map showLonLat $ V.toList x) ++ "]") (V.toList p)) ++ "]>"
+  show (Line l) = "Line<[" ++ intercalate "],[" (map showLonLat $ V.toList $ geoLinePoints l) ++ "]>"
+  show (Polygon p) = "Polygon<[" ++ intercalate "],[" (map (\x -> "[" ++ intercalate "],[" (map showLonLat $ V.toList x) ++ "]") (V.toList $ geoPolygonLines p)) ++ "]>"
   show (Binary b) = "Binary<" ++ show b ++ ">"
 
 showLonLat :: LonLat -> String
@@ -329,8 +336,8 @@ toJSONDatum a = case toJSON a of
         Just c <- HM.lookup "coordinates" o ->
           case t of
             "Point" | Success [lon, lat] <- fromJSON c -> Point (LonLat lon lat)
-            "LineString" | Success l <- V.mapM toLonLat =<< fromJSON c -> Line l
-            "Polygon" | Success p <- V.mapM (V.mapM toLonLat) =<< fromJSON c -> Polygon p
+            "LineString" | Success l <- V.mapM toLonLat =<< fromJSON c -> Line (GeoLine l)
+            "Polygon" | Success p <- V.mapM (V.mapM toLonLat) =<< fromJSON c -> Polygon (GeoPolygon p)
             _ -> asObject
       Just "TIME" |
         Just (J.Number ts) <- HM.lookup "epoch_time" o,
@@ -371,11 +378,11 @@ instance ToJSON Datum where
   toJSON (Line l) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
     "type" J..= ("LineString" :: ST.Text),
-    "coordinates" J..= V.map pointToPair l]
+    "coordinates" J..= V.map pointToPair (geoLinePoints l)]
   toJSON (Polygon p) = J.object [
     "$reql_type$" J..= ("GEOMETRY" :: ST.Text),
     "type" J..= ("Polygon" :: ST.Text),
-    "coordinates" J..= V.map (V.map pointToPair) p]
+    "coordinates" J..= V.map (V.map pointToPair) (geoPolygonLines p)]
   toJSON (Binary b) = J.object [
     "$reql_type$" J..= ("BINARY" :: ST.Text),
     "data" J..= Char8.unpack (Base64.encode b)]

@@ -139,7 +139,7 @@ module Database.RethinkDB (
   toGeoJSON, getIntersecting,
   getNearest, includes, intersects,
   line, point, polygon, polygonSub,
-  LonLat(..), Line, Polygon,
+  LonLat(..), GeoLine(..), GeoPolygon(..),
   maxResults, maxDist, unit, numVertices,
   Unit(..),
   
