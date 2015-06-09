@@ -14,3 +14,5 @@ dist/
 cabal.sandbox.config
 .ghci
 .lvimrc
+*.nix
+*.drv
