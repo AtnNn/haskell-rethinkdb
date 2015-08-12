@@ -113,6 +113,7 @@ module Database.RethinkDB (
   (==), (/=), (>), (>=), (<), (<=),
   not,
   random, randomTo, randomFromTo,
+  floor, ceil, round,
   
   -- * Dates and times
   

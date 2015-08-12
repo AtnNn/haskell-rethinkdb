@@ -16,3 +16,4 @@ cabal.sandbox.config
 .lvimrc
 *.nix
 *.drv
+.DS_Store

@@ -21,6 +21,26 @@ instance WireValue ResponseType where
   fromWire _ = Nothing
 
 
+data ErrorType = INTERNAL | RESOURCE_LIMIT | QUERY_LOGIC | NON_EXISTENCE | OP_FAILED | OP_INDETERMINATE | USER
+  deriving (Eq, Show)
+instance WireValue ErrorType where
+  toWire INTERNAL = 1000000
+  toWire RESOURCE_LIMIT = 2000000
+  toWire QUERY_LOGIC = 3000000
+  toWire NON_EXISTENCE = 3100000
+  toWire OP_FAILED = 4100000
+  toWire OP_INDETERMINATE = 4200000
+  toWire USER = 5000000
+  fromWire 1000000 = Just INTERNAL
+  fromWire 2000000 = Just RESOURCE_LIMIT
+  fromWire 3000000 = Just QUERY_LOGIC
+  fromWire 3100000 = Just NON_EXISTENCE
+  fromWire 4100000 = Just OP_FAILED
+  fromWire 4200000 = Just OP_INDETERMINATE
+  fromWire 5000000 = Just USER
+  fromWire _ = Nothing
+
+
 data ResponseNote = SEQUENCE_FEED | ATOM_FEED | ORDER_BY_LIMIT_FEED | UNIONED_FEED | INCLUDES_STATES
   deriving (Eq, Show)
 instance WireValue ResponseNote where

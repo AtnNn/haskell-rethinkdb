@@ -28,8 +28,8 @@ import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName)
 import Network.Socket (
-  socket, Family(AF_INET, AF_INET6), SocketType(Stream), sClose, setSocketOption, SocketOption(NoDelay),
-  Socket, AddrInfo(AddrInfo, addrAddress, addrFamily))
+  socket, Family(AF_INET, AF_INET6), SocketType(Stream), sClose, setSocketOption,
+  SocketOption(NoDelay, KeepAlive), Socket, AddrInfo(AddrInfo, addrAddress, addrFamily))
 import qualified Network.Socket as Socket
 import Network.BSD (getProtocolNumber)
 import Network.Socket.ByteString.Lazy (sendAll)
@@ -122,6 +122,7 @@ connectTo host port = do
   bracketOnError (socket addrF Stream proto) sClose $ \sock -> do
     Socket.connect sock (addrAddress addrI)
     setSocketOption sock NoDelay 1
+    setSocketOption sock KeepAlive 1
     return sock
 
 -- | Create a new connection to the database server

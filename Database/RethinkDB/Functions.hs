@@ -39,7 +39,7 @@ import qualified Prelude as P
 -- >>> import qualified Database.RethinkDB as R
 -- >>> :set -XOverloadedStrings
 -- >>> default (Datum, ReQL, String, Int, Double)
--- >>> h <- doctestConnect 
+-- >>> h <- doctestConnect
 
 -- $init_doctests
 -- >>> try' $ run' h $ dbCreate "doctests"
@@ -441,6 +441,27 @@ argmin f s = op MIN (s, expr . f)
 max :: Expr s => s -> ReQL
 max s = op MAX [s]
 
+-- | Floor rounds number to interger below
+--
+-- >>> run h $ R.floor 2.9
+-- 2
+floor :: Expr s => s -> ReQL
+floor s = op FLOOR [s]
+
+-- | Ceil rounds number to integer above
+--
+-- >>> run h $ R.ceil 2.1
+-- 3
+ceil :: Expr s => s -> ReQL
+ceil s = op CEIL [s]
+
+-- | Round rounds number to nearest integer
+--
+-- >>> run h $ R.round 2.5
+-- 3
+round :: Expr s => s -> ReQL
+round s = op ROUND [s]
+
 -- | Value that maximizes the function
 argmax :: (Expr s, Expr a) => (ReQL -> a) -> s -> ReQL
 argmax f s = op MAX (s, expr . f)
@@ -647,7 +668,7 @@ asArray = coerceTo "ARRAY"
 -- | Convert a value to a string
 --
 -- >>> run h $ asString $ ["a" := 1, "b" := 2]
--- "{\n\t\"a\":\t1,\n\t\"b\":\t2\n}"
+-- "{\"a\":1,\"b\":2}"
 asString :: Expr x => x -> ReQL
 asString = coerceTo "STRING"
 
@@ -705,7 +726,7 @@ prepend d a = op PREPEND (a, d)
 
 -- | The different of two lists
 --
--- >>> run h $ [1,2,3,4,5] # difference [2,5] 
+-- >>> run h $ [1,2,3,4,5] # difference [2,5]
 -- [1,3,4]
 difference :: (Expr a, Expr b) => a -> b -> ReQL
 difference a b = op DIFFERENCE (b, a)
@@ -953,7 +974,7 @@ instance Default HttpOptions where
 http :: Expr url => url -> HttpOptions -> ReQL
 http url opts = op' HTTP [url] $ render opts
   where
-    render ho = 
+    render ho =
       let
         go :: Expr x => (HttpOptions -> Maybe x) -> Text -> [Attribute Static]
         go f s = maybe [] (\x -> [s := x]) (f ho)
@@ -1010,7 +1031,7 @@ durability d = "durability" := d
 -- | Optional argument for non-atomic writes
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
--- *** Exception: RethinkDB: Runtime error: "Could not prove function deterministic.  Maybe you want to use the non_atomic flag?"
+-- *** Exception: RethinkDB: Runtime error: "Could not prove argument deterministic.  Maybe you want to use the non_atomic flag?"
 --   in
 --     {- HERE -}
 --     update(
@@ -1064,7 +1085,7 @@ rangeAll = op RANGE ()
 -- | Wait for tables to be ready
 --
 -- >>> run h $ table "users" # wait
--- {"ready":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":true,"ready_for_outdated_reads":true,"ready_for_writes":true,"ready_for_reads":true},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
+-- {"ready":1}
 wait :: Expr table => table -> ReQL
 wait t = op WAIT [t]
 

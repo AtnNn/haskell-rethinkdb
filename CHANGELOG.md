@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0.0
+- Added support for new RethinkDB 2.1 features (http://rethinkdb.com/blog/2.1-release/)
+- Added new ReQL terms `floor`, `ceil`, and `round`
+- Changed `UseOutdated` optarg to `ReadMode` optarg
+- Enabled TCP Keepalive
+
 ## 2.0.0.0
 - Added support for new RethinkDB 2.0 features (http://rethinkdb.com/blog/2.0-release/)
 - switch forEach args to match map

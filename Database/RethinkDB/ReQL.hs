@@ -108,7 +108,7 @@ data QuerySettings = QuerySettings {
   queryToken :: Int64,
   queryDefaultDatabase :: Database,
   queryVarIndex :: Int,
-  queryUseOutdated :: Maybe Bool
+  queryReadMode :: Maybe String
   }
 
 instance Default QuerySettings where
@@ -438,7 +438,7 @@ instance (a ~ ReQL, b ~ ReQL, c ~ ReQL, d ~ ReQL, e ~ ReQL) => Expr (a -> b -> c
 instance Expr Table where
   expr (Table mdb name _) = withQuerySettings $ \QuerySettings {..} ->
     op' TABLE (fromMaybe queryDefaultDatabase mdb, name) $ catMaybes [
-      fmap ("use_outdated" :=) queryUseOutdated ]
+      fmap ("read_mode" :=) queryReadMode ]
 
 instance Expr Database where
   expr (Database name) = op DB [name]

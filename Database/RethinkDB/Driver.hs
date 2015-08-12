@@ -49,16 +49,20 @@ import Database.RethinkDB.ReQL
 
 -- | Per-query settings
 data RunFlag =
-  UseOutdated |
+  ReadMode ReadMode |
   NoReply |
   Durability Durability |
   Profile |
   ArrayLimit Int
 
+data ReadMode = Majority | Single | Outdated
+
 data Durability = Hard | Soft
 
 renderOption :: RunFlag -> (Text, Datum)
-renderOption UseOutdated = "user_outdated" .= True
+renderOption (ReadMode Majority) = "read_mode" .= ("majority" :: String)
+renderOption (ReadMode Single) = "read_mode" .= ("single" :: String)
+renderOption (ReadMode Outdated) = "read_mode" .= ("outdated" :: String)
 renderOption NoReply = "noreply" .= True
 renderOption (Durability Soft) = "durability" .= ("soft" :: String)
 renderOption (Durability Hard) = "durability" .= ("hard" :: String)
