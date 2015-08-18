@@ -49,6 +49,7 @@ import Database.RethinkDB.ReQL
 
 -- | Per-query settings
 data RunFlag =
+  UseOutdated | -- ^ Deprecated. Use `ReadMode Outdated` instead
   ReadMode ReadMode |
   NoReply |
   Durability Durability |
@@ -60,6 +61,7 @@ data ReadMode = Majority | Single | Outdated
 data Durability = Hard | Soft
 
 renderOption :: RunFlag -> (Text, Datum)
+renderOption UseOutdated = "read_mode" .= ("outdated" :: String)
 renderOption (ReadMode Majority) = "read_mode" .= ("majority" :: String)
 renderOption (ReadMode Single) = "read_mode" .= ("single" :: String)
 renderOption (ReadMode Outdated) = "read_mode" .= ("outdated" :: String)

@@ -43,6 +43,7 @@ library
             Debug
         exposed: True
         buildable: True
+        ghc-prof-options: -fprof-auto
     exposed-modules:
         Database.RethinkDB
         Database.RethinkDB.NoClash
@@ -66,7 +67,6 @@ library
     exposed: True
     buildable: True
     ghc-options: -Wall
-    ghc-prof-options: -fprof-auto
 
 test-suite doctests
     build-depends:
@@ -92,7 +92,7 @@ benchmark bench
     ghc-prof-options: "-with-rtsopts=-p -s -h -i0.1 -N"
 
 executable proto2hs
-  if flag(dev)
-    buildable: True
+  if !flag(dev)
+    buildable: False
   main-is: proto2hs.hs
   build-depends: base, text, attoparsec
