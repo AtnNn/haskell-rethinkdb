@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/AtnNn/haskell-rethinkdb.svg?branch=master)](https://travis-ci.org/AtnNn/haskell-rethinkdb)
 
-This driver targets versions 2.0 of [RethinkDB](http://rethinkdb.com).
+This driver targets versions 2.1 of [RethinkDB](http://rethinkdb.com).
 
 API Documentation:
 
