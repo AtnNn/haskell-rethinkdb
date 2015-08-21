@@ -6,7 +6,7 @@ license: Apache
 license-file: LICENSE
 maintainer: Etienne Laurin <etienne@atnnn.com>
 homepage: http://github.com/atnnn/haskell-rethinkdb
-synopsis: A driver for RethinkDB 2.0
+synopsis: A driver for RethinkDB 2.1
 description:
     A driver for the RethinkDB database server
 category: Database
