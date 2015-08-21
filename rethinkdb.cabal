@@ -43,7 +43,7 @@ library
             Debug
         exposed: True
         buildable: True
-        ghc-prof-options: -fprof-auto
+        -- ghc-prof-options: -fprof-auto
     exposed-modules:
         Database.RethinkDB
         Database.RethinkDB.NoClash
