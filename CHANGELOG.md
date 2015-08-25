@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0.2
+- Change bounds on vector dependency
+
+## 2.1.0.1
+- Fix synopsis in rethinkdb.cabal file
+
 ## 2.1.0.0
 - Added support for new RethinkDB 2.1 features (http://rethinkdb.com/blog/2.1-release/)
 - Added new ReQL terms `floor`, `ceil`, and `round`
