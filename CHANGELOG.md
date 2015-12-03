@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0.0
+- Added support for RethinkDB 2.2
+- Added new commands `serverInfo`, `uuid5` and `value`
+
 ## 2.1.0.2
 - Change bounds on vector dependency
 
