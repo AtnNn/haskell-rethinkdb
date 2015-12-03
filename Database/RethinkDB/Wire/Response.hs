@@ -1,13 +1,14 @@
 module Database.RethinkDB.Wire.Response where
 import Prelude (Maybe(..), Eq, Show)
 import Database.RethinkDB.Wire
-data ResponseType = SUCCESS_ATOM | SUCCESS_SEQUENCE | SUCCESS_PARTIAL | WAIT_COMPLETE | CLIENT_ERROR | COMPILE_ERROR | RUNTIME_ERROR
+data ResponseType = SUCCESS_ATOM | SUCCESS_SEQUENCE | SUCCESS_PARTIAL | WAIT_COMPLETE | SERVER_INFO | CLIENT_ERROR | COMPILE_ERROR | RUNTIME_ERROR
   deriving (Eq, Show)
 instance WireValue ResponseType where
   toWire SUCCESS_ATOM = 1
   toWire SUCCESS_SEQUENCE = 2
   toWire SUCCESS_PARTIAL = 3
   toWire WAIT_COMPLETE = 4
+  toWire SERVER_INFO = 5
   toWire CLIENT_ERROR = 16
   toWire COMPILE_ERROR = 17
   toWire RUNTIME_ERROR = 18
@@ -15,6 +16,7 @@ instance WireValue ResponseType where
   fromWire 2 = Just SUCCESS_SEQUENCE
   fromWire 3 = Just SUCCESS_PARTIAL
   fromWire 4 = Just WAIT_COMPLETE
+  fromWire 5 = Just SERVER_INFO
   fromWire 16 = Just CLIENT_ERROR
   fromWire 17 = Just COMPILE_ERROR
   fromWire 18 = Just RUNTIME_ERROR

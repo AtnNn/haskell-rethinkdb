@@ -801,6 +801,13 @@ changeAt n d a = op CHANGE_AT (a, n, d)
 keys :: Expr object => object -> ReQL
 keys o = op KEYS [o]
 
+-- | The list of values of the given object
+--
+-- >>> run h $ values ["a" := 1, "b" := 2]
+-- [1, 2]
+values :: Expr object => object -> ReQL
+values o = op VALUES [o]
+
 -- | Match a string to a regular expression.
 --
 -- >>> run' h $ str "foobar" # match "f(.)+[bc](.+)"
@@ -1018,6 +1025,10 @@ returnChanges = "return_changes" := P.True
 includeStates :: Attribute a
 includeStates = "include_states" := P.True
 
+-- | Optional argument for changes
+includeInitial :: Attribute a
+includeInitial = "include_initial" := P.True
+
 data Durability = Hard | Soft
 
 instance Expr Durability where
@@ -1059,7 +1070,12 @@ conflict cr = "conflict" := cr
 uuid :: ReQL
 uuid = op UUID ()
 
--- * New in 1.16
+-- | Generate a Version 5 UUID
+--
+-- >>> run h $ uuid5 "foo"
+-- "aa32a020-8c2d-5ff1-823b-ad3fa5d067eb"
+uuid5 :: Expr name => name -> ReQL
+uuid5 name = op UUID [name]
 
 -- | Generate numbers starting from 0
 --

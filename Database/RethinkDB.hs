@@ -16,6 +16,7 @@ module Database.RethinkDB (
   RethinkDBHandle,
   close,
   use,
+  serverInfo,
   run, run', runOpts,
   ReQL,
   Datum(..),
@@ -43,7 +44,7 @@ module Database.RethinkDB (
   tableCreate, tableDrop, tableList,
   indexCreate, indexDrop, indexList,
   indexRename, indexStatus, indexWait,
-  changes,
+  changes, includeStates, includeInitial,
 
   -- * Writing data
 
@@ -97,7 +98,7 @@ module Database.RethinkDB (
   setInsert, setUnion, setIntersection, setDifference,
   (!), (!?),
   hasFields,
-  insertAt, spliceAt, deleteAt, changeAt, keys,  
+  insertAt, spliceAt, deleteAt, changeAt, keys, values,
   literal, remove,
   Attribute(..),
 
@@ -129,7 +130,7 @@ module Database.RethinkDB (
   error,
   handle, Expr(..), coerceTo,
   asArray, asString, asNumber, asObject, asBool,
-  typeOf, info, json, toJSON, uuid,
+  typeOf, info, json, toJSON, uuid, uuid5,
   http,
   HttpOptions(..), HttpResultFormat(..),
   HttpMethod(..), PaginationStrategy(..),

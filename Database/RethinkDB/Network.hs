@@ -21,7 +21,8 @@ module Database.RethinkDB.Network (
   RethinkDBConnectionError(..),
   More,
   noReplyWait,
-  each
+  each,
+  serverInfo
   ) where
 
 import Control.Monad (when, forever, forM_)
@@ -56,8 +57,8 @@ import Data.Word (Word64, Word32)
 import qualified Data.HashMap.Strict as HM
 
 import Database.RethinkDB.Wire
-import Database.RethinkDB.Wire.Response
-import Database.RethinkDB.Wire.Query
+import Database.RethinkDB.Wire.Response as Response
+import Database.RethinkDB.Wire.Query as Query
 import Database.RethinkDB.Wire.VersionDummy as Protocol
 import Database.RethinkDB.Types
 import Database.RethinkDB.Datum
@@ -263,6 +264,7 @@ convertResponse h q t (WireResponse (Object o)) = let
   f <!< (Just a) = f a
   in case type_ of
   Just SUCCESS_ATOM -> ResponseSingle <!< atom
+  Just Response.SERVER_INFO -> ResponseSingle <!< atom
   Just SUCCESS_PARTIAL -> ResponseBatch (Just $ More False h t) <!< results
   Just SUCCESS_SEQUENCE -> ResponseBatch Nothing <!< results
   Just CLIENT_ERROR -> ResponseError $ RethinkDBError ErrorBrokenClient q e bt
@@ -469,3 +471,13 @@ each cursor f = do
     else do
       forM_ batch f
       each cursor f
+
+-- | Get information about the server
+serverInfo :: RethinkDBHandle -> IO Datum
+serverInfo h = do
+  m <- runQLQuery h (WireQuery $ toDatum [toWire Query.SERVER_INFO]) (Datum Null)
+  response <- takeMVar m
+  case response of
+    ResponseError e -> throwIO e
+    ResponseBatch _ _ -> throwIO (RethinkDBError ErrorUnexpectedResponse (Datum Null) "" [])
+    ResponseSingle d -> return d

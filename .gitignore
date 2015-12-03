@@ -17,3 +17,4 @@ cabal.sandbox.config
 *.nix
 *.drv
 .DS_Store
+.stack-work/
