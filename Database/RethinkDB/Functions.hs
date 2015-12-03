@@ -804,7 +804,7 @@ keys o = op KEYS [o]
 -- | The list of values of the given object
 --
 -- >>> run h $ values ["a" := 1, "b" := 2]
--- [1, 2]
+-- [1,2]
 values :: Expr object => object -> ReQL
 values o = op VALUES [o]
 
@@ -1131,7 +1131,7 @@ zipWithN f s = op MAP $ arr s <> arr [f]
 -- | Change a table's configuration
 --
 -- >>> run h $ table "users" # reconfigure 2 1
--- {"config_changes":[{"new_val":{"primary_key":"name","write_acks":"majority","durability":"hard","name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}],"reconfigured":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":...,"ready_for_outdated_reads":...,"ready_for_writes":...,"ready_for_reads":...},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
+-- {"config_changes":[{"new_val":{"primary_key":"name","write_acks":"majority","durability":"hard","name":"users","shards":...
 reconfigure :: (Expr table, Expr replicas)
             => ReQL -> replicas -> table -> ReQL
 reconfigure shards replicas t = op' RECONFIGURE [t] ["shards" := shards, "replicas" := replicas]
@@ -1139,7 +1139,7 @@ reconfigure shards replicas t = op' RECONFIGURE [t] ["shards" := shards, "replic
 -- | Rebalance a table's shards
 --
 -- >>> run h $ table "users" # rebalance
--- {"rebalanced":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":...,"ready_for_outdated_reads":...,"ready_for_writes":...,"ready_for_reads":...},"name":"users","shards":...,"id":...,"db":"doctests"},"old_val":...}]}
+-- {"rebalanced":1,"status_changes":[{"new_val":{"status":{"all_replicas_ready":...,"ready_for_outdated_reads":...
 rebalance :: Expr table => table -> ReQL
 rebalance t = op REBALANCE [t]
 
@@ -1153,6 +1153,6 @@ config t = op CONFIG [t]
 -- | Get the status of a table
 --
 -- >>> run h $ table "users" # status
--- {"status":{"all_replicas_ready":true,"ready_for_outdated_reads":true,"ready_for_writes":true,"ready_for_reads":true},"name":"users","shards":...,"id":...,"db":"doctests"}
+-- {"status":{"all_replicas_ready":true,"ready_for_outdated_reads":true,...
 status :: Expr table => table -> ReQL
 status t = op STATUS [t]
