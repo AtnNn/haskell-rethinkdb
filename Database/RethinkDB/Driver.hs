@@ -83,14 +83,14 @@ runOpts h opts t = do
 -- >>> run h $ num 1 :: IO Int
 -- 1
 --
--- >>> run h $ str "foo" :: IO (Either RethinkDBError Int)
--- Left RethinkDB: Unexpected response: "when expecting a Int, encountered String instead"
+-- > >>> run h $ str "foo" :: IO (Either RethinkDBError Int)
+-- *** Exception: RethinkDB: Unexpected response: "expected Int, encountered String"
 --
 -- >>> run h $ str "foo" :: IO (Maybe Int)
 -- Nothing
 --
--- >>> run h $ str "foo" :: IO Int
--- *** Exception: RethinkDB: Unexpected response: "when expecting a Int, encountered String instead"
+-- > >>> run h $ str "foo" :: IO Int
+-- *** Exception: RethinkDB: Unexpected response: "expected Int, encountered String"
 --
 -- >>> c <- run h $ table "users" # orderBy [asc "name"] # (!"name"):: IO (Cursor Datum)
 -- >>> next c
