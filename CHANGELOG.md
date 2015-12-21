@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0.2
+- Clean up and fix tests/examples
+
+## 2.2.0.1
+- Added support for aeson 0.10
+
 ## 2.2.0.0
 - Added support for RethinkDB 2.2
 - Added new commands `serverInfo`, `uuid5` and `value`
