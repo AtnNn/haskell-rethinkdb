@@ -131,7 +131,7 @@ connectTo host port = do
 -- /Example:/ connect using the default port with no passphrase (/note:/ IPv4 and IPv6 supported)
 --
 -- >>> h <- connect "localhost" 28015 Nothing
--- >>> h <- connect "::1" 28015 Nothing
+-- > >>> h <- connect "::1" 28015 Nothing
 
 connect :: HostName -> Integer -> Maybe String -> IO RethinkDBHandle
 connect host port mauth = do
