@@ -1,5 +1,5 @@
 name: rethinkdb
-version: 2.2.0.2
+version: 2.2.0.3
 cabal-version: >=1.8
 build-type: Simple
 license: Apache
