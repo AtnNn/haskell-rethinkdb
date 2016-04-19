@@ -18,3 +18,4 @@ cabal.sandbox.config
 *.drv
 .DS_Store
 .stack-work/
+rethinkdb_data

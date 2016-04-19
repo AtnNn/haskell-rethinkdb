@@ -185,7 +185,7 @@ instance FromDatum (Ratio Integer)
 
 type Array = Vector Datum
 type Object = HM.HashMap ST.Text Datum
-newtype GeoLine = GeoLine { geoLinePoints :: Vector LonLat } 
+newtype GeoLine = GeoLine { geoLinePoints :: Vector LonLat }
             deriving (Eq, Ord)
 newtype GeoPolygon = GeoPolygon { geoPolygonLines :: Vector (Vector LonLat) }
             deriving (Eq, Ord)
@@ -354,7 +354,7 @@ toJSONDatum a = case toJSON a of
   J.Number s -> Number (toRealFloat s)
   J.String t -> String t
   J.Array v -> Array (fmap toJSONDatum v)
-  where 
+  where
     toLonLat [lon, lat] = J.Success $ LonLat lon lat
     toLonLat _ = J.Error "expected a pair"
 instance J.FromJSON Datum where
