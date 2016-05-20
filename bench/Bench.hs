@@ -3,7 +3,7 @@
 module Main where
 
 import Control.Exception
-import Database.RethinkDB.NoClash
+import Database.RethinkDB.NoClash hiding (wait)
 import qualified Database.RethinkDB as R
 import Criterion.Main
 import Control.Monad
