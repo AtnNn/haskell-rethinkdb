@@ -554,7 +554,7 @@ branch a b c = op BRANCH (a, b, c)
 -- | Abort the query with an error
 --
 -- >>> run' h $ R.error (str "haha") R./ 2 + 1
--- *** Exception: RethinkDB: Runtime error: "haha"
+-- *** Exception: RethinkDB: Runtime error: haha
 --   in add(div({- HERE -} error("haha"), 2), 1)
 error :: (Expr s) => s -> ReQL
 error m = op ERROR [m]
@@ -1042,7 +1042,7 @@ durability d = "durability" := d
 -- | Optional argument for non-atomic writes
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
--- *** Exception: RethinkDB: Runtime error: "Could not prove argument deterministic.  Maybe you want to use the non_atomic flag?"
+-- *** Exception: RethinkDB: Runtime error: Could not prove argument deterministic.  Maybe you want to use the non_atomic flag?
 --   in
 --     {- HERE -}
 --     update(

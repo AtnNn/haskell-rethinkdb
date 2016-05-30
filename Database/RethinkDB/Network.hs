@@ -193,7 +193,7 @@ instance Exception RethinkDBError
 
 instance Show RethinkDBError where
   show (RethinkDBError code term message backtrace) =
-    show code ++ ": " ++ show message ++
+    show code ++ ": " ++ message ++
     if term == Datum Null
        then ""
        else "\n" ++ indent ("in " ++ show (annotate backtrace term))
