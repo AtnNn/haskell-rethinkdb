@@ -12,6 +12,12 @@ description:
 category: Database
 author: Etienne Laurin, Brandon Martin
 
+tested-with:
+  GHC==7.6.3,
+  GHC==7.8.4,
+  GHC==7.10.3,
+  GHC==8.0.1
+
 source-repository head
     type: git
     location: https://github.com/atnnn/haskell-rethinkdb
@@ -28,7 +34,7 @@ library
         aeson >=0.7 && <0.12,
         bytestring ==0.10.*,
         containers ==0.5.*,
-        data-default >=0.5 && <0.7,
+        data-default >=0.5 && <0.8,
         network >=2.4 && <2.7,
         mtl >=2.1 && <2.3,
         vector >=0.10 && <0.12,
