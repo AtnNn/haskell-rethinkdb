@@ -29,7 +29,7 @@ import Control.Monad (when, forever, forM_)
 import Data.Typeable (Typeable)
 import Network (HostName)
 import Network.Socket (
-  socket, Family(AF_INET, AF_INET6), SocketType(Stream), sClose, setSocketOption,
+  socket, Family(AF_INET, AF_INET6), SocketType(Stream), setSocketOption,
   SocketOption(NoDelay, KeepAlive), Socket, AddrInfo(AddrInfo, addrAddress, addrFamily))
 import qualified Network.Socket as Socket
 import Network.BSD (getProtocolNumber)
@@ -120,7 +120,7 @@ connectTo host port = do
   let addrI = head h
   let addrF = getAddrFamily addrI
   proto <- getProtocolNumber "tcp"
-  bracketOnError (socket addrF Stream proto) sClose $ \sock -> do
+  bracketOnError (socket addrF Stream proto) Socket.close $ \sock -> do
     Socket.connect sock (addrAddress addrI)
     setSocketOption sock NoDelay 1
     setSocketOption sock KeepAlive 1
@@ -333,7 +333,7 @@ readResponses h' = do
   tid <- myThreadId
   let h = h' tid
   let handler e@SomeException{} = do
-        sClose $ rdbSocket h
+        Socket.close $ rdbSocket h
         modifyMVar (rdbWriteLock h) $ \_ -> return (Just e, ())
         writeIORef (rdbWait h) M.empty
   flip catch handler $ forever $ readSingleResponse h
@@ -384,7 +384,7 @@ close :: RethinkDBHandle -> IO ()
 close h@RethinkDBHandle{ rdbSocket, rdbThread } = do
   noReplyWait h
   killThread rdbThread
-  sClose rdbSocket
+  Socket.close rdbSocket
 
 closeToken :: RethinkDBHandle -> Token -> IO ()
 closeToken h tok = do
