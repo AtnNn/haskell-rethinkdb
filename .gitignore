@@ -18,4 +18,5 @@ cabal.sandbox.config
 *.drv
 .DS_Store
 .stack-work/
+dist-newstyle/
 rethinkdb_data
