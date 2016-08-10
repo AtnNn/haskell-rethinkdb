@@ -7,7 +7,8 @@ module Database.RethinkDB.Driver (
   runOpts,
   RunFlag(..),
   WriteResponse(..),
-  Change(..)
+  Change(..),
+  Durability(..)
   ) where
 
 import qualified Data.Aeson as J
@@ -34,6 +35,7 @@ import Data.Ratio
 import qualified Data.Vector as V
 
 import Database.RethinkDB.Datum hiding (Result)
+import Database.RethinkDB.Functions (Durability(..))
 import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL
 
@@ -57,8 +59,6 @@ data RunFlag =
   ArrayLimit Int
 
 data ReadMode = Majority | Single | Outdated
-
-data Durability = Hard | Soft
 
 renderOption :: RunFlag -> (Text, Datum)
 renderOption UseOutdated = "read_mode" .= ("outdated" :: String)
