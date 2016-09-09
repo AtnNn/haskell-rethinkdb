@@ -6,6 +6,8 @@ module Database.RethinkDB.Driver (
   Result(..),
   runOpts,
   RunFlag(..),
+  Durability(..),
+  durability,
   WriteResponse(..),
   Change(..)
   ) where
@@ -59,6 +61,14 @@ data RunFlag =
 data ReadMode = Majority | Single | Outdated
 
 data Durability = Hard | Soft
+
+instance Expr Durability where
+  expr Hard = "hard"
+  expr Soft = "soft"
+
+-- | Optional argument for soft durability writes
+durability :: Durability -> Attribute a
+durability d = "durability" := d
 
 renderOption :: RunFlag -> (Text, Datum)
 renderOption UseOutdated = "read_mode" .= ("outdated" :: String)
@@ -115,7 +125,7 @@ instance Result Response where
 
 instance FromDatum a => Result (Cursor a) where
   convertResult r = do
-    c <- makeCursor r 
+    c <- makeCursor r
     return c { cursorMap = unsafeFromDatum }
 
 unsafeFromDatum :: FromDatum a => Datum -> IO a
@@ -144,7 +154,7 @@ instance (FromDatum b, a ~ RethinkDBError) => Result (Either a b) where
         Error a -> return $ Left $ RethinkDBError ErrorUnexpectedResponse (Datum Null) a []
 
 instance FromDatum a => Result (Maybe a) where
-  convertResult v = do 
+  convertResult v = do
       ed <- convertResult v
       case ed of
         Left _ -> return Nothing

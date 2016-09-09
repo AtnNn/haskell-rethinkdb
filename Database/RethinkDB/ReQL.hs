@@ -37,7 +37,11 @@ module Database.RethinkDB.ReQL (
   ) where
 
 import qualified Data.Aeson as J
+#if MIN_VERSION_aeson(1,0,0)
+import qualified Data.Aeson.Text as J
+#else
 import qualified Data.Aeson.Encode as J
+#endif
 import qualified Data.Text.Lazy as LT
 import qualified Data.Text.Lazy.Builder as LT
 import Data.Aeson (Value)

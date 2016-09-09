@@ -1029,16 +1029,6 @@ includeStates = "include_states" := P.True
 includeInitial :: Attribute a
 includeInitial = "include_initial" := P.True
 
-data Durability = Hard | Soft
-
-instance Expr Durability where
-  expr Hard = "hard"
-  expr Soft = "soft"
-
--- | Optional argument for soft durability writes
-durability :: Durability -> Attribute a
-durability d = "durability" := d
-
 -- | Optional argument for non-atomic writes
 --
 -- >>> run' h $ table "users" # get "sabrina" # update (merge ["lucky_number" := random])
