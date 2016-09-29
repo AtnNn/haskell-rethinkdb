@@ -350,6 +350,13 @@ limit n s = op LIMIT (s, n)
 slice :: (Expr a, Expr b, Expr c) => a -> b -> c -> ReQL
 slice n m s = op SLICE (s, n, m)
 
+-- | Get nth element of a sequence
+--
+-- >>> run h $ nth 2 [1, 2, 3, 4, 5]
+-- 3
+nth :: (Expr a, Expr seq) => a -> seq -> ReQL
+nth a s = op NTH (s, a)
+
 -- | Reduce a sequence to a single value
 --
 -- >>> run h $ reduce0 (+) 0 [1, 2, 3]

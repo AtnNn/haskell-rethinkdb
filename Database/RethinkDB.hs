@@ -74,7 +74,7 @@ module Database.RethinkDB (
   map, zipWith, zipWithN,
   withFields, concatMap,
   orderBy, asc, desc,
-  skip, limit, slice,
+  skip, limit, slice, nth,
   indexesOf, isEmpty, union, sample,
 
   -- * Aggregation
