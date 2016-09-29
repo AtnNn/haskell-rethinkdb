@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.0.7
+- Add `nth` function
+- Version bump: `aeson`
+- Consolidate durability
+- Socket deprecation
+
+## 2.2.0.6
+- Version bump: `data-default`
+- Update travis config
+- Don't escape error messages, closes #59
+
+## 2.2.0.5
+- Fix compilation of benchmarks
+- Initial support for GHC 8.0
+
+## 2.2.0.4
+- Version bump: `data-default`
+
+## 2.2.0.3
+- Version bump: `aeson`
+
 ## 2.2.0.2
 - Clean up and fix tests/examples
 
