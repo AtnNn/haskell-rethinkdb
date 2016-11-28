@@ -1,7 +1,11 @@
 {-# LANGUAGE ExistentialQuantification, RecordWildCards,
              ScopedTypeVariables, FlexibleInstances,
-             OverloadedStrings, PatternGuards, GADTs, 
+             OverloadedStrings, PatternGuards, GADTs,
              EmptyDataDecls, DefaultSignatures, CPP #-}
+
+#if __GLASGOW_HASKELL__ < 710
+{-# LANGUAGE OverlappingInstances #-}
+#endif
 
 -- | Building RQL queries in Haskell
 module Database.RethinkDB.ReQL (
@@ -133,7 +137,7 @@ instance OptArgs ReQL where
       Datum _ -> return e
       Term t a oa -> Term t a . (oa ++) <$> baseAttributes attrs
       Note n t -> Note n <$> runReQL (ex (ReQL $ return t) attrs)
-      
+
 instance OptArgs b => OptArgs (a -> b) where
   ex f a = flip ex a . f
 
@@ -169,7 +173,7 @@ shortLines sep args =
   else intercalate (sep ++ " ") args
   where
     tooLong = any ('\n' `elem`) args || 80 < (length $ concat args)
-    indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines 
+    indent = (\x -> case x of [] -> []; _ -> init x) . unlines . map ("  "++) . lines
 
 varName :: Int -> String
 varName n = replicate (q+1) (chr $ ord 'a' + r)
@@ -214,7 +218,7 @@ instance Arr ArgList where
 infix 0 :=
 
 -- | A key/value pair used for building objects
-data Attribute a where 
+data Attribute a where
   (:=) :: Expr e => T.Text -> e -> Attribute a
   (::=) :: (Expr k, Expr v) => k -> v -> Attribute Dynamic
   NoAttribute :: Attribute a
@@ -293,7 +297,7 @@ toInt _ = Nothing
 
 varsOf :: [Term] -> Maybe [Int]
 varsOf = sequence . map varOf
-    
+
 varOf :: Term -> Maybe Int
 varOf (Term VAR [Datum d] []) = toInt d
 varOf _ = Nothing
@@ -356,10 +360,18 @@ instance (Expr a, Expr b) => Expr (Either a b) where
   expr (Left a) = expr ["Left" := a]
   expr (Right b) = expr ["Right" := b]
 
-instance Expr a => Expr (HM.HashMap [Char] a) where
+instance
+#if __GLASGOW_HASKELL__ >= 710
+    {-# OVERLAPPING #-}
+#endif
+    Expr a => Expr (HM.HashMap [Char] a) where
   expr = expr . map (\(k,v) -> T.pack k := v) . HM.toList
 
-instance Expr a => Expr (HM.HashMap T.Text a) where
+instance
+#if __GLASGOW_HASKELL__ >= 710
+    {-# OVERLAPPING #-}
+#endif
+    Expr a => Expr (HM.HashMap T.Text a) where
   expr = expr . map (uncurry (:=)) . HM.toList
 
 instance Expr a => Expr (Map.Map [Char] a) where
@@ -453,7 +465,11 @@ instance Expr a => Expr [a] where
 instance Expr ArgList where
   expr a = op MAKE_ARRAY a
 
-instance (Expr k, Expr v) => Expr (M.HashMap k v) where
+instance
+#if __GLASGOW_HASKELL__ >= 710
+    {-# OVERLAPPABLE #-}
+#endif
+    (Expr k, Expr v) => Expr (M.HashMap k v) where
   expr m = expr $ map (uncurry (::=)) $ M.toList m
 
 
@@ -578,7 +594,7 @@ instance Num a => Num (Bound a) where
   (-) = boundOp (-)
   (*) = boundOp (*)
   negate MinVal = MaxVal
-  negate MaxVal = MaxVal 
+  negate MaxVal = MaxVal
   negate a = fmap negate a
   abs MinVal = MaxVal
   abs a = fmap abs a
