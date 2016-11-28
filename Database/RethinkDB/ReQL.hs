@@ -5,6 +5,9 @@
 
 #if __GLASGOW_HASKELL__ < 710
 {-# LANGUAGE OverlappingInstances #-}
+#define PRAGMA_OVERLAPPING
+#else
+#define PRAGMA_OVERLAPPING {-# OVERLAPPING #-}
 #endif
 
 -- | Building RQL queries in Haskell
@@ -360,18 +363,10 @@ instance (Expr a, Expr b) => Expr (Either a b) where
   expr (Left a) = expr ["Left" := a]
   expr (Right b) = expr ["Right" := b]
 
-instance
-#if __GLASGOW_HASKELL__ >= 710
-    {-# OVERLAPPING #-}
-#endif
-    Expr a => Expr (HM.HashMap [Char] a) where
+instance PRAGMA_OVERLAPPING Expr a => Expr (HM.HashMap [Char] a) where
   expr = expr . map (\(k,v) -> T.pack k := v) . HM.toList
 
-instance
-#if __GLASGOW_HASKELL__ >= 710
-    {-# OVERLAPPING #-}
-#endif
-    Expr a => Expr (HM.HashMap T.Text a) where
+instance PRAGMA_OVERLAPPING Expr a => Expr (HM.HashMap T.Text a) where
   expr = expr . map (uncurry (:=)) . HM.toList
 
 instance Expr a => Expr (Map.Map [Char] a) where
@@ -465,11 +460,7 @@ instance Expr a => Expr [a] where
 instance Expr ArgList where
   expr a = op MAKE_ARRAY a
 
-instance
-#if __GLASGOW_HASKELL__ >= 710
-    {-# OVERLAPPABLE #-}
-#endif
-    (Expr k, Expr v) => Expr (M.HashMap k v) where
+instance PRAGMA_OVERLAPPING (Expr k, Expr v) => Expr (M.HashMap k v) where
   expr m = expr $ map (uncurry (::=)) $ M.toList m
 
 
