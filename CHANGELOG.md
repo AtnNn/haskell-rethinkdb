@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0.8
+- Fix for GHC 8.0.2
+- Version bump: `aeson`
+
 ## 2.2.0.7
 - Add `nth` function
 - Version bump: `aeson`
