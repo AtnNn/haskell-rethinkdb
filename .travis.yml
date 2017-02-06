@@ -37,9 +37,9 @@ before_install:
  - unset CC
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
  - CABALOPTS="--enable-tests"
- # - if [ ! "x$NOBENCH" = "xYES" ]; then
- #     CABALOPTS="$CABALOPTS --enable-benchmarks";
- #   fi
+ - if [ ! "x$NOBENCH" = "xYES" ]; then
+     CABALOPTS="$CABALOPTS --enable-benchmarks";
+   fi
 
 install:
  - cabal --version
