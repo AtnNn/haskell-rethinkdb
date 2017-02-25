@@ -521,7 +521,9 @@ contains :: (Expr x, Expr seq) => x -> seq -> ReQL
 contains x s = op CONTAINS (s, x)
 
 -- | Merge two objects together
---
+-- |
+-- | NOTE: This driver is based on the official JavaScript driver, you are correct to expect the same semantics.
+-- | However the order of composition is flipped by putting the first argument last.
 -- >>> run' h $ merge ["a" := 1, "b" := 1] ["b" := 1, "c" := 2]
 -- {"a":1,"b":1,"c":2}
 merge :: (Expr a, Expr b) => a -> b -> ReQL
