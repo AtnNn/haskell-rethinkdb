@@ -1,4 +1,10 @@
 # Changelog
+# Changelog
+
+## 2.2.0.9
+- Fix doctest for GHC 8.0.2
+- Version bump: `vector`
+- Add note about merge, closes #56
 
 ## 2.2.0.8
 - Fix for GHC 8.0.2
