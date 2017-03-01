@@ -40,13 +40,18 @@ import Database.RethinkDB.Network
 import Database.RethinkDB.ReQL
 
 -- $setup
---
--- Get the doctests ready
---
+-- >>> :set -XOverloadedStrings
 -- >>> :load Database.RethinkDB.NoClash
 -- >>> import qualified Database.RethinkDB as R
--- >>> :set -XOverloadedStrings
+-- >>> import Control.Exception
+-- >>> import Data.Text
+-- >>> let try' x = (try x `asTypeOf` return (Left (undefined :: SomeException))) >> return ()
 -- >>> h <- fmap (use "doctests") $ connect "localhost" 28015 def
+-- >>> try' $ run' h $ dbCreate "doctests"
+-- >>> try' $ run' h $ tableCreate (table "users"){ tablePrimaryKey = Just "name" }
+-- >>> try' $ run' h $ delete $ table "users"
+-- >>> run h $ table "users" # insert (R.map (\x -> ["name":=x]) ["bill", "bob", "nancy" :: Text]) :: IO WriteResponse
+-- {inserted:3}
 
 
 -- | Per-query settings
@@ -106,7 +111,7 @@ runOpts h opts t = do
 -- >>> next c
 -- Just "bill"
 -- >>> collect c
--- ["nancy","sabrina"]
+-- ["bob","nancy"]
 run :: (Expr query, Result r) => RethinkDBHandle -> query -> IO r
 run h = runOpts h []
 
