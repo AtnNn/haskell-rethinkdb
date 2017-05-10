@@ -1,5 +1,5 @@
-resolver: nightly-2017-02-25
+resolver: nightly-2017-05-07
 packages:
 - '.'
 extra-deps:
-- aeson-1.1.0.0
+- aeson-1.2.0.0
